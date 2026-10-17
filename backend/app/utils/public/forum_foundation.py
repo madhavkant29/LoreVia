@@ -14,6 +14,7 @@ from app.core.redis import (
     cache_set_version_marker,
     key_public_books,
     key_public_forum_cache_version,
+    mark_public_catalog_cache_dirty,
     mark_public_profile_cache_dirty,
 )
 from app.models.beta_read import BetaReadAssignment
@@ -400,6 +401,7 @@ async def enforce_daily_general_forum_post_limit(db: AsyncSession, *, user_id: u
 async def _invalidate_public_forum_cache() -> None:
     await cache_set_version_marker(key_public_forum_cache_version())
     await cache_del(key_public_books())
+    await mark_public_catalog_cache_dirty()
 
 
 async def _invalidate_public_profile_cache_for_users(*user_ids: uuid.UUID | None) -> None:

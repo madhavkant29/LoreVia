@@ -17,7 +17,10 @@ from app.core.redis import (
 )
 from app.engine.character.deduplicator import character_name_keys
 from app.models.character import Character
-from app.services.character_identity.resolver import reconcile_pending_first_name_alias_candidates
+from app.services.book_freeze_service import book_is_frozen, is_book_frozen
+from app.services.character_identity.resolver import (
+    reconcile_pending_first_name_alias_candidates,
+)
 from app.services.extraction_chapter_analysis_dispatch_service import (
     dispatch_chapter_analysis_after_extraction,
 )
@@ -28,11 +31,17 @@ from app.services.extraction_chapter_diagnostics_flow_service import (
     build_post_llm_chapter_diagnostics,
 )
 from app.services.extraction_chapter_embedding_service import (
-    persist_chapter_chunks_with_embeddings,
+    prepare_chapter_chunks_with_embeddings,
+    replace_chapter_chunks,
 )
 from app.services.extraction_chapter_llm_service import collect_chapter_llm_extraction
-from app.services.extraction_chapter_progress_service import update_chapter_processing_progress
-from app.services.extraction_chapter_record_service import stage_chapter_for_extraction
+from app.services.extraction_chapter_progress_service import (
+    update_chapter_processing_progress,
+)
+from app.services.extraction_chapter_record_service import (
+    replace_chapter_extraction_records,
+    stage_chapter_for_extraction,
+)
 from app.services.extraction_character_resolution_service import (
     resolve_chapter_character_entities,
 )
@@ -61,25 +70,53 @@ async def _process_chapter(
     manual_reprocess: bool = False,
     dispatch_analysis: bool = True,
     check_book_completion: bool = True,
-):
+) -> bool:
+    from app.services.data_generation_service import generation_scope
+
+    with generation_scope(rebuild_run_id):
+        return await _process_chapter_in_generation(
+            db,
+            book,
+            ch_data,
+            queue_wait_ms=queue_wait_ms,
+            rebuild_run_id=rebuild_run_id,
+            manual_reprocess=manual_reprocess,
+            dispatch_analysis=dispatch_analysis,
+            check_book_completion=check_book_completion,
+        )
+
+
+async def _process_chapter_in_generation(
+    db,
+    book,
+    ch_data: dict,
+    queue_wait_ms: int | None = None,
+    rebuild_run_id: str | None = None,
+    manual_reprocess: bool = False,
+    dispatch_analysis: bool = True,
+    check_book_completion: bool = True,
+) -> bool:
     """Extract characters, relationships, store chunks for one chapter."""
     if await is_book_hidden(db, book.id):
         log.info("Skipping chapter processing for unavailable book %s", book.id)
-        return
+        return False
+    if is_book_frozen(book):
+        log.info("Skipping chapter processing for frozen book %s", book.id)
+        return False
 
     from app.services.editor_project_service import get_rebuild_run_id
 
     active_rebuild_run_id = get_rebuild_run_id(book)
     if rebuild_run_id is not None and active_rebuild_run_id != rebuild_run_id:
         log.info("Skipping stale rebuild extraction book_id=%s", book.id)
-        return
+        return False
     if (
         getattr(book, "is_editor_project", False)
         and not active_rebuild_run_id
         and not manual_reprocess
     ):
         log.info("Skipping stale editor-project extraction book_id=%s", book.id)
-        return
+        return False
 
     ch_data = _prepare_chapter_rich_content(ch_data)
     chapter_number = int(ch_data["number"])
@@ -90,9 +127,11 @@ async def _process_chapter(
         EXTRACTION_INFLIGHT_TTL_SECONDS,
     ):
         log.info(
-            "Skipping duplicate extraction in-flight book_id=%s chapter=%s", book.id, chapter_number
+            "Skipping duplicate extraction in-flight book_id=%s chapter=%s",
+            book.id,
+            chapter_number,
         )
-        return
+        return False
 
     try:
         started_at = time.perf_counter()
@@ -101,6 +140,13 @@ async def _process_chapter(
         # Stage/reset the chapter in a short transaction. Provider calls below
         # must not hold a checked-out connection or chapter locks.
         await db.commit()
+        if await book_is_frozen(db, book.id):
+            log.info(
+                "Aborting frozen chapter extraction book_id=%s chapter=%s",
+                book.id,
+                chapter_number,
+            )
+            return False
         log.info(
             "ingestion_timing stage=chapter_db_load book_id=%s chapter=%s elapsed_ms=%s",
             book.id,
@@ -114,14 +160,13 @@ async def _process_chapter(
             queue_wait_ms,
         )
 
-        chunks = await persist_chapter_chunks_with_embeddings(
-            db,
+        prepared_chunks = await prepare_chapter_chunks_with_embeddings(
             book=book,
             chapter=chapter,
             chapter_number=chapter_number,
             ch_data=ch_data,
         )
-        await db.commit()
+        chunks = prepared_chunks.texts
 
         existing_characters = (
             (
@@ -144,6 +189,13 @@ async def _process_chapter(
         }
 
         llm_started = time.perf_counter()
+        if await book_is_frozen(db, book.id):
+            log.info(
+                "Aborting frozen chapter extraction before LLM book_id=%s chapter=%s",
+                book.id,
+                chapter_number,
+            )
+            return False
         llm_extraction = await collect_chapter_llm_extraction(
             db,
             book=book,
@@ -162,8 +214,26 @@ async def _process_chapter(
             book_id=book.id,
             chapter_number=chapter_number,
         )
+        await replace_chapter_chunks(
+            db,
+            prepared_chunks,
+            chapter_id=chapter.id,
+        )
+        await replace_chapter_extraction_records(
+            db,
+            book_id=book.id,
+            chapter_number=chapter_number,
+            replace_generated_intelligence=manual_reprocess,
+        )
 
         raw_character_entities = llm_extraction.raw_character_entities
+        if await book_is_frozen(db, book.id):
+            log.info(
+                "Aborting frozen chapter extraction before resolution book_id=%s chapter=%s",
+                book.id,
+                chapter_number,
+            )
+            return False
         character_resolution = await resolve_chapter_character_entities(
             db,
             book=book,
@@ -221,7 +291,7 @@ async def _process_chapter(
                 chapter_title=chapter.title,
                 last_error="Book was removed while processing.",
             )
-            return
+            return False
 
         # Only expose the chapter as processed once all provider-backed
         # extraction and its database writes have succeeded. The staging
@@ -274,5 +344,6 @@ async def _process_chapter(
             chapter_number,
             elapsed_ms(started_at),
         )
+        return True
     finally:
         await cache_del(inflight_key)

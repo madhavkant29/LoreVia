@@ -4,27 +4,17 @@ import type { ChapterListItem, ReadingProgress } from "@/types/reader"
 const READER_WORDS_PER_MINUTE = 230
 
 export function estimateReaderBookWords(
-  book: Pick<Book, "total_words" | "total_tokens" | "total_chapters" | "work_type">,
-  progress?: Pick<ReadingProgress, "percent_complete" | "chapters_left" | "chapters_read_count"> | null,
+  book: Pick<Book, "total_words">,
 ) {
   if (typeof book.total_words === "number" && book.total_words > 0) return Math.round(book.total_words)
-  if (typeof book.total_tokens === "number" && book.total_tokens > 0) return Math.round(book.total_tokens * 0.75)
-
-  const defaultUnits = Math.max(
-    book.total_chapters ?? 0,
-    (progress?.chapters_left ?? 0) + (progress?.chapters_read_count ?? 0),
-    1,
-  )
-  const unitWords = book.work_type === "screenplay" ? 900 : 3200
-
-  return defaultUnits * unitWords
+  return 0
 }
 
 export function estimateRemainingReadingMinutes(
   book: Pick<Book, "total_words" | "total_tokens" | "total_chapters" | "work_type">,
   progress?: Pick<ReadingProgress, "percent_complete" | "chapters_left" | "chapters_read_count"> | null,
 ) {
-  const totalWords = estimateReaderBookWords(book, progress)
+  const totalWords = estimateReaderBookWords(book)
   if (!totalWords) return null
 
   const percent = Math.max(0, Math.min(100, progress?.percent_complete ?? 0))
@@ -33,8 +23,16 @@ export function estimateRemainingReadingMinutes(
   return Math.max(1, Math.ceil(remainingWords / READER_WORDS_PER_MINUTE))
 }
 
+export function estimateChapterRemainingReadingMinutes(wordCount: number | null | undefined, scrollPct: number) {
+  if (typeof wordCount !== "number" || wordCount <= 0) return null
+  const remainingFraction = 1 - Math.max(0, Math.min(1, scrollPct))
+  if (remainingFraction <= 0) return 0
+  return Math.max(1, Math.ceil((wordCount * remainingFraction) / READER_WORDS_PER_MINUTE))
+}
+
 export function formatReadingDuration(minutes?: number | null) {
-  if (typeof minutes !== "number" || Number.isNaN(minutes) || minutes <= 0) return "Syncing"
+  if (typeof minutes !== "number" || Number.isNaN(minutes) || minutes < 0) return "Not available"
+  if (minutes === 0) return "Complete"
   if (minutes < 60) return `${minutes} min`
 
   const hours = Math.floor(minutes / 60)

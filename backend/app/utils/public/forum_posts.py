@@ -224,17 +224,21 @@ async def _comment_reaction_map(
     *,
     post_id: uuid.UUID,
     user_id: uuid.UUID | None,
+    comment_ids: list[uuid.UUID] | None = None,
 ) -> dict[uuid.UUID, str]:
     if user_id is None:
         return {}
-    rows = (
-        await db.execute(
-            select(BookForumCommentReaction.comment_id, BookForumCommentReaction.reaction).where(
-                BookForumCommentReaction.post_id == post_id,
-                BookForumCommentReaction.user_id == user_id,
-            )
-        )
-    ).all()
+    statement = select(
+        BookForumCommentReaction.comment_id, BookForumCommentReaction.reaction
+    ).where(
+        BookForumCommentReaction.post_id == post_id,
+        BookForumCommentReaction.user_id == user_id,
+    )
+    if comment_ids is not None:
+        if not comment_ids:
+            return {}
+        statement = statement.where(BookForumCommentReaction.comment_id.in_(comment_ids))
+    rows = (await db.execute(statement)).all()
     return {comment_id: reaction for comment_id, reaction in rows}
 
 

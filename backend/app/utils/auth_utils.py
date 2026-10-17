@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import re
 import uuid
+from collections.abc import Mapping
 from typing import Any
 
 from passlib.exc import MissingBackendError, PasswordSizeError, UnknownHashError
@@ -24,6 +25,11 @@ def parse_auth_subject_uuid(subject: str) -> uuid.UUID:
         return uuid.UUID(str(subject))
     except (TypeError, ValueError, AttributeError) as exc:
         raise ValueError("Invalid auth subject") from exc
+
+
+def supabase_email_is_confirmed(user_payload: Mapping[str, Any]) -> bool:
+    confirmed_at = user_payload.get("email_confirmed_at")
+    return isinstance(confirmed_at, str) and bool(confirmed_at.strip())
 
 
 async def get_user_for_auth_subject(db: AsyncSession, subject: str) -> User | None:

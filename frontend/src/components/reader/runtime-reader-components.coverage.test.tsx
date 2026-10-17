@@ -236,15 +236,16 @@ describe("reader runtime components", () => {
       />,
     )
 
-    expect(text()).toContain("Ask LoreVia")
+    expect(text()).toContain("Ask about the story")
     expect(text()).toContain("The Lantern Gate")
     expect(text()).toContain("Chapter 1 - The Door")
     expect(text()).toContain("The advisor is unavailable.")
     expect(text()).toContain("Open Story Advisor")
-    expect(text()).toContain("Loading Ask LoreVia answer")
+    expect(text()).toContain("Receiving answer")
 
     await click("Summarize Mara's arc")
-    expect(onSubmit).toHaveBeenCalledWith("Summarize Mara's arc")
+    expect(onSubmit).not.toHaveBeenCalled()
+    expect((buttons("Summarize Mara's arc")[0] as HTMLButtonElement).disabled).toBe(true)
 
     const textarea = field<HTMLTextAreaElement>("textarea")
     setFieldValue(textarea, "What did Mara promise?")
@@ -297,6 +298,7 @@ describe("reader runtime components", () => {
   })
 
   it("renders Vault Preview search, edit, save, reset, copy, and zip export behavior", async () => {
+    vi.spyOn(window, "confirm").mockReturnValue(true)
     await renderElement(
       <VaultPreview
         bookId="book-1"

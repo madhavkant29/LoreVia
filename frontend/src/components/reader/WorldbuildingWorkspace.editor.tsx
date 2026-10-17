@@ -44,7 +44,7 @@ export function WorldbuildingDocumentEditorCard({
     <WorkspaceCard
       number="8"
       sectionLabel="Worldbuilding Manuscript"
-      title="Start a new world document"
+      title={selectedDocument ? "Edit canon source" : "Start a new world document"}
       description={selectedDocument ? `Editing ${selectedDocument.title}. Last updated ${new Date(selectedDocument.updated_at).toLocaleString()}` : "Type directly or upload files to build the corpus."}
       isDark={isDark}
     >
@@ -98,7 +98,7 @@ export function WorldbuildingDocumentEditorCard({
             disabled={analysisLoading || !hasDocuments}
             className={accentOutlineButtonClass("amber", isDark)}
           >
-            {analysisLoading ? "Checking gaps..." : "Run world gap detection"}
+            {analysisLoading ? "Refreshing…" : "Refresh comparison"}
           </button>
         </div>
       </div>

@@ -351,6 +351,7 @@ async def mark_character_candidates_merged(
     )
     candidates = result.scalars().all()
     for candidate in candidates:
+        candidate.generation_id = None
         candidate.matched_character_id = primary_character_id
         candidate.status = CHARACTER_CANDIDATE_MERGED
         candidate.adjudication_status = CHARACTER_ADJUDICATION_MERGED_ALIAS
@@ -378,6 +379,7 @@ def _approve_character_from_review(
     action: str,
     details: Mapping[str, Any] | None = None,
 ) -> None:
+    character.generation_id = None
     set_character_review_state(
         character,
         visibility_state=CHARACTER_VISIBILITY_VISIBLE,
@@ -397,6 +399,7 @@ def _quarantine_character_for_review(
     details: Mapping[str, Any] | None = None,
     approval_source: str = CHARACTER_APPROVAL_SOURCE_MANUAL_REVIEW,
 ) -> None:
+    character.generation_id = None
     set_character_review_state(
         character,
         visibility_state=CHARACTER_VISIBILITY_QUARANTINED,
@@ -416,6 +419,7 @@ def reject_character_as_noise(
     details: Mapping[str, Any] | None = None,
     actor_user_id: uuid.UUID | None = None,
 ) -> None:
+    character.generation_id = None
     set_character_review_state(
         character,
         visibility_state=CHARACTER_VISIBILITY_NOISE,
@@ -433,6 +437,7 @@ def reject_character_candidate(
     *,
     reason_codes: Sequence[object] | None = None,
 ) -> None:
+    candidate.generation_id = None
     candidate.status = CHARACTER_CANDIDATE_REJECTED
     candidate.adjudication_status = CHARACTER_ADJUDICATION_REJECTED
     candidate.entity_type = candidate.entity_type or "unknown"
@@ -451,6 +456,7 @@ def mark_character_candidate_as_place(
     *,
     reason_codes: Sequence[object] | None = None,
 ) -> None:
+    candidate.generation_id = None
     candidate.status = CHARACTER_CANDIDATE_SUPPRESSED
     candidate.entity_type = "place"
     candidate.adjudication_status = CHARACTER_ADJUDICATION_PLACE
@@ -469,6 +475,7 @@ async def promote_character_candidate(
     *,
     candidate: CharacterCandidate,
 ) -> Character:
+    candidate.generation_id = None
     entity = _candidate_entity_payload(candidate)
     if candidate.matched_character_id is not None:
         existing = await db.get(Character, candidate.matched_character_id)
@@ -521,6 +528,7 @@ async def attach_character_candidate(
     candidate: CharacterCandidate,
     character: Character,
 ) -> Character:
+    candidate.generation_id = None
     updated = merge_profile_fields(
         character,
         {

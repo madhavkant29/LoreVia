@@ -10,7 +10,9 @@ from app.core.config import settings
 
 
 def auth_cookie_secure() -> bool:
-    return not settings.DEBUG and settings.APP_URL.startswith("https://")
+    # Production cookies must stay Secure even when APP_URL is accidentally
+    # misconfigured. DEBUG is the explicit switch that permits local HTTP.
+    return not settings.DEBUG
 
 
 def auth_cookie_path() -> str:

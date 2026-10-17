@@ -1,4 +1,5 @@
 import logging
+import time
 import uuid
 from typing import Any
 
@@ -29,6 +30,7 @@ from app.utils.auth_cookies import (
 )
 from app.utils.auth_csrf import _has_valid_bearer_access_token, enforce_cookie_csrf
 from app.utils.auth_utils import current_token_version, get_user_for_auth_subject
+from app.utils.observability_metrics import record_auth_db_lookup
 from app.utils.privacy_utils import user_is_deleted
 from app.utils.request_context import set_request_user_id
 
@@ -70,6 +72,7 @@ def _decode_refresh_payload(token: str | None) -> dict[str, Any] | None:
 
 
 async def _load_user_from_claims(user_id: str, claimed_version: int, db: AsyncSession) -> User:
+    started_at = time.perf_counter()
     try:
         user = await get_user_for_auth_subject(db, user_id)
     except ValueError:
@@ -77,6 +80,8 @@ async def _load_user_from_claims(user_id: str, claimed_version: int, db: AsyncSe
     except AUTH_INFRASTRUCTURE_EXCEPTIONS:
         log.exception("database_unavailable_during_auth", extra={"user_id": user_id})
         raise HTTPException(503, "Authentication service temporarily unavailable")
+    finally:
+        record_auth_db_lookup((time.perf_counter() - started_at) * 1000)
 
     if not user:
         raise HTTPException(401, "User not found")

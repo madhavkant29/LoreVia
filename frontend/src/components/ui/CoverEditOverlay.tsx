@@ -5,6 +5,7 @@ import { useRef, useState, type ChangeEvent } from "react"
 
 import { DisclosureMenu } from "@/components/ui/DisclosureMenu"
 import { booksApi } from "@/lib/api/books"
+import { validateCoverFile } from "@/lib/validation/manuscriptUpload"
 import { cn } from "@/lib/utils/text"
 import type { Book } from "@/types/book"
 
@@ -22,15 +23,25 @@ export function CoverEditOverlay({
   onCoverUpdated,
 }: CoverEditOverlayProps) {
   const [uploading, setUploading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const handleFileChange = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
     if (!file) return
+    const validationError = validateCoverFile(file)
+    if (validationError) {
+      setError(validationError)
+      if (fileInputRef.current) fileInputRef.current.value = ""
+      return
+    }
 
     try {
+      setError(null)
       setUploading(true)
       onCoverUpdated(await booksApi.updateCover(bookId, file))
+    } catch {
+      setError("The cover could not be updated. Check your connection and try again.")
     } finally {
       setUploading(false)
       if (fileInputRef.current) fileInputRef.current.value = ""
@@ -39,8 +50,11 @@ export function CoverEditOverlay({
 
   const handleRemove = async () => {
     try {
+      setError(null)
       setUploading(true)
       onCoverUpdated(await booksApi.deleteCover(bookId))
+    } catch {
+      setError("The cover could not be removed. Check your connection and try again.")
     } finally {
       setUploading(false)
     }
@@ -81,6 +95,12 @@ export function CoverEditOverlay({
         className="hidden"
         onChange={(event) => void handleFileChange(event)}
       />
+
+      {error ? (
+        <p role="alert" className="absolute left-1 right-1 top-12 z-20 rounded-md bg-red-600/95 px-2 py-1 text-[11px] text-white shadow-sm">
+          {error}
+        </p>
+      ) : null}
     </>
   )
 }

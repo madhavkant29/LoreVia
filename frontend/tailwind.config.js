@@ -100,11 +100,11 @@ module.exports = {
         display: ["var(--font-newsreader)", "Iowan Old Style", "Georgia", "serif"],
       },
       borderRadius: {
-        sm: "8px",
-        DEFAULT: "10px",
-        md: "16px",
-        lg: "28px",
-        xl: "36px",
+        sm: "6px",
+        DEFAULT: "8px",
+        md: "10px",
+        lg: "12px",
+        xl: "16px",
       },
       boxShadow: {
         sm: "0 1px 2px 0 rgb(0 0 0 / 0.05)",

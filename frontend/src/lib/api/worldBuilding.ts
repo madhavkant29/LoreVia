@@ -2,6 +2,7 @@ import { apiClient } from "./client"
 import { normalizeBookRouteId } from "@/lib/utils/bookRoutes"
 import type {
   CanonOverride,
+  SeriesWorldAnalysis,
   WorldBuildingDocument,
   WorldBuildingBootstrapPayload,
   WorldBuildingDocumentDetail,
@@ -78,7 +79,7 @@ export const worldBuildingApi = {
   generateWiki: (bookId: string) =>
     apiClient.post<WikiGenerationResponse>(worldBuildingPath(bookId, "/world-building/wiki/generate")).then(r => r.data),
   getSeriesAnalysis: (seriesId: string) =>
-    apiClient.get(`/intelligence/series/${seriesId}/world-building/series-analysis`).then(r => r.data),
+    apiClient.get<SeriesWorldAnalysis>(`/intelligence/series/${seriesId}/world-building/series-analysis`).then(r => r.data),
   acceptSuggestion: (worldElementId: string, payload: { suggestion_id: string; mark_implemented?: boolean }) =>
     apiClient.post<{ accepted: string; remaining: number }>(`/intelligence/${worldElementId}/world-building/accept-suggestion`, payload).then(r => r.data),
   listNotes: (bookId: string) =>

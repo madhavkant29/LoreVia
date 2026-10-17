@@ -266,7 +266,7 @@ async def add_beta_read_feedback_item(
     db: AsyncSession,
     *,
     assignment: BetaReadAssignment,
-    current_user: User,
+    current_user: User | None,
     body: BetaReadFeedbackItemCreateBody,
 ) -> BetaReadFeedbackItem:
     now = utc_now()
@@ -318,7 +318,7 @@ async def add_beta_read_feedback_item(
         assignment_id=assignment.id,
         book_id=assignment.book_id,
         author_user_id=assignment.author_user_id,
-        reader_user_id=current_user.id,
+        reader_user_id=current_user.id if current_user is not None else None,
         question_id=question.id if question else None,
         scene_id=scene.id if scene else None,
         kind=kind,

@@ -1,7 +1,5 @@
 import type { ReactNode } from "react"
 
-import { cn } from "@/lib/utils/text"
-
 import { PublicContentHeader } from "./PublicContentHeader"
 
 export function PublicContentShell({
@@ -13,10 +11,8 @@ export function PublicContentShell({
   children: ReactNode
   className?: string
 }) {
-  const squareCorners = activeSection === "blog" || activeSection === "answers"
-
   return (
-    <main className={cn("app-shell overflow-hidden content-library-shell", squareCorners && "content-library-square-corners", className)}>
+    <main className={`editorial-shell ${className ?? ""}`}>
       <PublicContentHeader activeSection={activeSection} />
       {children}
     </main>

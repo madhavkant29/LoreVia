@@ -155,7 +155,6 @@ export default function PrivacyPage() {
       title="Privacy policy for a manuscript-first product"
       description="LoreVia handles account data, manuscripts, and workspace activity to power product functionality and provide a secure experience."
       effectiveDate={TRUST_EFFECTIVE_DATE}
-      notice="LoreVia is designed for authors, readers, and editorial workflows that need more than a simple file upload box. This policy is specific to the website and application as they exist today."
       sections={sections}
       rightRail={
         <LegalRightRail

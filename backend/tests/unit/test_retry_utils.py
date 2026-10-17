@@ -3,9 +3,9 @@ import pytest
 from app.utils.retry_utils import LLM_MAX_ATTEMPTS, LLM_MAX_RETRIES, exponential_backoff_seconds
 
 
-def test_llm_retry_limit_means_three_total_attempts() -> None:
-    assert LLM_MAX_RETRIES == 2
-    assert LLM_MAX_ATTEMPTS == 3
+def test_llm_retry_limit_means_two_total_attempts() -> None:
+    assert LLM_MAX_RETRIES == 1
+    assert LLM_MAX_ATTEMPTS == 2
 
 
 @pytest.mark.parametrize(

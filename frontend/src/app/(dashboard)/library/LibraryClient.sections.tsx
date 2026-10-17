@@ -126,14 +126,14 @@ export function LibraryProjectSection({
           actionHandler={emptyState.onAction}
         />
       ) : viewMode === "grid" ? (
-        <div className="grid gap-4 xl:grid-cols-3">
+        <div className="grid gap-4 md:grid-cols-2 2xl:grid-cols-3">
           {projectCards}
           {showCreateProject && onCreateProject ? (
             <CreateProjectCard isDark={isDark} onCreate={onCreateProject} />
           ) : null}
         </div>
       ) : (
-        <div className="space-y-3">
+        <div className="border-t border-[rgb(var(--border))]">
           {projectRows}
           {showCreateProject && onCreateProject ? (
             <CreateProjectRow isDark={isDark} onCreate={onCreateProject} />

@@ -34,6 +34,9 @@ SENSITIVE_TEXT_PATTERNS = (
     re.compile(r"(?i)\b(postgresql(?:\+psycopg)?://)([^:\s/@]+):([^@\s]+)@"),
     re.compile(r"(?i)\b(rediss?://)([^:\s/@]+):([^@\s]+)@"),
 )
+JWT_TEXT_PATTERN = re.compile(
+    r"(?<![A-Za-z0-9_-])[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}(?![A-Za-z0-9_-])"
+)
 
 
 def _normalize_sensitive_key(key: object) -> str:
@@ -57,7 +60,7 @@ def redact_sensitive_text(value: str | None) -> str | None:
             redacted = pattern.sub(r"\1\2:" + REDACTED_VALUE + "@", redacted)
         else:
             redacted = pattern.sub(r"\1\2" + REDACTED_VALUE, redacted)
-    return redacted
+    return JWT_TEXT_PATTERN.sub(REDACTED_VALUE, redacted)
 
 
 def scrub_sensitive_data(value: object, *, key: object | None = None) -> object:
@@ -115,7 +118,7 @@ def request_log_context(request: Request, **extra: object) -> dict[str, object]:
     context: dict[str, object] = {
         "request_id": get_request_id(),
         "method": request.method,
-        "path": request.url.path,
+        "path": redact_sensitive_text(request.url.path),
     }
     context.update(
         {

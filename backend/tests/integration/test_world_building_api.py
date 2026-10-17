@@ -1,8 +1,10 @@
 import uuid
 
 import pytest
+from sqlalchemy import select
 
 from app.models.book import Book, Chapter, Series, SeriesBook
+from app.models.intelligence import WorldBuildingDocument, WorldElement, WorldGapAnalysis, WorldNote
 from app.utils.books.manuscript import (
     serialize_manuscript_content,
 )
@@ -58,7 +60,6 @@ async def test_world_building_documents_gap_detection_and_notes(client, db, monk
     )
     monkeypatch.setattr("app.utils.world_building_story_utils.download_book", fake_download_book)
     monkeypatch.setattr("app.api.v1.routes.reader.core.download_book", fake_download_book)
-    monkeypatch.setattr("app.api.v1.routes.world_building.download_book", fake_download_book)
 
     headers, user_id = await _register_user(client, f"world-api-{uuid.uuid4().hex[:8]}@lorevia.app")
     book = Book(
@@ -159,6 +160,13 @@ async def test_world_building_documents_gap_detection_and_notes(client, db, monk
     assert chapter_after.status_code == 200
     assert chapter_after.json()["text_content"] == chapter_before.json()["text_content"]
 
+    refreshed = await client.post(
+        f"/api/v1/intelligence/{book.id}/world-building/analyze",
+        headers=headers,
+        json={"mode": "gap_detection"},
+    )
+    assert refreshed.status_code == 200
+
     gaps = await client.get(f"/api/v1/intelligence/{book.id}/world-building/gaps", headers=headers)
     assert gaps.status_code == 200
     payload = gaps.json()
@@ -235,6 +243,188 @@ async def test_world_building_documents_gap_detection_and_notes(client, db, monk
 
 
 @pytest.mark.asyncio
+async def test_world_read_endpoints_use_persisted_rows_without_storage_or_extraction(
+    client, db, monkeypatch
+):
+    headers, user_id = await _register_user(
+        client, f"world-read-only-{uuid.uuid4().hex[:8]}@lorevia.app"
+    )
+    book = Book(
+        user_id=user_id,
+        title="Snapshot World",
+        format="pdf",
+        s3_key="world-read-only.pdf",
+        status="ready",
+        mode="author",
+    )
+    db.add(book)
+    await db.flush()
+    document = WorldBuildingDocument(
+        book_id=book.id,
+        title="Stored World Bible",
+        s3_key="world-read-only/document.json",
+    )
+    db.add(document)
+    await db.flush()
+    element = WorldElement(
+        book_id=book.id,
+        world_document_id=document.id,
+        source_scope="worldbuilding",
+        element_type="faction",
+        name="The Lantern Court",
+        description="A council that keeps the harbor lights lit.",
+    )
+    db.add_all(
+        [
+            element,
+            WorldGapAnalysis(
+                book_id=book.id,
+                analysis_mode="gap_detection",
+                gap_categories={},
+                priority_gaps=[],
+                integration_opportunities=[],
+                consistency_flags=[],
+            ),
+            WorldGapAnalysis(
+                book_id=book.id,
+                analysis_mode="story_integration",
+                gap_categories={},
+                priority_gaps=[],
+                integration_opportunities=[],
+                consistency_flags=[],
+            ),
+        ]
+    )
+    await db.commit()
+
+    def unexpected_storage_read(*_args, **_kwargs):
+        raise AssertionError("world GET attempted a storage read")
+
+    async def unexpected_sync(*_args, **_kwargs):
+        raise AssertionError("world GET attempted an extraction sync")
+
+    monkeypatch.setattr(
+        "app.utils.world_building_document_utils.download_book", unexpected_storage_read
+    )
+    monkeypatch.setattr(
+        "app.utils.world_building_candidate_record_utils.download_book", unexpected_storage_read
+    )
+    monkeypatch.setattr(
+        "app.utils.world_building_story_utils.download_book", unexpected_storage_read
+    )
+    monkeypatch.setattr(
+        "app.utils.world_building_utils.sync_world_document_elements", unexpected_sync
+    )
+
+    for path in (
+        f"/api/v1/intelligence/{book.id}/world-building/elements",
+        f"/api/v1/intelligence/{book.id}/world-building/gaps",
+        f"/api/v1/intelligence/{book.id}/world-building/integration",
+        f"/api/v1/intelligence/{book.id}/world-building/bootstrap?focus=gap",
+    ):
+        response = await client.get(path, headers=headers)
+        assert response.status_code == 200
+
+    query_response = await client.post(
+        f"/api/v1/intelligence/{book.id}/world-building/query",
+        headers=headers,
+        json={"query": "How would the Lantern Court react?", "mode": "story_integration"},
+    )
+    assert query_response.status_code == 200
+    assert query_response.json()["citations"][0]["name"] == "The Lantern Court"
+
+
+@pytest.mark.asyncio
+async def test_world_note_rejects_elements_from_other_owned_and_other_user_books(client, db):
+    owner_headers, owner_id = await _register_user(
+        client, f"world-note-owner-{uuid.uuid4().hex[:8]}@lorevia.app"
+    )
+    _, other_user_id = await _register_user(
+        client, f"world-note-other-{uuid.uuid4().hex[:8]}@lorevia.app"
+    )
+    target_book = Book(
+        user_id=owner_id,
+        title="Target World",
+        format="pdf",
+        s3_key="world-notes/target.pdf",
+        status="ready",
+        mode="author",
+    )
+    other_owned_book = Book(
+        user_id=owner_id,
+        title="Other Owned World",
+        format="pdf",
+        s3_key="world-notes/other-owned.pdf",
+        status="ready",
+        mode="author",
+    )
+    other_user_book = Book(
+        user_id=other_user_id,
+        title="Other User World",
+        format="pdf",
+        s3_key="world-notes/other-user.pdf",
+        status="ready",
+        mode="author",
+    )
+    db.add_all([target_book, other_owned_book, other_user_book])
+    await db.flush()
+    target_element = WorldElement(
+        book_id=target_book.id,
+        source_scope="story",
+        element_type="location",
+        name="Target Citadel",
+    )
+    other_owned_element = WorldElement(
+        book_id=other_owned_book.id,
+        source_scope="story",
+        element_type="location",
+        name="Other Owned Citadel",
+    )
+    other_user_element = WorldElement(
+        book_id=other_user_book.id,
+        source_scope="story",
+        element_type="location",
+        name="Other User Citadel",
+    )
+    db.add_all([target_element, other_owned_element, other_user_element])
+    await db.commit()
+
+    valid_response = await client.post(
+        f"/api/v1/intelligence/{target_book.id}/world-building/notes",
+        headers=owner_headers,
+        json={
+            "world_element_id": str(target_element.id),
+            "note_type": "general_world",
+            "body": "This link stays inside the owned book.",
+        },
+    )
+    assert valid_response.status_code == 200
+    assert valid_response.json()["world_element_id"] == str(target_element.id)
+
+    for element in (other_owned_element, other_user_element):
+        response = await client.post(
+            f"/api/v1/intelligence/{target_book.id}/world-building/notes",
+            headers=owner_headers,
+            json={
+                "world_element_id": str(element.id),
+                "note_type": "general_world",
+                "body": "Must not link across book boundaries.",
+            },
+        )
+
+        assert response.status_code == 404
+        assert response.json() == {"detail": "Not found."}
+
+    notes = (
+        (await db.execute(select(WorldNote).where(WorldNote.book_id == target_book.id)))
+        .scalars()
+        .all()
+    )
+    assert len(notes) == 1
+    assert notes[0].world_element_id == target_element.id
+
+
+@pytest.mark.asyncio
 async def test_series_world_building_analysis_checks_across_member_books(client, db, monkeypatch):
     stored: dict[str, bytes] = {}
 
@@ -257,7 +447,6 @@ async def test_series_world_building_analysis_checks_across_member_books(client,
         "app.utils.world_building_candidate_record_utils.download_book", fake_download_book
     )
     monkeypatch.setattr("app.utils.world_building_story_utils.download_book", fake_download_book)
-    monkeypatch.setattr("app.api.v1.routes.world_building.download_book", fake_download_book)
 
     headers, user_id = await _register_user(
         client, f"world-series-api-{uuid.uuid4().hex[:8]}@lorevia.app"
@@ -315,6 +504,12 @@ async def test_series_world_building_analysis_checks_across_member_books(client,
         },
     )
     assert created_docs.status_code == 200
+
+    refreshed = await client.post(
+        f"/api/v1/intelligence/series/{series.id}/world-building/series-analysis/refresh",
+        headers=headers,
+    )
+    assert refreshed.status_code == 200
 
     response = await client.get(
         f"/api/v1/intelligence/series/{series.id}/world-building/series-analysis",

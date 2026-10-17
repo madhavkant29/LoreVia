@@ -17,6 +17,23 @@ import {
 } from "./admin-page.test-utils"
 
 describe("AdminPage access handling", () => {
+  it("opens the first permitted area for a scoped moderator", async () => {
+    adminApiMock.session.mockResolvedValueOnce({
+      ...ownerSession,
+      is_owner: false,
+      scopes: ["moderation_admin"],
+    })
+
+    await renderPage(<AdminPage />)
+    await waitForText("Gate Draft")
+
+    expect(getContainer().querySelector('button[aria-current="page"]')?.textContent).toContain("Moderation")
+    expect(adminApiMock.publicShares).toHaveBeenCalledTimes(1)
+    expect(adminApiMock.reports).toHaveBeenCalledTimes(1)
+    expect(adminApiMock.metrics).not.toHaveBeenCalled()
+    expect(adminApiMock.billingStatus).not.toHaveBeenCalled()
+  })
+
   it("handles step-up verification and missing admin access", async () => {
     adminApiMock.session
       .mockResolvedValueOnce({ ...ownerSession, requires_step_up: true })

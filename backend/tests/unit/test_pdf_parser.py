@@ -1,3 +1,5 @@
+import fitz
+
 from app.parsers.heading_patterns import build_heading_regex
 from app.parsers.pdf_parser import (
     _assemble_text_parts,
@@ -15,10 +17,85 @@ from app.parsers.pdf_parser import (
     _is_repeated_noise,
     _needs_forced_large_chapter_split,
     _normalize_chapters,
+    _order_two_column_page_items,
+    _page_blocks,
     _scrub_inline_page_artifacts,
     _should_merge_across_pages,
     _split_large_chapter_parts,
 )
+
+
+def test_clear_two_column_pages_read_down_each_column_before_crossing():
+    title = {"type": "text", "text": "Chapter 1", "bbox": (40.0, 30.0, 550.0, 50.0)}
+    left = [
+        {
+            "type": "text",
+            "text": f"left-{index}",
+            "bbox": (50.0, 80.0 + index * 24, 265.0, 95.0 + index * 24),
+        }
+        for index in range(6)
+    ]
+    right = [
+        {
+            "type": "text",
+            "text": f"right-{index}",
+            "bbox": (325.0, 80.0 + index * 24, 540.0, 95.0 + index * 24),
+        }
+        for index in range(6)
+    ]
+
+    ordered, detected = _order_two_column_page_items([*left, *right, title], 595.0)
+
+    assert detected is True
+    assert [item["text"] for item in ordered] == [
+        "Chapter 1",
+        *[item["text"] for item in left],
+        *[item["text"] for item in right],
+    ]
+
+
+def test_ambiguous_spanning_text_keeps_original_vertical_reading_order():
+    left = [
+        {
+            "type": "text",
+            "text": f"left-{index}",
+            "bbox": (50.0, 80.0 + index * 24, 265.0, 95.0 + index * 24),
+        }
+        for index in range(6)
+    ]
+    right = [
+        {
+            "type": "text",
+            "text": f"right-{index}",
+            "bbox": (325.0, 80.0 + index * 24, 540.0, 95.0 + index * 24),
+        }
+        for index in range(6)
+    ]
+    middle = {"type": "text", "text": "ambiguous", "bbox": (40.0, 130.0, 550.0, 145.0)}
+
+    ordered, detected = _order_two_column_page_items([*left, *right, middle], 595.0)
+
+    assert detected is False
+    assert ordered.index(middle) < ordered.index(left[-1])
+
+
+def test_real_pdf_text_blocks_follow_detected_column_reading_order():
+    document = fitz.open()
+    page = document.new_page(width=595, height=842)
+    for index in range(6):
+        y = 80 + index * 26
+        page.insert_text((50, y), f"LEFT {index}: Mara guards the archive key.", fontsize=11)
+        page.insert_text((325, y), f"RIGHT {index}: Jon watches the gate.", fontsize=11)
+    diagnostics: dict = {}
+
+    blocks = _page_blocks(page, diagnostics_state=diagnostics)
+    document.close()
+
+    texts = [block["text"] for block in blocks if block["type"] == "text"]
+    assert diagnostics["multi_column_pages"] == 1
+    assert max(index for index, value in enumerate(texts) if value.startswith("LEFT")) < min(
+        index for index, value in enumerate(texts) if value.startswith("RIGHT")
+    )
 
 
 def test_extract_heading_handles_decorated_prologue():

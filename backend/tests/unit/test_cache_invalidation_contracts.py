@@ -162,7 +162,7 @@ async def test_public_forum_and_profile_invalidation_bump_expected_keys(monkeypa
 
 
 @pytest.mark.asyncio
-async def test_advisor_invalidation_marks_book_series_and_deletes_namespaces(
+async def test_advisor_invalidation_resolves_series_before_deleting_namespaces(
     monkeypatch,
 ):
     book_id = uuid.uuid4()
@@ -173,21 +173,11 @@ async def test_advisor_invalidation_marks_book_series_and_deletes_namespaces(
         async def execute(self, _statement):
             return _RowsResult([SimpleNamespace(series_id=series_id)])
 
-    async def mark_book_cache_dirty(value):
-        calls.append(("book", value))
-
-    async def mark_series_cache_dirty(value):
-        calls.append(("series", value))
-
     async def invalidate_advisor_caches(*, book_id, series_ids=None):
         calls.append(("advisor", [str(book_id), *[str(value) for value in series_ids or []]]))
 
-    monkeypatch.setattr(advisor_utils, "mark_book_cache_dirty", mark_book_cache_dirty)
-    monkeypatch.setattr(advisor_utils, "mark_series_cache_dirty", mark_series_cache_dirty)
     monkeypatch.setattr(advisor_utils, "invalidate_advisor_caches", invalidate_advisor_caches)
 
     await advisor_utils.invalidate_advisor_caches_for_book(DB(), book_id=book_id)
 
-    assert ("book", str(book_id)) in calls
-    assert ("series", str(series_id)) in calls
-    assert ("advisor", [str(book_id), str(series_id)]) in calls
+    assert calls == [("advisor", [str(book_id), str(series_id)])]

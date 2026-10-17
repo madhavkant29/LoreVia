@@ -1,3 +1,7 @@
+import { useRef } from "react"
+
+import { Dialog } from "@/components/ui/Dialog"
+
 type ManuscriptReprocessDialogProps = {
   isDark: boolean
   reprocessing: boolean
@@ -11,15 +15,24 @@ export function ManuscriptReprocessDialog({
   onCancel,
   onConfirm,
 }: ManuscriptReprocessDialogProps) {
+  const cancelRef = useRef<HTMLButtonElement | null>(null)
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4">
-      <div className={`w-full max-w-md rounded-lg border p-5 ${isDark ? "border-white/10 bg-[#0f1117] text-slate-100" : "border-stone-200 bg-white text-stone-950"}`}>
-        <h2 className="text-lg font-semibold">Reprocess manuscript?</h2>
-        <p className={`mt-3 text-sm leading-6 ${isDark ? "text-slate-300" : "text-stone-600"}`}>
-          Reprocessing rebuilds the Character Bible, relationships, plot threads, summaries, world/lore data, and continuity signals from the saved manuscript. This will consume 1 book upload. Continue?
-        </p>
-        <div className="mt-5 flex flex-wrap justify-end gap-3">
+    <Dialog
+      open
+      onClose={() => {
+        if (!reprocessing) onCancel()
+      }}
+      title="Reprocess manuscript?"
+      description="Reprocessing rebuilds the Character Bible, relationships, plot threads, summaries, world/lore data, and continuity signals from the saved manuscript. The manuscript's full word count is reserved first; only chapters that finish successfully are charged, and unused reservations are restored after failure or cancellation. Continue?"
+      initialFocusRef={cancelRef}
+      closeOnOutside={!reprocessing}
+      size="sm"
+      className={isDark ? "border-white/10 bg-[#0f1117] text-slate-100" : "border-stone-200 bg-white text-stone-950"}
+      footer={(
+        <div className="flex flex-wrap justify-end gap-3">
           <button
+            ref={cancelRef}
             type="button"
             onClick={onCancel}
             disabled={reprocessing}
@@ -33,10 +46,10 @@ export function ManuscriptReprocessDialog({
             disabled={reprocessing}
             className="rounded-md bg-[#1f615d] px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
           >
-            {reprocessing ? "Starting..." : "Reprocess and use 1 upload"}
+            {reprocessing ? "Starting..." : "Reserve words and reprocess"}
           </button>
         </div>
-      </div>
-    </div>
+      )}
+    />
   )
 }

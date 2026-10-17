@@ -49,6 +49,12 @@ export interface DirectConversationListResponse {
   unread_count: number
 }
 
+export interface DirectConversationPageResponse {
+  items: DirectConversationSummary[]
+  next_cursor: string | null
+  has_more: boolean
+}
+
 export interface UnreadCountResponse {
   unread_count: number
 }
@@ -65,4 +71,10 @@ export interface DirectMessage {
 
 export interface DirectMessageListResponse {
   items: DirectMessage[]
+}
+
+export interface DirectMessagePageResponse {
+  items: DirectMessage[]
+  next_cursor: string | null
+  has_more: boolean
 }

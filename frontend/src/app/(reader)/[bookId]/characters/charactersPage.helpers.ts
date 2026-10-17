@@ -662,18 +662,6 @@ export function sentimentLabel(value: number | null | undefined) {
   return "Neutral"
 }
 
-export function strengthValue(value: number | null | undefined) {
-  if (typeof value !== "number" || Number.isNaN(value)) return 32
-  return Math.max(18, Math.min(100, Math.round((value + 1) * 50)))
-}
-
-export function relationshipStrengthColor(value: number | null | undefined, isDark: boolean) {
-  if (typeof value !== "number" || Number.isNaN(value)) return isDark ? "bg-slate-500" : "bg-stone-400"
-  if (value >= 0.4) return "bg-teal-600"
-  if (value <= -0.4) return "bg-rose-500"
-  return isDark ? "bg-slate-500" : "bg-stone-400"
-}
-
 export function growthTitle(event: NonNullable<Character["growth_events"]>[number]) {
   return event.event_title || event.event || "Untitled event"
 }
@@ -707,56 +695,54 @@ export function healthTone(score: number): CharacterHealth["tone"] {
 }
 
 export function buildCharacterHealth(character: Character, mergeSuggestionIds: Set<string>, connections: ConnectedRelationship[]): CharacterHealth {
-  let score = 100
   const issues: string[] = []
   const missingTraits = missingTraitLabels(character)
   const lastSeenChapter = character.last_seen_chapter ?? character.first_chapter ?? null
 
   if (missingTraits.includes("physical description")) {
-    score -= 16
     issues.push("Missing physical description")
   }
   if (missingTraits.includes("age")) {
-    score -= 8
     issues.push("Age is not grounded")
   }
   if (!character.description) {
-    score -= 14
     issues.push("Profile summary is still thin")
   }
   if (character.motivations.length === 0) {
-    score -= 12
     issues.push("Motivation evidence is missing")
   }
   if (mergeSuggestionIds.has(character.id)) {
-    score -= 16
     issues.push("Duplicate candidate found")
   }
   if (connections.some((connection) => !connection.description || typeof connection.from_chapter !== "number")) {
-    score -= 12
     issues.push("Relationship evidence incomplete")
   }
   if (typeof lastSeenChapter === "number" && lastSeenChapter > character.first_chapter && (character.growth_events?.length ?? 0) === 0) {
-    score -= 10
     issues.push(`Arc has no update after chapter ${lastSeenChapter}`)
   }
   for (const diagnostic of character.arc_tracker?.diagnostics ?? []) {
-    score -= diagnostic.includes("too abruptly") ? 12 : 8
     issues.push(diagnostic)
   }
   if (!(character.arc_tracker?.voice_markers?.length ?? 0)) {
-    score -= 6
     issues.push("Voice markers are not grounded yet")
   }
   if (!(character.goal ?? character.arc_tracker?.goal)) {
-    score -= 8
     issues.push("Goal is missing")
   }
-  if (visibleTraitEntries(character).length < 2) {
-    score -= 10
-  }
 
-  const normalizedScore = Math.max(24, Math.min(issues.length > 0 ? 86 : 94, Math.round(score)))
+  const completenessChecks = [
+    Boolean(character.description?.trim()),
+    character.motivations.length > 0,
+    Boolean(character.goal ?? character.arc_tracker?.goal),
+    visibleTraitEntries(character).length >= 2,
+    !mergeSuggestionIds.has(character.id),
+    connections.every((connection) => Boolean(connection.description) && typeof connection.from_chapter === "number"),
+    Boolean(character.arc_summary || (character.growth_events?.length ?? 0) > 0),
+    (character.arc_tracker?.voice_markers?.length ?? 0) > 0,
+  ]
+  const normalizedScore = Math.round(
+    (completenessChecks.filter(Boolean).length / completenessChecks.length) * 100,
+  )
   const tone = healthTone(normalizedScore)
   const summary = tone === "strong"
     ? "Well-grounded across traits, continuity, and relationships."

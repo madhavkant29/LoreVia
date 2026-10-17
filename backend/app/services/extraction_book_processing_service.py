@@ -15,12 +15,14 @@ from app.core.config import settings
 from app.core.storage import download_book, upload_binary
 from app.models.book import Book, Chapter
 from app.models.user import User
+from app.services.book_section_service import persist_book_sections
 from app.services.extraction_budget_service import apply_ingestion_token_budget
 from app.services.extraction_chapter_content_service import _ensure_chapter_stub
 from app.services.extraction_chapter_queue_service import queue_initial_extraction_chapters
 from app.services.task_execution_service import get_or_create_processing_run
 from app.utils.books.imports import parse_book_upload_for_ingestion
 from app.utils.books.scene_metadata import refresh_screenplay_scene_rows
+from app.utils.books.serialization import build_blank_cover_image
 from app.utils.compliance.copyright_check import evaluate_document_copyright
 from app.utils.ingestion_utils import (
     apply_chapter_number_strategy,
@@ -32,6 +34,43 @@ from app.utils.ingestion_utils import (
 )
 
 log = logging.getLogger("lorevia.extraction")
+
+COVER_GENERATION_EXCEPTIONS = (OSError, RuntimeError, TypeError, ValueError)
+COVER_UPLOAD_EXCEPTIONS = (BotoCoreError, ClientError, OSError, RuntimeError, TypeError, ValueError)
+
+
+async def ensure_ingested_book_cover(book: Book, raw: bytes) -> bool:
+    if book.cover_s3_key:
+        return False
+
+    cover: tuple[bytes, str] | None = None
+    if book.format == "pdf":
+        from app.parsers.pdf_parser import extract_first_page_cover
+
+        try:
+            cover = await asyncio.to_thread(extract_first_page_cover, raw)
+        except COVER_GENERATION_EXCEPTIONS:
+            log.warning("cover_extraction_failed book_id=%s", book.id, exc_info=True)
+
+    if cover is None:
+        try:
+            cover = await asyncio.to_thread(build_blank_cover_image, book.title, book.author)
+        except COVER_GENERATION_EXCEPTIONS:
+            log.warning("blank_cover_generation_failed book_id=%s", book.id, exc_info=True)
+            return False
+
+    cover_bytes, content_type = cover
+    try:
+        book.cover_s3_key = await asyncio.to_thread(
+            upload_binary,
+            f"covers/{book.user_id}/{uuid.uuid4()}.png",
+            cover_bytes,
+            content_type,
+        )
+        return True
+    except COVER_UPLOAD_EXCEPTIONS:
+        log.warning("cover_upload_failed book_id=%s", book.id, exc_info=True)
+        return False
 
 
 async def process_book_ingestion_and_queue(
@@ -45,6 +84,12 @@ async def process_book_ingestion_and_queue(
     book = await db.get(Book, uuid.UUID(book_id))
     if not book:
         return {"error": "not found"}
+
+    from app.services.book_freeze_service import is_book_frozen
+
+    if is_book_frozen(book):
+        log.info("Skipping processing for frozen book %s", book_id)
+        return {"skipped": "frozen"}
 
     if await is_book_hidden(db, book.id):
         log.info("Skipping processing for unavailable book %s", book_id)
@@ -71,22 +116,16 @@ async def process_book_ingestion_and_queue(
         queue_wait_ms,
     )
 
-    if book.format == "pdf" and not book.cover_s3_key:
-        from app.parsers.pdf_parser import extract_first_page_cover
+    cover_started = time.perf_counter()
+    cover_generated = await ensure_ingested_book_cover(book, raw)
+    log.info(
+        "ingestion_timing stage=cover book_id=%s elapsed_ms=%s generated=%s",
+        book_id,
+        elapsed_ms(cover_started),
+        cover_generated,
+    )
 
-        try:
-            cover = await asyncio.to_thread(extract_first_page_cover, raw)
-            if cover:
-                cover_bytes, content_type = cover
-                book.cover_s3_key = await asyncio.to_thread(
-                    upload_binary,
-                    f"covers/{book.user_id}/{uuid.uuid4()}.png",
-                    cover_bytes,
-                    content_type,
-                )
-        except (BotoCoreError, ClientError, OSError, RuntimeError, TypeError, ValueError):
-            log.warning("cover_extraction_upload_failed book_id=%s", book_id, exc_info=True)
-
+    copyright_started = time.perf_counter()
     copyright_info = await evaluate_document_copyright(
         format_name=book.format,
         raw=raw,
@@ -96,6 +135,13 @@ async def process_book_ingestion_and_queue(
         book.isbn = str(copyright_info["isbn"])
     book.copyright_warning = bool(copyright_info.get("copyright_warning", False))
     await db.commit()
+    log.info(
+        "ingestion_timing stage=copyright book_id=%s elapsed_ms=%s warning=%s isbn_found=%s",
+        book_id,
+        elapsed_ms(copyright_started),
+        book.copyright_warning,
+        bool(copyright_info.get("isbn")),
+    )
 
     parse_started = time.perf_counter()
     parsed_payload = await parse_book_upload_for_ingestion(
@@ -104,17 +150,35 @@ async def process_book_ingestion_and_queue(
         raw=raw,
         preserve_chapter_numbers=book.preserve_chapter_numbers,
         preserve_source_chapters=book.preserve_source_chapters,
+        proposed_plan=(
+            book.import_structure
+            if isinstance(book.import_structure, dict)
+            and book.import_structure.get("parser_version")
+            else None
+        ),
     )
     chapters = cast(list[dict[str, Any]], parsed_payload["chapters"])
     screenplay_payload = cast(dict[str, Any] | None, parsed_payload.get("screenplay_payload"))
     parser_diagnostics = cast(dict[str, Any] | None, parsed_payload.get("parser_diagnostics"))
+    structure_plan = cast(dict[str, Any] | None, parsed_payload.get("structure_plan"))
 
     detected_language = parsed_payload.get("detected_language", "en")
     if detected_language and detected_language != "en":
         book.language = detected_language
         await db.commit()
 
-    if parser_diagnostics:
+    if structure_plan:
+        additional_imports = (
+            book.import_structure.get("additional_imports")
+            if isinstance(book.import_structure, dict)
+            else None
+        )
+        book.import_structure = {
+            **structure_plan,
+            **({"additional_imports": additional_imports} if additional_imports else {}),
+        }
+        await db.commit()
+    elif parser_diagnostics:
         sections = []
         for ch in chapters:
             sections.append(
@@ -146,8 +210,10 @@ async def process_book_ingestion_and_queue(
     all_chapters = apply_chapter_number_strategy(
         chapters,
         preserve_chapter_numbers=(book.preserve_chapter_numbers or book.preserve_source_chapters)
-        and book.work_type != "screenplay",
+        and book.work_type != "screenplay"
+        and not structure_plan,
         generic_titles=book.work_type != "screenplay"
+        and not structure_plan
         and not (book.preserve_chapter_numbers or book.preserve_source_chapters),
     )
 
@@ -187,11 +253,21 @@ async def process_book_ingestion_and_queue(
 
     user = await db.get(User, book.user_id)
 
+    budget_started = time.perf_counter()
+    ai_candidates = [
+        chapter for chapter in all_chapters if chapter.get("include_in_analysis", True)
+    ]
     budget_result = await apply_ingestion_token_budget(
         db,
         book=book,
         user=user,
-        all_chapters=all_chapters,
+        all_chapters=ai_candidates,
+    )
+    log.info(
+        "ingestion_timing stage=budget book_id=%s elapsed_ms=%s outcome=%s",
+        book_id,
+        elapsed_ms(budget_started),
+        budget_result.get("error") or "accepted",
     )
     if budget_result.get("error") == "budget_exhausted":
         log.warning(
@@ -297,6 +373,15 @@ async def process_book_ingestion_and_queue(
         .scalars()
         .all()
     )
+    if structure_plan and not book.force_single_manuscript:
+        await persist_book_sections(
+            db,
+            book=book,
+            plan=structure_plan,
+            chapter_rows=chapter_rows,
+            chapters=all_chapters,
+        )
+        await db.commit()
     chapters_by_number = {int(chapter.number): chapter for chapter in chapter_rows}
     processing_run = await get_or_create_processing_run(
         db,
@@ -306,6 +391,21 @@ async def process_book_ingestion_and_queue(
     )
     processing_run.status = "running"
     processing_run.started_at = processing_run.started_at or datetime.now(UTC)
+    if not ai_chapters:
+        processing_run.status = "completed"
+        processing_run.completed_at = datetime.now(UTC)
+        book.status = "ready"
+        book.writer_workspace = update_book_processing_state(
+            book,
+            status="ready",
+            stage="analysis",
+            total_chapters=0,
+            completed_chapters=0,
+            started_at=processing_started_at,
+            queue_wait_ms=queue_wait_ms,
+        )
+        await db.commit()
+        return {"book_id": book_id, "chapters": len(all_chapters)}
     queue_started = time.perf_counter()
     queue_result = await queue_initial_extraction_chapters(
         db,

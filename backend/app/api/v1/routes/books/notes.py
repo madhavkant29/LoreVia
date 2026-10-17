@@ -5,6 +5,7 @@ from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps.auth import get_current_user
+from app.api.deps.feature_flags import require_cursor_page_apis_enabled
 from app.api.deps.rate_limit import rate_limit_manuscript_import
 from app.core.config import settings
 from app.core.database import get_db
@@ -12,12 +13,14 @@ from app.models.book import Book, BookNote, VaultNoteSource
 from app.schemas.books import (
     BookNoteBody,
     BookNoteOut,
+    BookNotePageOut,
     EntityTagSetOut,
     EntityTagUpdateBody,
     VaultGraphOut,
     VaultNoteBody,
     VaultNoteLinkListOut,
     VaultNoteOut,
+    VaultNotePageOut,
     VaultNoteSaveOut,
 )
 from app.utils.billing_utils import require_author_access
@@ -28,8 +31,10 @@ from app.utils.books.collaboration_access import (
 )
 from app.utils.books.notes import (
     delete_book_note,
+    get_book_note,
     get_owned_book,
     list_book_notes,
+    list_book_notes_page,
     save_book_note,
 )
 from app.utils.books.vault import (
@@ -41,8 +46,10 @@ from app.utils.books.vault_relations import (
 from app.utils.books.vault_storage import (
     delete_vault_note,
     export_vault_notes_zip,
+    get_vault_note,
     import_vault_notes_zip,
     list_vault_notes,
+    list_vault_notes_page,
     save_vault_note,
 )
 from app.utils.tag_utils import (
@@ -70,6 +77,34 @@ async def get_book_notes(
     if collaborator and not collaboration_can_comment(collaborator):
         raise HTTPException(403, "This share cannot view or leave comments.")
     return await list_book_notes(db, book, collaborator=collaborator)
+
+
+@router.get(
+    "/{book_id}/notes/page",
+    response_model=BookNotePageOut,
+    dependencies=[Depends(require_cursor_page_apis_enabled)],
+)
+async def get_book_notes_page(
+    book_id: uuid.UUID,
+    limit: int = Query(default=50, ge=1, le=100),
+    cursor: str | None = Query(default=None, max_length=1024),
+    include_body: bool = Query(default=False),
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    book, collaborator = await get_book_with_collaboration_access(db, book_id, current_user)
+    if collaborator is None:
+        require_author_access(current_user)
+    if collaborator and not collaboration_can_comment(collaborator):
+        raise HTTPException(403, "This share cannot view or leave comments.")
+    return await list_book_notes_page(
+        db,
+        book=book,
+        collaborator=collaborator,
+        limit=limit,
+        cursor=cursor,
+        include_body=include_body,
+    )
 
 
 @router.put("/{book_id}/revision-tags", response_model=EntityTagSetOut)
@@ -177,6 +212,32 @@ async def list_book_vault_notes(
         book=book,
         user_id=current_user.id,
         source=VaultNoteSource.USER_NOTES.value,
+    )
+
+
+@router.get(
+    "/{book_id}/notes/vault/page",
+    response_model=VaultNotePageOut,
+    dependencies=[Depends(require_cursor_page_apis_enabled)],
+)
+async def list_book_vault_notes_page(
+    book_id: uuid.UUID,
+    include_content: bool = Query(default=False),
+    limit: int = Query(default=50, ge=1, le=100),
+    cursor: str | None = Query(default=None, max_length=1024),
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    book = await get_owned_book(db, book_id, current_user.id)
+    require_author_access(current_user)
+    return await list_vault_notes_page(
+        db,
+        book=book,
+        user_id=current_user.id,
+        source=VaultNoteSource.USER_NOTES.value,
+        include_content=include_content,
+        limit=limit,
+        cursor=cursor,
     )
 
 
@@ -293,4 +354,37 @@ async def get_book_vault_note_relations(
         book=book,
         user_id=current_user.id,
         path=path,
+    )
+
+
+@router.get("/{book_id}/notes/{note_id}", response_model=BookNoteOut)
+async def get_book_note_detail(
+    book_id: uuid.UUID,
+    note_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    book, collaborator = await get_book_with_collaboration_access(db, book_id, current_user)
+    if collaborator is None:
+        require_author_access(current_user)
+    if collaborator and not collaboration_can_comment(collaborator):
+        raise HTTPException(403, "This share cannot view or leave comments.")
+    return await get_book_note(db, book=book, note_id=note_id, collaborator=collaborator)
+
+
+@router.get("/{book_id}/notes/vault/{path:path}", response_model=VaultNoteOut)
+async def get_book_vault_note_detail(
+    book_id: uuid.UUID,
+    path: str,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    book = await get_owned_book(db, book_id, current_user.id)
+    require_author_access(current_user)
+    return await get_vault_note(
+        db,
+        book=book,
+        user_id=current_user.id,
+        path=path,
+        source=VaultNoteSource.USER_NOTES.value,
     )

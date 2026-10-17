@@ -1,4 +1,5 @@
-import type { ReactNode } from "react"
+import { useEffect, useId, useRef, type ReactNode } from "react"
+import { SUPPORT_HELP_EVENT } from "@/components/ui/ShortcutHelp"
 
 import { CardSkeleton, RowSkeleton, SidebarSkeleton, Skeleton } from "@/components/ui/Skeleton"
 
@@ -19,13 +20,13 @@ export type MenuAction = {
 }
 
 export function iconButtonClasses(isDark: boolean) {
-  return `inline-flex h-10 w-10 items-center justify-center rounded-xl border transition ${
+  return `inline-flex h-10 w-10 items-center justify-center rounded-sm border transition-colors ${
     isDark ? "border-[#202a38] bg-[#121823] text-slate-200 hover:border-[#2b3747] hover:bg-[#182131]" : "border-stone-200 bg-white text-stone-700 hover:bg-stone-50"
   }`
 }
 
 export function actionButtonClasses(isDark: boolean) {
-  return `inline-flex items-center rounded-xl border px-4 py-2.5 text-sm font-medium transition ${
+  return `inline-flex items-center rounded-sm border px-4 py-2.5 text-sm font-medium transition-colors ${
     isDark ? "border-[#202a38] bg-[#121823] text-slate-100 hover:border-[#2b3747] hover:bg-[#182131]" : "border-stone-200 bg-white text-stone-700 hover:bg-stone-50"
   }`
 }
@@ -66,15 +67,15 @@ export function workspaceActionButtonClasses(
 
 export function fieldClasses(isDark: boolean) {
   return isDark
-    ? "w-full rounded-xl border border-[#202a38] bg-[#0c1119] px-3 py-2.5 text-sm text-white outline-none transition focus:border-violet-400/40 focus:ring-2 focus:ring-violet-400/20"
-    : "w-full rounded-xl border border-stone-200 bg-white px-3 py-2.5 text-sm text-stone-900 outline-none transition focus:border-violet-300 focus:ring-2 focus:ring-violet-200/70"
+    ? "w-full rounded-sm border border-[#202a38] bg-[#0c1119] px-3 py-2.5 text-sm text-white outline-none transition-colors focus:border-violet-400/40 focus:ring-2 focus:ring-violet-400/20"
+    : "w-full rounded-sm border border-stone-200 bg-white px-3 py-2.5 text-sm text-stone-900 outline-none transition-colors focus:border-violet-300 focus:ring-2 focus:ring-violet-200/70"
 }
 
 export function sectionEyebrowClasses(isDark: boolean, tone: "default" | "teal" | "violet" | "amber" = "default") {
   if (tone === "teal") return isDark ? "text-teal-300" : "text-teal-700"
   if (tone === "violet") return isDark ? "text-violet-300" : "text-violet-700"
   if (tone === "amber") return isDark ? "text-amber-300" : "text-amber-700"
-  return isDark ? "text-slate-500" : "text-stone-400"
+  return isDark ? "text-slate-400" : "text-stone-600"
 }
 
 export function RelationshipGraphLoading() {
@@ -252,11 +253,11 @@ export function StatCard({ stat, isDark }: { stat: CharacterBibleStat; isDark: b
         }`}>
           <ShellIcon name={stat.icon} className="h-[18px] w-[18px]" />
         </span>
-        {stat.detail ? <span className={`mt-1 text-xs font-semibold ${isDark ? "text-slate-400" : "text-stone-500"}`}>{stat.detail}</span> : null}
+        {stat.detail ? <span className={`mt-1 text-xs font-semibold ${isDark ? "text-slate-400" : "text-stone-600"}`}>{stat.detail}</span> : null}
       </div>
       <div className="mt-3">
         <p className={`text-3xl font-semibold leading-none tracking-tight ${isDark ? "text-white" : "text-stone-950"}`}>{stat.value}</p>
-        <p className={`mt-1 text-xs font-semibold ${isDark ? "text-slate-400" : "text-stone-500"}`}>{stat.label}</p>
+        <p className={`mt-1 text-xs font-semibold ${isDark ? "text-slate-400" : "text-stone-600"}`}>{stat.label}</p>
       </div>
     </div>
   )
@@ -270,11 +271,16 @@ export function CharacterBibleHeaderStats({
   stats: CharacterBibleStat[]
 }) {
   return (
-    <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
+    <dl className={`flex max-w-full flex-wrap items-center gap-0 border-y text-sm ${isDark ? "border-[#202a38]" : "border-stone-200"}`}>
       {stats.map((stat) => (
-        <StatCard key={stat.label} stat={stat} isDark={isDark} />
+        <div key={stat.label} className={`flex min-w-max items-baseline gap-2 border-r px-4 py-2.5 first:pl-0 last:border-r-0 ${isDark ? "border-[#202a38]" : "border-stone-200"}`}>
+          <dt className={isDark ? "text-slate-400" : "text-stone-600"}>{stat.label}</dt>
+          <dd className={`font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>{stat.value}
+            {stat.detail && stat.detail !== "View" ? <span className={`ml-2 text-xs font-normal ${isDark ? "text-slate-400" : "text-stone-600"}`}>{stat.detail}</span> : null}
+          </dd>
+        </div>
       ))}
-    </div>
+    </dl>
   )
 }
 
@@ -286,8 +292,6 @@ export function CharacterBibleHeaderActions({
   pageMenuOpen,
   workspaceMode,
   onCreateCharacter,
-  onOpenDuplicateReview,
-  onOpenRepairWorkspace,
   onOpenReviewQueue,
   onReviewDataIntent,
   onTogglePageMenu,
@@ -306,13 +310,13 @@ export function CharacterBibleHeaderActions({
   onTogglePageMenu: () => void
 }) {
   return (
-    <div className="flex flex-wrap items-center justify-start gap-3 xl:justify-end">
+    <div className="flex flex-wrap items-center justify-start gap-2 xl:justify-end">
       {isAuthorMode ? (
         <button
           type="button"
           onClick={onCreateCharacter}
           aria-pressed={creating}
-          className={`inline-flex h-[50px] items-center gap-2 rounded-md px-5 py-3 text-sm font-semibold transition ${workspaceActionButtonClasses(isDark, { active: creating, tone: "teal" })}`}
+          className={`inline-flex h-10 items-center gap-2 rounded-sm border px-4 text-sm font-semibold transition-colors ${creating ? "border-teal-500 bg-teal-700 text-white" : "border-teal-700 bg-[#1f615d] text-white hover:bg-[#174c49]"}`}
         >
           <ShellIcon name="add" className="h-4 w-4" />
           Add character
@@ -324,34 +328,13 @@ export function CharacterBibleHeaderActions({
         aria-pressed={workspaceMode === "review"}
         onMouseEnter={onReviewDataIntent}
         onFocus={onReviewDataIntent}
-        className={`inline-flex h-[50px] items-center gap-2 rounded-md px-5 py-3 text-sm font-semibold transition ${workspaceActionButtonClasses(isDark, { active: workspaceMode === "review", tone: "teal" })}`}
+        className={`inline-flex h-10 items-center gap-2 rounded-sm px-4 text-sm font-semibold transition-colors ${workspaceActionButtonClasses(isDark, { active: workspaceMode === "review", tone: "teal" })}`}
       >
         <ShellIcon name="review" className="h-4 w-4" />
         Review queue
       </button>
-      <button
-        type="button"
-        onClick={onOpenDuplicateReview}
-        aria-pressed={workspaceMode === "duplicates"}
-        onMouseEnter={onReviewDataIntent}
-        onFocus={onReviewDataIntent}
-        className={`inline-flex h-[50px] items-center gap-2 rounded-md px-5 py-3 text-sm font-semibold transition ${workspaceActionButtonClasses(isDark, { active: workspaceMode === "duplicates", tone: "violet" })}`}
-      >
-        <ShellIcon name="review" className="h-4 w-4" />
-        Review duplicates
-      </button>
-      {isAuthorMode ? (
-        <button
-          type="button"
-          onClick={onOpenRepairWorkspace}
-          aria-pressed={workspaceMode === "repair"}
-          className={`inline-flex h-[50px] items-center gap-2 rounded-md px-5 py-3 text-sm font-semibold transition ${workspaceActionButtonClasses(isDark, { active: workspaceMode === "repair", tone: "amber" })}`}
-        >
-          <ShellIcon name="repair" className="h-4 w-4" />
-          Repair workspace
-        </button>
-      ) : null}
       <OverflowMenu isDark={isDark} open={pageMenuOpen} onToggle={onTogglePageMenu} actions={pageMenuActions} />
+      <button type="button" className="min-h-10 px-2 text-sm underline underline-offset-4" onClick={() => window.dispatchEvent(new Event(SUPPORT_HELP_EVENT))}>Help</button>
     </div>
   )
 }
@@ -368,9 +351,9 @@ export function SurfaceCard({
   className?: string
 }) {
   return (
-    <section className={`rounded-md border px-4 py-4 ${isDark ? "border-transparent bg-[#0d141d]/92" : "border-stone-200 bg-stone-50/80"} ${className}`}>
-      <p className={`text-3xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>{title}</p>
-      <div className="mt-4">{children}</div>
+    <section className={`border-b px-1 py-5 last:border-b-0 ${isDark ? "border-[#202a38]" : "border-stone-200"} ${className}`}>
+      <h3 className={`text-sm font-semibold ${isDark ? "text-slate-200" : "text-stone-800"}`}>{title}</h3>
+      <div className="mt-3">{children}</div>
     </section>
   )
 }
@@ -380,29 +363,53 @@ export function OverflowMenu({
   open,
   onToggle,
   actions,
+  label = "Open menu",
 }: {
   isDark: boolean
   open: boolean
   onToggle: () => void
   actions: MenuAction[]
+  label?: string
 }) {
+  const root = useRef<HTMLDivElement>(null)
+  const trigger = useRef<HTMLButtonElement>(null)
+  const id = useId()
+  useEffect(() => {
+    if (!open) return
+    function pointer(event: PointerEvent) {
+      if (!root.current?.contains(event.target as Node)) onToggle()
+    }
+    function key(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        event.preventDefault()
+        onToggle()
+        trigger.current?.focus()
+      }
+    }
+    document.addEventListener("pointerdown", pointer)
+    document.addEventListener("keydown", key)
+    return () => {
+      document.removeEventListener("pointerdown", pointer)
+      document.removeEventListener("keydown", key)
+    }
+  }, [open, onToggle])
   return (
-    <div className="relative">
-      <button type="button" onClick={onToggle} className={iconButtonClasses(isDark)} aria-label="Open menu">
+    <div ref={root} className="relative">
+      <button ref={trigger} type="button" onClick={onToggle} className={iconButtonClasses(isDark)} aria-label={label} aria-expanded={open} aria-controls={id}>
         <svg className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
           <path d="M10 4.75a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3ZM10 11.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3ZM10 18.25a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Z" />
         </svg>
       </button>
 
       {open ? (
-        <div className={menuPanelClasses(isDark)}>
+        <div id={id} className={menuPanelClasses(isDark)}>
           {actions.map((action, index) => (
             <div key={`${action.label}-${index}`} className={action.dividerBefore ? `mt-1 border-t pt-1 ${isDark ? "border-[#202a38]" : "border-stone-200"}` : ""}>
               <button
                 type="button"
                 disabled={action.disabled}
                 onClick={action.onClick}
-                className={`block w-full rounded-xl px-4 py-2.5 text-left text-sm transition disabled:cursor-not-allowed disabled:opacity-50 ${
+                className={`block w-full rounded-sm px-4 py-2.5 text-left text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
                   action.danger
                     ? isDark ? "text-rose-300 hover:bg-rose-500/12" : "text-rose-700 hover:bg-rose-50"
                     : isDark ? "text-slate-200 hover:bg-white/[0.06]" : "text-stone-700 hover:bg-stone-50"
@@ -443,7 +450,7 @@ export function QuickActionTile({
         </span>
       ) : null}
       <p className={`text-sm font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>{title}</p>
-      <p className={`mt-1 text-xs leading-5 ${isDark ? "text-slate-400" : "text-stone-500"}`}>{description}</p>
+      <p className={`mt-1 text-xs leading-5 ${isDark ? "text-slate-400" : "text-stone-600"}`}>{description}</p>
     </button>
   )
 }

@@ -7,16 +7,16 @@ const SECTION_TYPES: { value: SectionType; label: string; include: boolean }[] =
   { value: "prologue", label: "Prologue", include: true },
   { value: "epilogue", label: "Epilogue", include: true },
   { value: "interlude", label: "Interlude", include: true },
-  { value: "part", label: "Part", include: true },
+  { value: "part_opening", label: "Part opening", include: true },
   { value: "preface", label: "Preface", include: true },
   { value: "foreword", label: "Foreword", include: true },
   { value: "afterword", label: "Afterword", include: true },
   { value: "appendix", label: "Appendix", include: true },
-  { value: "toc", label: "Table of Contents", include: false },
   { value: "dedication", label: "Dedication", include: false },
   { value: "acknowledgements", label: "Acknowledgements", include: false },
   { value: "glossary", label: "Glossary", include: false },
   { value: "notes", label: "Author Notes", include: false },
+  { value: "chronology", label: "Chronology", include: false },
   { value: "copyright", label: "Copyright", include: false },
   { value: "title_page", label: "Title Page", include: false },
   { value: "unknown", label: "Unknown", include: true },
@@ -24,11 +24,19 @@ const SECTION_TYPES: { value: SectionType; label: string; include: boolean }[] =
 
 export const ImportStructureEditor = memo(function ImportStructureEditor({
   sections: initialSections,
+  blockWordCounts = [],
+  blockOpenings = [],
+  blockClosings = [],
+  blockLocations = [],
   isDark = false,
   onSave,
   onCancel,
 }: {
   sections: SectionMeta[]
+  blockWordCounts?: number[]
+  blockOpenings?: string[]
+  blockClosings?: string[]
+  blockLocations?: Array<string | null>
   isDark?: boolean
   onSave: (sections: SectionMeta[]) => void
   onCancel: () => void
@@ -36,7 +44,6 @@ export const ImportStructureEditor = memo(function ImportStructureEditor({
   const [sections, setSections] = useState<SectionMeta[]>(
     initialSections.map((s) => ({ ...s }))
   )
-  const [mergeIndex, setMergeIndex] = useState<number | null>(null)
 
   const updateSection = (index: number, patch: Partial<SectionMeta>) => {
     setSections((prev) => {
@@ -46,44 +53,62 @@ export const ImportStructureEditor = memo(function ImportStructureEditor({
     })
   }
 
-  const deleteSection = (index: number) => {
-    if (sections.length <= 1) return
-    setSections((prev) => prev.filter((_, i) => i !== index))
-    setMergeIndex(null)
-  }
-
-  const handleMerge = (index: number) => {
-    if (mergeIndex === null) {
-      setMergeIndex(index)
-      return
-    }
-    if (mergeIndex === index) {
-      setMergeIndex(null)
-      return
-    }
-    const from = Math.min(mergeIndex, index)
-    const to = Math.max(mergeIndex, index)
+  const shiftBoundary = (index: number, delta: number) => {
     setSections((prev) => {
-      const merged: SectionMeta = {
-        ...prev[from],
-        title: prev[from].title || prev[to].title || `Merged ${from + 1}-${to + 1}`,
-        number: Math.min(prev[from].number ?? to, prev[to].number ?? to),
-        confidence: (prev[from].confidence + prev[to].confidence) / 2,
+      const next = prev.map((section) => ({ ...section }))
+      const left = next[index]
+      const right = next[index + 1]
+      if (!left || !right || left.end_block == null || right.end_block == null || left.start_block == null) return prev
+      if (["part", "toc"].includes(left.type) || ["part", "toc"].includes(right.type)) return prev
+      const boundary = left.end_block + delta
+      if (boundary <= left.start_block || boundary >= right.end_block) return prev
+      left.end_block = boundary
+      right.start_block = boundary
+      for (const item of [left, right]) {
+        const start = item.start_block ?? 0
+        const end = item.end_block ?? start
+        if (blockWordCounts.length) item.word_count = blockWordCounts.slice(start, end).reduce((sum, count) => sum + count, 0)
+        if (blockOpenings[start]) item.opening_excerpt = blockOpenings[start]
+        if (blockClosings[end - 1]) item.closing_excerpt = blockClosings[end - 1]
+        const first = blockLocations[start]
+        const last = blockLocations[end - 1]
+        if (first) item.source_location = last && last !== first ? `${first} – ${last}` : first
       }
-      const result = [...prev.slice(0, from), merged, ...prev.slice(to + 1)]
-      return result
+      return next
     })
-    setMergeIndex(null)
   }
 
-  const quickMark = (type: SectionType) => {
-    setSections((prev) =>
-      prev.map((s, i) => ({
-        ...s,
-        type: i === 0 && type === "preface" && prev.length > 1 ? "preface" : type,
-        include_in_analysis: SECTION_TYPES.find((t) => t.value === type)?.include ?? true,
-      }))
-    )
+  const makePart = (index: number) => {
+    setSections((prev) => {
+      const target = prev[index]
+      if (!target || target.start_block == null || target.type === "toc" || target.type === "part") return prev
+      const partId = `part-${crypto.randomUUID()}`
+      const group: SectionMeta = {
+        ...target, id: partId, type: "part", title: target.title,
+        parent_id: null, end_block: target.start_block,
+        include_in_analysis: false, word_count: 0,
+        opening_excerpt: "", closing_excerpt: "", warnings: [],
+      }
+      const opening = { ...target, type: "part_opening" as const, parent_id: partId, include_in_analysis: true }
+      return [...prev.slice(0, index), group, opening, ...prev.slice(index + 1)]
+    })
+  }
+
+  const removePart = (index: number) => {
+    setSections((prev) => {
+      const group = prev[index]
+      if (!group || group.type !== "part") return prev
+      const earlierPart = [...prev.slice(0, index)].reverse().find((item) => item.type === "part")
+      return prev.filter((_, position) => position !== index).map((item) => {
+        if (item.parent_id !== group.id) return item
+        return {
+          ...item,
+          type: item.type === "part_opening" ? "chapter" as const : item.type,
+          title: item.type === "part_opening" ? group.title : item.title,
+          parent_id: earlierPart?.id ?? null,
+        }
+      })
+    })
   }
 
   const toggleInclude = (index: number) => {
@@ -105,19 +130,10 @@ export const ImportStructureEditor = memo(function ImportStructureEditor({
               Edit section structure
             </p>
             <p className={`text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-              {sections.length} sections &middot; {analysisCount} marked for analysis
+              {sections.length} sections &middot; {analysisCount} marked for analysis. Boundary moves retain every source block.
             </p>
           </div>
           <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => quickMark("chapter")}
-              className={`rounded px-2 py-1 text-xs font-medium transition ${
-                isDark ? "bg-indigo-500/20 text-indigo-300 hover:bg-indigo-500/30" : "bg-indigo-100 text-indigo-700 hover:bg-indigo-200"
-              }`}
-            >
-              All chapters
-            </button>
             <button
               type="button"
               onClick={onCancel}
@@ -134,7 +150,7 @@ export const ImportStructureEditor = memo(function ImportStructureEditor({
           <div
             key={section.id}
             className={`px-4 py-3 transition ${
-              mergeIndex === index ? (isDark ? "bg-indigo-500/10" : "bg-indigo-100") : ""
+              section.warnings?.length ? (isDark ? "bg-amber-500/10" : "bg-amber-50") : ""
             }`}
           >
             <div className="flex items-start gap-3">
@@ -172,7 +188,7 @@ export const ImportStructureEditor = memo(function ImportStructureEditor({
                         : "border-slate-200 bg-white text-slate-700 focus:ring-indigo-500"
                     }`}
                   >
-                    {SECTION_TYPES.map((t) => (
+                    {(section.type === "part" ? [{ value: "part" as SectionType, label: "Part heading", include: false }] : section.type === "toc" ? [{ value: "toc" as SectionType, label: "Table of Contents", include: false }, ...SECTION_TYPES] : SECTION_TYPES).map((t) => (
                       <option key={t.value} value={t.value}>
                         {t.label}
                       </option>
@@ -183,39 +199,37 @@ export const ImportStructureEditor = memo(function ImportStructureEditor({
                     <input
                       type="checkbox"
                       checked={section.include_in_analysis}
+                      disabled={section.type === "part" || section.type === "toc"}
                       onChange={() => toggleInclude(index)}
                       className="h-3.5 w-3.5 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
                     />
                     Analyze
                   </label>
 
-                  {index > 0 ? (
-                    <button
-                      type="button"
-                      onClick={() => handleMerge(index)}
-                      className={`rounded px-2 py-1 text-xs font-medium transition ${
-                        mergeIndex === index
-                          ? (isDark ? "bg-indigo-500/30 text-indigo-200" : "bg-indigo-200 text-indigo-800")
-                          : mergeIndex !== null
-                            ? (isDark ? "bg-amber-500/15 text-amber-300 hover:bg-amber-500/25" : "bg-amber-100 text-amber-700 hover:bg-amber-200")
-                            : (isDark ? "text-slate-500 hover:text-slate-300" : "text-slate-400 hover:text-slate-600")
-                      }`}
-                    >
-                      {mergeIndex === index ? "Cancel merge" : mergeIndex !== null ? `Merge with #${mergeIndex + 1}` : "Merge"}
-                    </button>
+                  {section.type !== "part" && section.type !== "toc" ? (
+                    <label className={`text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                      Part <select aria-label={`Section ${index + 1} Part`} value={section.parent_id ?? ""} onChange={(e) => updateSection(index, { parent_id: e.target.value || null })} className={`ml-1 rounded border px-1 py-0.5 ${isDark ? "border-white/10 bg-slate-900" : "border-slate-200 bg-white"}`}>
+                        <option value="">None</option>
+                        {sections.slice(0, index).filter((item) => item.type === "part").map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}
+                      </select>
+                    </label>
                   ) : null}
-
-                  <button
-                    type="button"
-                    onClick={() => deleteSection(index)}
-                    disabled={sections.length <= 1}
-                    className={`ml-auto rounded px-2 py-1 text-xs font-medium transition disabled:opacity-30 ${
-                      isDark ? "text-red-400 hover:text-red-300 hover:bg-red-500/10" : "text-red-500 hover:text-red-700 hover:bg-red-50"
-                    }`}
-                  >
-                    Delete
-                  </button>
+                  {section.type === "part" ? (
+                    <button type="button" onClick={() => removePart(index)} className="text-xs font-semibold text-amber-500 underline">Remove Part grouping</button>
+                  ) : section.type !== "toc" ? (
+                    <button type="button" onClick={() => makePart(index)} className="text-xs font-semibold text-teal-500 underline">Make this a Part opening</button>
+                  ) : null}
                 </div>
+                <p className={`text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}>{section.source_location ?? "Source location unavailable"} · {section.word_count ?? 0} words · blocks {section.start_block ?? 0}–{section.end_block ?? 0}</p>
+                {section.opening_excerpt ? <p className="text-xs opacity-70">Starts: {section.opening_excerpt}</p> : null}
+                {section.closing_excerpt ? <p className="text-xs opacity-70">Ends: {section.closing_excerpt}</p> : null}
+                {section.warnings?.map((warning) => <p key={warning} className="text-xs text-amber-500">{warning}</p>)}
+                {index < sections.length - 1 && section.type !== "part" && section.type !== "toc" && sections[index + 1].type !== "part" && sections[index + 1].type !== "toc" ? (
+                  <div className="flex gap-2 text-xs">
+                    <button type="button" onClick={() => shiftBoundary(index, -1)} className="underline">Move next block into next section</button>
+                    <button type="button" onClick={() => shiftBoundary(index, 1)} className="underline">Move next block into this section</button>
+                  </div>
+                ) : null}
               </div>
             </div>
           </div>

@@ -16,7 +16,7 @@ from app.models.operations import (
     SupportIncident,
     TaskExecution,
 )
-from app.models.user import LlmUsageEvent, User
+from app.models.user import LlmUsageEvent, ProcessingUsageEvent, User
 from app.services.task_execution_service import (
     EXTRACTION_TASK_NAMES,
     dispatch_pending_analysis_tasks,
@@ -61,6 +61,10 @@ async def retry_terminal_execution(db: AsyncSession, execution_id: uuid.UUID) ->
         raise LookupError("Task execution not found")
     if row.status != "failed_terminal":
         raise ValueError("Only terminal failures can be retried")
+    if row.rebuild_run_id:
+        raise ValueError(
+            "Failed rebuild tasks cannot be retried individually. Start a new manuscript reprocess."
+        )
     supported_tasks = {
         *EXTRACTION_TASK_NAMES,
         "analysis_tasks.analyse_chapter",
@@ -72,6 +76,35 @@ async def retry_terminal_execution(db: AsyncSession, execution_id: uuid.UUID) ->
         row.arguments_json or {}
     ).get("character_id"):
         raise ValueError("Embedding task is missing character identity")
+    reservation_id = (row.arguments_json or {}).get("processing_reservation_id")
+    if reservation_id:
+        reservation = await db.get(
+            ProcessingUsageEvent,
+            uuid.UUID(str(reservation_id)),
+            with_for_update=True,
+        )
+        if reservation is None:
+            raise ValueError("The processing reservation for this task no longer exists")
+        if reservation.status == "consumed":
+            raise ValueError("A consumed processing task cannot be retried")
+        if reservation.status == "released":
+            from app.services.processing_allowance_service import (
+                reserve_processing_words,
+            )
+
+            user = await db.get(User, reservation.user_id)
+            if user is None:
+                raise ValueError("The processing reservation owner no longer exists")
+            reservation, _summary = await reserve_processing_words(
+                db,
+                user,
+                book_id=reservation.book_id,
+                usage_kind=reservation.usage_kind,
+                source_id=reservation.source_id,
+                word_count=reservation.word_count,
+                task_id=str(row.id),
+            )
+        reservation.task_id = str(row.id)
     row.status = "pending_dispatch"
     row.completed_at = None
     row.error_category = None
@@ -106,9 +139,53 @@ async def dismiss_terminal_execution(
     row.dismissed_at = datetime.now(UTC)
     row.dismissed_by_user_id = admin_user_id
     row.dismissal_reason = reason
+    reservation_id = (row.arguments_json or {}).get("processing_reservation_id")
+    if reservation_id:
+        from app.services.processing_allowance_service import (
+            release_processing_reservation,
+        )
+
+        await release_processing_reservation(db, uuid.UUID(str(reservation_id)))
+    if row.rebuild_run_id and row.user_id and row.book_id:
+        from app.services.processing_allowance_service import (
+            AUTO_FIRST_REPROCESS_USAGE_KIND,
+            MANUAL_REPROCESS_USAGE_KIND,
+            auto_first_reprocess_source_prefix,
+            manual_reprocess_source_prefix,
+            release_processing_reservations_for_source_prefix,
+        )
+
+        for usage_kind, source_prefix in (
+            (
+                MANUAL_REPROCESS_USAGE_KIND,
+                manual_reprocess_source_prefix(row.rebuild_run_id),
+            ),
+            (
+                AUTO_FIRST_REPROCESS_USAGE_KIND,
+                auto_first_reprocess_source_prefix(row.rebuild_run_id),
+            ),
+        ):
+            await release_processing_reservations_for_source_prefix(
+                db,
+                user_id=row.user_id,
+                book_id=row.book_id,
+                usage_kind=usage_kind,
+                source_prefix=source_prefix,
+            )
     if row.processing_run_id:
         run = await db.get(BookProcessingRun, row.processing_run_id, with_for_update=True)
         if run is not None:
+            if row.rebuild_run_id and row.book_id:
+                from app.services.processing_pause_service import (
+                    write_book_terminal_processing_state,
+                )
+
+                await write_book_terminal_processing_state(
+                    db,
+                    run,
+                    error=f"Processing was dismissed by an administrator: {reason}",
+                    rebuild_run_id=row.rebuild_run_id,
+                )
             run.status = "dismissed"
             run.completed_at = row.dismissed_at
     await db.commit()
@@ -132,7 +209,10 @@ async def operations_metrics(db: AsyncSession) -> dict[str, Any]:
     avg_duration = await db.scalar(
         select(
             func.avg(func.extract("epoch", TaskExecution.completed_at - TaskExecution.started_at))
-        ).where(TaskExecution.completed_at.is_not(None), TaskExecution.started_at.is_not(None))
+        ).where(
+            TaskExecution.completed_at.is_not(None),
+            TaskExecution.started_at.is_not(None),
+        )
     )
     paused_runs = int(
         await db.scalar(
@@ -205,13 +285,22 @@ async def quality_metrics(db: AsyncSession) -> dict[str, Any]:
     rows = (
         await db.execute(
             select(
-                AiQualityEvent.entity_type, AiQualityEvent.outcome, func.count(AiQualityEvent.id)
+                AiQualityEvent.entity_type,
+                AiQualityEvent.outcome,
+                func.count(AiQualityEvent.id),
             )
             .group_by(AiQualityEvent.entity_type, AiQualityEvent.outcome)
             .order_by(AiQualityEvent.entity_type, AiQualityEvent.outcome)
         )
     ).all()
-    review_outcomes = {"accepted", "promoted", "merged", "rejected", "suppressed", "resolved"}
+    review_outcomes = {
+        "accepted",
+        "promoted",
+        "merged",
+        "rejected",
+        "suppressed",
+        "resolved",
+    }
     reviewed = sum(int(count) for _, outcome, count in rows if outcome in review_outcomes)
     accepted = sum(
         int(count) for _, outcome, count in rows if outcome in {"accepted", "promoted", "merged"}
@@ -266,11 +355,10 @@ async def quality_metrics(db: AsyncSession) -> dict[str, Any]:
         "relationship_corrections": relationship_corrections,
         "reprocessing_runs": reprocessing_runs,
         "support_incidents": support_incidents,
-        "support_incidents_per_processed_manuscript": round(
-            support_incidents / processed_manuscripts, 4
-        )
-        if processed_manuscripts
-        else None,
+        "processed_manuscripts": processed_manuscripts,
+        "support_incidents_per_processed_manuscript": (
+            round(support_incidents / processed_manuscripts, 4) if processed_manuscripts else None
+        ),
         "breakdown": [
             {"entity_type": entity_type, "outcome": outcome, "count": int(count)}
             for entity_type, outcome, count in rows
@@ -316,7 +404,9 @@ async def contribution_margin(db: AsyncSession) -> dict[str, Any]:
                 LlmUsageEvent.user_id,
                 LlmUsageEvent.book_id,
                 func.coalesce(func.sum(LlmUsageEvent.total_cost_usd), 0),
-            ).group_by(
+            )
+            .where(LlmUsageEvent.status == "succeeded")
+            .group_by(
                 LlmUsageEvent.feature,
                 LlmUsageEvent.user_id,
                 LlmUsageEvent.book_id,
@@ -330,6 +420,14 @@ async def contribution_margin(db: AsyncSession) -> dict[str, Any]:
         add_cost(feature_costs, str(feature or "unattributed"), value)
         add_cost(user_costs, user_id, value)
         add_cost(book_costs, book_id, value)
+    llm_cost_at_risk = float(
+        await db.scalar(
+            select(func.coalesce(func.sum(LlmUsageEvent.total_cost_usd), 0)).where(
+                LlmUsageEvent.status != "succeeded"
+            )
+        )
+        or 0
+    )
 
     task_rows = (
         await db.execute(
@@ -339,7 +437,10 @@ async def contribution_margin(db: AsyncSession) -> dict[str, Any]:
                 TaskExecution.book_id,
                 func.coalesce(
                     func.sum(
-                        func.extract("epoch", TaskExecution.completed_at - TaskExecution.started_at)
+                        func.extract(
+                            "epoch",
+                            TaskExecution.completed_at - TaskExecution.started_at,
+                        )
                     ),
                     0,
                 ),
@@ -413,6 +514,7 @@ async def contribution_margin(db: AsyncSession) -> dict[str, Any]:
         "currency": "USD",
         "recognized_net_revenue": round(revenue, 6),
         "llm_cost": round(llm_cost, 6),
+        "llm_cost_at_risk": round(llm_cost_at_risk, 6),
         "worker_cost": round(worker_cost, 6),
         "storage_cost": round(storage_cost, 6),
         "contribution_margin": round(revenue - total_cost, 6),
@@ -422,7 +524,9 @@ async def contribution_margin(db: AsyncSession) -> dict[str, Any]:
             {
                 "feature": feature,
                 "direct_cost": round(cost, 6),
-                "allocated_revenue": round(revenue * cost / feature_base, 6) if feature_base else 0,
+                "allocated_revenue": (
+                    round(revenue * cost / feature_base, 6) if feature_base else 0
+                ),
             }
             for feature, cost in sorted(feature_costs.items(), key=lambda item: -item[1])
         ],
@@ -441,16 +545,18 @@ async def contribution_margin(db: AsyncSession) -> dict[str, Any]:
         "by_book": [
             {
                 "book_id": str(book_id),
-                "user_id": str(book_users.get(book_id)) if book_users.get(book_id) else None,
+                "user_id": (str(book_users.get(book_id)) if book_users.get(book_id) else None),
                 "direct_cost": round(cost, 6),
-                "allocated_revenue": round(
-                    revenue_by_user.get(book_users.get(book_id), 0)
-                    * cost
-                    / user_book_totals.get(book_users.get(book_id), 1),
-                    6,
-                )
-                if user_book_totals.get(book_users.get(book_id), 0)
-                else 0,
+                "allocated_revenue": (
+                    round(
+                        revenue_by_user.get(book_users.get(book_id), 0)
+                        * cost
+                        / user_book_totals.get(book_users.get(book_id), 1),
+                        6,
+                    )
+                    if user_book_totals.get(book_users.get(book_id), 0)
+                    else 0
+                ),
             }
             for book_id, cost in sorted(book_costs.items(), key=lambda item: -item[1])
         ],

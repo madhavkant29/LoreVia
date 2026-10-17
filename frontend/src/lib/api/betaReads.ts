@@ -6,6 +6,8 @@ import type {
   BetaReadAssignment,
   BetaReadAssignmentDetail,
   BetaReadAssignmentListResponse,
+  BetaReadConsensus,
+  BetaReadGuestReview,
   BetaReadQuestion,
 } from "@/types/betaRead"
 
@@ -57,6 +59,10 @@ export const betaReadsApi = {
     apiClient.get<BetaReadAssignmentListResponse>(bookBetaReadsPath(bookId)).then((response) => response.data.items),
   getBookAssignmentDetail: (bookId: string, assignmentId: string) =>
     apiClient.get<BetaReadAssignmentDetail>(bookBetaReadsPath(bookId, `/${assignmentId}`)).then((response) => response.data),
+  getConsensus: (bookId: string) =>
+    apiClient.get<BetaReadConsensus>(`/books/${normalizeBookRouteId(bookId)}/beta-consensus`).then((response) => response.data),
+  getGuestLink: (bookId: string, assignmentId: string) =>
+    apiClient.get<{ share_url: string; expires_at: string }>(bookBetaReadsPath(bookId, `/${assignmentId}/guest-link`)).then((response) => response.data),
   appendQuestions: (bookId: string, assignmentId: string, questions: string[]) =>
     apiClient.post<BetaReadQuestion[]>(bookBetaReadsPath(bookId, `/${assignmentId}/questions`), {
       questions,
@@ -133,4 +139,25 @@ export const betaReadsApi = {
       invalidateBetaReadCache()
       return response.data
     }),
+  getGuestReview: (token: string) =>
+    apiClient.get<BetaReadGuestReview>(`/beta-review/${encodeURIComponent(token)}`).then((response) => response.data),
+  markGuestChapterRead: (token: string, chapterNumber: number) =>
+    apiClient.post<void>(`/beta-review/${encodeURIComponent(token)}/progress`, {
+      chapter_number: chapterNumber,
+    }),
+  createGuestFeedbackItem: (
+    token: string,
+    payload: { kind: string; chapterNumber?: number | null; questionId?: string | null; anchorText?: string | null; body?: string | null },
+  ) => apiClient.post<BetaReadAssignmentDetail>(`/beta-review/${encodeURIComponent(token)}/feedback-items`, {
+    kind: payload.kind,
+    chapter_number: payload.chapterNumber ?? null,
+    question_id: payload.questionId ?? null,
+    anchor_text: payload.anchorText ?? null,
+    body: payload.body ?? null,
+  }).then((response) => response.data),
+  submitGuestReview: (token: string, finalFeedback: string, finalRating: number) =>
+    apiClient.post<BetaReadAssignment>(`/beta-review/${encodeURIComponent(token)}/submit-feedback`, {
+      final_feedback: finalFeedback,
+      final_rating: finalRating,
+    }).then((response) => response.data),
 }

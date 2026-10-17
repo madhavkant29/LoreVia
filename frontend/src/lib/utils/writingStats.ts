@@ -99,7 +99,20 @@ export function formatWordCount(words: number) {
   return `${words.toLocaleString()} words`
 }
 
+function formatCapacityReset(value?: string | null) {
+  if (!value) return "the monthly reset"
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return "the monthly reset"
+  return date.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    timeZone: "UTC",
+  })
+}
+
 export function buildSecondaryStats(stats: UserStats) {
+  const capacityReset = formatCapacityReset(stats.private.ai_capacity_resets_at)
   return [
     {
       label: "Books finished",
@@ -122,9 +135,11 @@ export function buildSecondaryStats(stats: UserStats) {
       note: "Tracked AI calls tied to your account",
     },
     {
-      label: "LLM tokens",
-      value: (stats.private.llm_total_tokens ?? 0).toLocaleString(),
-      note: "Prompt plus completion tokens recorded so far",
+      label: "AI capacity",
+      value: `${stats.private.ai_capacity_usage_percent ?? 0}% used`,
+      note: stats.private.ai_interactive_available === false
+        ? `Interactive AI resumes as manuscript processing frees capacity or at ${capacityReset}`
+        : `Shared monthly capacity for AI feedback; resets ${capacityReset}`,
     },
     {
       label: "Saved quotes",

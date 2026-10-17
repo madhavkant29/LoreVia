@@ -2,6 +2,7 @@ import type { Metadata } from "next"
 import Link from "next/link"
 import { notFound } from "next/navigation"
 
+import { MarketingFooterLayout } from "@/components/layout/MarketingFooterLayout"
 import { ContentArrowIcon } from "@/components/marketing/PublicContentHeader"
 import { PublicContentShell } from "@/components/marketing/PublicContentShell"
 import { JsonLdScript } from "@/components/seo/JsonLdScript"
@@ -71,6 +72,7 @@ export default async function DemoPage({ params }: { params: Promise<{ slug: str
 
   const article = getBlogArticleBySlug(demo.articleSlug)
   const relatedAnswers = getAnswerPagesBySlugs(demo.answerSlugs)
+  const displayTitle = demo.title.replace(/^Demo:\s*/, "")
 
   const jsonLd = buildArticleJsonLd({
     title: demo.title,
@@ -86,156 +88,98 @@ export default async function DemoPage({ params }: { params: Promise<{ slug: str
   ])
 
   return (
-    <PublicContentShell activeSection="demo">
-      <JsonLdScript id={`demo-jsonld-${demo.slug}`} data={jsonLd} />
-      <JsonLdScript id={`demo-breadcrumbs-jsonld-${demo.slug}`} data={breadcrumbJsonLd} />
+    <MarketingFooterLayout>
+      <PublicContentShell activeSection="demo">
+        <JsonLdScript id={`demo-jsonld-${demo.slug}`} data={jsonLd} />
+        <JsonLdScript id={`demo-breadcrumbs-jsonld-${demo.slug}`} data={breadcrumbJsonLd} />
 
       <section className="app-container py-10 md:py-14">
-        <div className="app-panel app-panel--strong rounded-lg p-6 md:p-8 lg:p-10">
-          <div className="flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
-            <Link href="/demo" className="hover:text-foreground">
-              Demo
-            </Link>
-            <span>/</span>
-            <span>{demo.sourceWork}</span>
-          </div>
-
-          <div className="mt-8 grid gap-8 lg:grid-cols-[1.15fr_0.85fr] lg:items-start">
-            <div className="max-w-4xl">
-              <span className="app-chip">
-                {demo.sourceWork} by {demo.sourceAuthor}
-              </span>
-              <h1 className="mt-7 max-w-5xl font-display text-[3rem] leading-[0.94] tracking-[-0.04em] text-foreground sm:text-[3.5rem]">{demo.title}</h1>
-              <p className="mt-6 max-w-3xl text-base leading-8 text-muted-foreground sm:text-[1.1rem]">{demo.intro}</p>
-            </div>
-
-            <div className="grid gap-4 sm:grid-cols-3 lg:grid-cols-1">
-              <div className="app-stat app-stat--accent">
-                <p className="app-stat__label">Read time</p>
-                <p className="mt-3 text-lg font-semibold text-foreground">{demo.readTime}</p>
-                <p className="app-stat__note">A concrete public-domain example rather than abstract product copy.</p>
-              </div>
-              <div className="app-stat app-stat--success">
-                <p className="app-stat__label">Source text</p>
-                <p className="mt-3 text-lg font-semibold text-foreground">{demo.sourceWork}</p>
-                <p className="app-stat__note">Chosen because the workflow is visible on the page.</p>
-              </div>
-              <div className="app-stat">
-                <p className="app-stat__label">Related answers</p>
-                <p className="app-stat__value">{relatedAnswers.length}</p>
-                <p className="app-stat__note">Connected search-intent pages tied to the same workflow.</p>
-              </div>
-            </div>
-          </div>
+        <div className="flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
+          <Link href="/demo" className="transition hover:text-foreground">Demo library</Link>
+          <span aria-hidden="true">/</span>
+          <span>{demo.sourceWork}</span>
         </div>
 
-        <div className="mt-8 grid gap-8 lg:grid-cols-[1.2fr_0.8fr]">
-          <article className="space-y-6">
-            <section className="app-panel rounded-lg p-6 md:p-8">
-              <p className="text-xs font-semibold uppercase tracking-[0.22em] text-muted-foreground">Featured insight</p>
-              <p className="mt-4 text-base leading-8 text-muted-foreground md:text-lg">{demo.featuredInsight}</p>
-            </section>
+        <header className="mt-8 max-w-4xl border-b border-[rgba(var(--border),0.72)] pb-10 md:pb-14">
+          <p className="text-sm font-semibold text-[rgb(var(--accent))]">
+            {demo.sourceWork} · {demo.sourceAuthor} · {demo.readTime}
+          </p>
+          <h1 className="mt-4 max-w-4xl font-display text-[3rem] leading-[0.96] tracking-[-0.04em] text-foreground sm:text-[3.75rem]">
+            {displayTitle}
+          </h1>
+          <p className="mt-6 max-w-3xl text-base leading-8 text-muted-foreground sm:text-[1.1rem]">{demo.intro}</p>
+        </header>
 
-            {demo.sections.map((section) => (
-              <section key={section.heading} className="app-panel rounded-lg p-6 md:p-8">
-                <h2 className="text-[2rem] font-semibold tracking-[-0.03em] text-foreground md:text-[2.2rem]">
-                  {section.heading}
-                </h2>
-                <div className="mt-5 space-y-4">
-                  {section.body.map((paragraph) => (
-                    <p key={paragraph} className="text-base leading-8 text-muted-foreground md:text-lg">
-                      {paragraph}
-                    </p>
-                  ))}
-                </div>
-                {section.bullets?.length ? (
-                  <ul className="mt-6 space-y-3 text-sm leading-7 text-foreground/85 md:text-base">
-                    {section.bullets.map((bullet) => (
-                      <li key={bullet} className="flex gap-3">
-                        <span className="mt-2 h-1.5 w-1.5 rounded-full bg-[rgb(var(--accent))]" />
-                        <span>{bullet}</span>
-                      </li>
-                    ))}
-                  </ul>
-                ) : null}
-              </section>
-            ))}
-          </article>
+        <article data-testid="demo-case-study" className="max-w-4xl">
+          <blockquote className="my-10 border-l-2 border-[rgb(var(--accent))] pl-5 text-xl font-medium leading-9 text-foreground md:my-12 md:text-2xl">
+            {demo.featuredInsight}
+          </blockquote>
 
-          <aside className="space-y-6 lg:sticky lg:top-28">
-            <div className="app-panel app-panel--strong rounded-lg p-6 md:p-8">
-              <p className="text-xs font-semibold uppercase tracking-[0.22em] text-muted-foreground">Why this page exists</p>
-              <p className="mt-4 text-sm leading-7 text-muted-foreground">{demo.description}</p>
-            </div>
-
-            {article ? (
-              <div className="app-panel rounded-lg p-6 md:p-8">
-                <p className="text-xs font-semibold uppercase tracking-[0.22em] text-muted-foreground">Related guide</p>
-                <h2 className="mt-4 text-2xl font-semibold tracking-[-0.03em] text-foreground">{article.title}</h2>
-                <p className="mt-3 text-sm leading-7 text-muted-foreground">{article.description}</p>
-                <Link href={`/blog/${article.slug}`} className="mt-5 inline-flex items-center gap-2 font-semibold text-[rgb(var(--accent))]">
-                  Open guide
-                  <ContentArrowIcon />
-                </Link>
+          {demo.sections.map((section) => (
+            <section key={section.heading} className="border-t border-[rgba(var(--border),0.64)] py-9 md:py-11">
+              <h2 className="text-[2rem] font-semibold tracking-[-0.03em] text-foreground md:text-[2.2rem]">
+                {section.heading}
+              </h2>
+              <div className="mt-5 space-y-4">
+                {section.body.map((paragraph) => (
+                  <p key={paragraph} className="text-base leading-8 text-muted-foreground md:text-lg">
+                    {paragraph}
+                  </p>
+                ))}
               </div>
-            ) : null}
+              {section.bullets?.length ? (
+                <ul className="mt-7 divide-y divide-[rgba(var(--border),0.56)] border-y border-[rgba(var(--border),0.56)] text-sm leading-7 text-foreground/85 md:text-base">
+                  {section.bullets.map((bullet) => (
+                    <li key={bullet} className="py-3">{bullet}</li>
+                  ))}
+                </ul>
+              ) : null}
+            </section>
+          ))}
+        </article>
 
-            <div className="app-panel rounded-lg p-6 md:p-8">
-              <p className="text-xs font-semibold uppercase tracking-[0.22em] text-muted-foreground">Why demos work</p>
-              <p className="mt-4 text-sm leading-7 text-muted-foreground">
-                Public-domain examples make the product promise testable. Instead of talking abstractly about continuity or character memory, the page shows how those workflows would read against a recognizable manuscript.
+        <section className="grid max-w-5xl border-y border-[rgba(var(--border),0.72)] lg:grid-cols-[0.95fr_1.05fr]">
+          {article ? (
+            <div className="py-8 lg:pr-10">
+              <p className="text-sm font-semibold text-[rgb(var(--accent))]">Continue with the craft guide</p>
+              <h2 className="mt-3 text-2xl font-semibold tracking-[-0.03em] text-foreground">{article.title}</h2>
+              <p className="mt-3 text-sm leading-7 text-muted-foreground">{article.description}</p>
+              <Link href={`/blog/${article.slug}`} className="mt-5 inline-flex items-center gap-2 font-semibold text-[rgb(var(--accent))]">
+                Read the guide <ContentArrowIcon />
+              </Link>
+            </div>
+          ) : null}
+          <div className="border-t border-[rgba(var(--border),0.72)] py-8 lg:border-l lg:border-t-0 lg:pl-10">
+            <p className="text-sm font-semibold text-[rgb(var(--accent))]">Related questions</p>
+            <div className="mt-4 divide-y divide-[rgba(var(--border),0.56)]">
+              {relatedAnswers.map((answer) => (
+                <Link key={answer.slug} href={`/answers/${answer.slug}`} className="block py-4 first:pt-0 last:pb-0">
+                  <span className="font-semibold text-foreground transition hover:text-[rgb(var(--accent))]">{answer.question}</span>
+                  <span className="mt-1 block text-sm leading-6 text-muted-foreground">{answer.shortAnswer}</span>
+                </Link>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        <section className="max-w-5xl py-14 md:py-16">
+          <div className="grid gap-6 border-b border-[rgba(var(--border),0.72)] pb-10 md:grid-cols-[1fr_auto] md:items-end">
+            <div className="max-w-3xl">
+              <h2 className="text-3xl font-semibold tracking-[-0.03em] text-foreground md:text-4xl">
+                Apply the same review to your manuscript.
+              </h2>
+              <p className="mt-4 text-base leading-8 text-muted-foreground md:text-lg">
+                Import a draft, inspect the cited evidence, and decide which findings belong in your revision plan.
               </p>
             </div>
-          </aside>
-        </div>
+            <div className="flex flex-col gap-3 sm:flex-row">
+              <Link href="/demo/workspace" className="app-button-secondary">Review a sample finding</Link>
+              <Link href="/register" className="app-button-primary">Start free</Link>
+            </div>
+          </div>
+        </section>
       </section>
-
-      <section className="app-container pb-8">
-        <div className="app-panel app-panel--subtle rounded-lg p-6 md:p-8 lg:p-10">
-          <div className="max-w-2xl">
-            <p className="app-eyebrow">Related questions</p>
-            <h2 className="mt-4 text-3xl font-semibold tracking-[-0.03em] text-foreground md:text-4xl">
-              Supporting search questions tied to the same workflow.
-            </h2>
-          </div>
-
-          <div className="mt-8 grid gap-5 lg:grid-cols-2">
-            {relatedAnswers.map((answer) => (
-              <article key={answer.slug} className="h-full rounded-lg border border-[rgba(var(--border),0.76)] bg-white/70 p-6 dark:bg-white/[0.04]">
-                <h3 className="text-xl font-semibold tracking-[-0.03em] text-foreground">
-                  <Link href={`/answers/${answer.slug}`} className="hover:text-[rgb(var(--accent))]">
-                    {answer.question}
-                  </Link>
-                </h3>
-                <p className="mt-3 text-sm leading-7 text-muted-foreground">{answer.shortAnswer}</p>
-              </article>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      <section className="app-container pb-20 pt-8 md:pb-24">
-        <div className="app-panel app-panel--strong rounded-lg p-7 md:p-10">
-          <div className="max-w-3xl">
-            <p className="app-eyebrow">Try LoreVia</p>
-            <h2 className="mt-4 text-3xl font-semibold tracking-[-0.03em] text-foreground md:text-4xl">
-              Apply the same workflow to your own manuscript.
-            </h2>
-            <p className="mt-4 text-base leading-8 text-muted-foreground md:text-lg">
-              LoreVia helps authors turn drafts into searchable working systems for continuity, character memory, revision planning, and beta-reader preparation.
-            </p>
-          </div>
-          <div className="mt-7 flex flex-col gap-3 sm:flex-row">
-            <Link href="/register" className="app-button-primary gap-2">
-              Start free
-              <ContentArrowIcon />
-            </Link>
-            <Link href="/blog" className="app-button-secondary">
-              Read the main guides
-            </Link>
-          </div>
-        </div>
-      </section>
-    </PublicContentShell>
+      </PublicContentShell>
+    </MarketingFooterLayout>
   )
 }

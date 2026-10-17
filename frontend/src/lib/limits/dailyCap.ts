@@ -5,11 +5,18 @@ export type DailyCapAction = "search" | "prediction" | "high_cost_authoring"
 export const DAILY_LIMIT_MESSAGE = "Your daily limit refreshes tomorrow. Want higher limits now? Upgrade."
 export const DAILY_CAP_EVENT = "lorevia:daily-cap-hit"
 
+const SPECIFIC_DAILY_LIMIT_PATTERN =
+  /^You've reached your daily limit of \d+ (Story Advisor turns|continuity and editorial scans)\b/
+
 export interface DailyCapEventDetail {
   action: DailyCapAction | null
   status: number
   requestPath: string
   detail: string
+}
+
+export function isDailyLimitDetail(detail: string): boolean {
+  return detail === DAILY_LIMIT_MESSAGE || SPECIFIC_DAILY_LIMIT_PATTERN.test(detail)
 }
 
 export function inferDailyCapActionFromRequestPath(requestPath: string): DailyCapAction | null {
@@ -42,7 +49,7 @@ export function buildDailyCapEventDetail(error: unknown): DailyCapEventDetail | 
   const requestUrl = String(error.config?.url ?? "")
   const requestPath = requestUrl.split("?")[0]
 
-  if ((status !== 403 && status !== 429) || detail !== DAILY_LIMIT_MESSAGE) {
+  if ((status !== 403 && status !== 429) || !isDailyLimitDetail(detail)) {
     return null
   }
 

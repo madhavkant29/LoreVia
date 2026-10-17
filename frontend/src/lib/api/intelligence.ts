@@ -1,6 +1,8 @@
 import { apiClient } from "./client"
 import { API_BASE } from "@/lib/constants"
 import { normalizeBookRouteId } from "@/lib/utils/bookRoutes"
+import { bookCacheKey } from "@/lib/query/cacheKeys"
+import { invalidateQueryKeys } from "@/lib/query/queryClient"
 import type {
   CrossBookIntelligence,
   GroundedAnswer,
@@ -20,9 +22,15 @@ import type {
   ProseTightenResponse,
   WhatsTheWordResponse,
   VoiceConsistencyResponse,
+  BetaReaderAnalysisRequest,
+  BetaReaderJobResponse,
+  BetaReaderReportsResponse,
+  BetaReaderRevisionTaskResponse,
+  BetaReaderRunResponse,
+  FirstImpressionResponse,
 } from "@/types/intelligence"
 
-const MAX_ADVISOR_PASSAGE_CHARS = 12_000
+export const MAX_ADVISOR_PASSAGE_CHARS = 12_000
 
 type AdvisorStreamHandlers = {
   onDelta?: (content: string) => void
@@ -197,10 +205,9 @@ export const intelligenceApi = {
   advisorGreeting: (bookId: string) =>
     apiClient.get<AdvisorGreeting>(intelligencePath(bookId, "/advisor/greeting")).then(r => r.data),
 
-  advisorMessage: (bookId: string, messages: AdvisorMessage[], totalChapters: number) =>
+  advisorMessage: (bookId: string, messages: AdvisorMessage[]) =>
     apiClient.post<AdvisorResponse | AdvisorAsyncAccepted>(intelligencePath(bookId, "/advisor/message-async"), {
       messages,
-      total_chapters: totalChapters,
     }).then(async r => {
       const payload = r.data
       if ("reply" in payload) {
@@ -209,11 +216,10 @@ export const intelligenceApi = {
       return pollAdvisorMessage(bookId, payload.task_id)
     }),
 
-  advisorMessageStream: (bookId: string, messages: AdvisorMessage[], totalChapters: number, handlers?: AdvisorStreamHandlers) =>
+  advisorMessageStream: (bookId: string, messages: AdvisorMessage[], handlers?: AdvisorStreamHandlers) =>
     requestSse<AdvisorResponse>(intelligencePath(bookId, "/advisor/message-stream"), {
       payload: {
         messages,
-        total_chapters: totalChapters,
       },
     }, handlers),
 
@@ -223,9 +229,15 @@ export const intelligenceApi = {
   advisorSuggestionsScan: (bookId: string) =>
     apiClient.post<AdvisorSuggestionScanResponse>(intelligencePath(bookId, "/advisor/suggestions/scan")).then(r => r.data),
 
-  advisorSuggestionsJobStatus: (bookId: string, jobId: string) =>
-    apiClient.get<AdvisorSuggestionJobStatusResponse>(
-      intelligencePath(bookId, `/advisor/suggestions/jobs/${jobId}`),
+  advisorSuggestionsJobStatus: (bookId: string, jobId: string, signal?: AbortSignal) =>
+    (signal
+      ? apiClient.get<AdvisorSuggestionJobStatusResponse>(
+          intelligencePath(bookId, `/advisor/suggestions/jobs/${jobId}`),
+          { signal },
+        )
+      : apiClient.get<AdvisorSuggestionJobStatusResponse>(
+          intelligencePath(bookId, `/advisor/suggestions/jobs/${jobId}`),
+        )
     ).then(r => r.data),
 
   editorialReview: (bookId: string, text: string, chapterNum?: number) =>
@@ -290,6 +302,44 @@ export const intelligenceApi = {
         ...(options?.characterId ? { character_id: options.characterId } : {}),
       },
     }, handlers),
+  runBetaReader: (bookId: string, payload: BetaReaderAnalysisRequest) =>
+    apiClient.post<BetaReaderRunResponse>(
+      intelligencePath(bookId, "/advisor/beta-reader"),
+      payload,
+    ).then(r => r.data),
+  getBetaReaderJob: (bookId: string, taskId: string, signal?: AbortSignal) =>
+    (signal
+      ? apiClient.get<BetaReaderJobResponse>(
+          intelligencePath(bookId, `/advisor/beta-reader/jobs/${taskId}`),
+          { signal },
+        )
+      : apiClient.get<BetaReaderJobResponse>(
+          intelligencePath(bookId, `/advisor/beta-reader/jobs/${taskId}`),
+        )
+    ).then(r => r.data),
+  getBetaReaderReports: (bookId: string) =>
+    apiClient.get<BetaReaderReportsResponse>(
+      intelligencePath(bookId, "/advisor/beta-reader/reports"),
+    ).then(r => r.data),
+  getFirstImpression: (bookId: string) =>
+    apiClient.get<FirstImpressionResponse>(
+      intelligencePath(bookId, "/advisor/first-impression"),
+    ).then(r => r.data),
+  retryFirstImpression: (bookId: string) =>
+    apiClient.post<FirstImpressionResponse>(
+      intelligencePath(bookId, "/advisor/first-impression/retry"),
+    ).then(r => r.data),
+  createBetaReaderRevisionTask: (bookId: string, reportId: string, candidateId: string) =>
+    apiClient.post<BetaReaderRevisionTaskResponse>(
+      intelligencePath(
+        bookId,
+        `/advisor/beta-reader/reports/${encodeURIComponent(reportId)}/revision-candidates/${encodeURIComponent(candidateId)}`,
+      ),
+    ).then(r => {
+      void invalidateQueryKeys(bookCacheKey(bookId, "revision-intelligence"))
+      void invalidateQueryKeys(bookCacheKey(bookId, "writer-workspace"))
+      return r.data
+    }),
   continuityReport: (bookId: string, text: string, format: ContinuityReportFormat, chapterNum?: number) =>
     apiClient.get<Blob>(intelligencePath(bookId, "/advisor/continuity-report"), {
       params: { text, format, chapter_num: chapterNum ?? null },
@@ -323,6 +373,7 @@ export const intelligenceApi = {
 
   seriesContinuityCheck: (seriesId: string, bookId: string, text: string, chapterNum?: number) =>
     apiClient.post<SeriesContinuityResponse>(`/intelligence/series/${seriesId}/continuity-check`, {
+      messages: [],
       book_id: normalizeBookRouteId(bookId),
       text,
       chapter_num: chapterNum ?? null,
@@ -330,6 +381,7 @@ export const intelligenceApi = {
   seriesContinuityCheckStream: (seriesId: string, bookId: string, text: string, chapterNum?: number, handlers?: AdvisorStreamHandlers) =>
     requestSse<SeriesContinuityResponse>(`/intelligence/series/${seriesId}/continuity-check-stream`, {
       payload: {
+        messages: [],
         book_id: normalizeBookRouteId(bookId),
         text,
         chapter_num: chapterNum ?? null,

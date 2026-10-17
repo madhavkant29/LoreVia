@@ -147,6 +147,7 @@ export function useManuscriptUiEffects({
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "f") {
+        if (!searchInputRef.current) return
         event.preventDefault()
         searchInputRef.current?.focus()
         searchInputRef.current?.select()
@@ -194,7 +195,7 @@ export function useManuscriptUiEffects({
 
     const handle = window.setTimeout(() => {
       setRecallLoading(true)
-      readerApi.search(bookId, trimmed, 9999)
+      readerApi.search(bookId, trimmed)
         .then((results) => setRecallResults(results.slice(0, 6)))
         .catch(() => setRecallResults([]))
         .finally(() => setRecallLoading(false))
@@ -216,8 +217,8 @@ export function useManuscriptUiEffects({
   useEffect(() => {
     if (focusMode) return
     if (workspaceTab === "write") {
-      setShowLeftRail(true)
-      setShowRightRail(true)
+      setShowLeftRail(false)
+      setShowRightRail(false)
       setActiveRightPane((current) => current === "insights" ? "context" : current)
       return
     }

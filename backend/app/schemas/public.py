@@ -61,6 +61,14 @@ class PublicBookOut(BaseModel):
     public_updated_at: datetime | None = None
 
 
+class PublicBookPageOut(BaseModel):
+    """Cursor page for public catalog cards."""
+
+    items: list[PublicBookOut] = Field(default_factory=list)
+    next_cursor: str | None = None
+    has_more: bool = False
+
+
 class PublicBookAnalyticsOut(BaseModel):
     book_view_count: int = 0
     unique_reader_count_30d: int = 0
@@ -93,6 +101,7 @@ class PublicChapterOut(BaseModel):
     chapter_title: str | None = None
     chapter_description: str | None = None
     total_chapters: int | None = None
+    content_url: str | None = None
     text_url: str | None = None
     text_content: str | None = None
     html_content: str | None = None
@@ -234,6 +243,12 @@ class PublicForumPostListOut(BaseModel):
     surface: str | None = None
 
 
+class PublicForumPostCursorPageOut(BaseModel):
+    items: list[PublicForumPostOut]
+    next_cursor: str | None = None
+    has_more: bool = False
+
+
 class PublicForumInterestCreateBody(BaseModel):
     message: str = Field(..., min_length=3, max_length=2000)
 
@@ -254,6 +269,12 @@ class PublicForumInterestOut(BaseModel):
 
 class PublicForumInterestListOut(BaseModel):
     items: list[PublicForumInterestOut]
+
+
+class PublicForumInterestCursorPageOut(BaseModel):
+    items: list[PublicForumInterestOut]
+    next_cursor: str | None = None
+    has_more: bool = False
 
 
 class PublicForumCommentCreateBody(BaseModel):
@@ -293,6 +314,12 @@ class PublicForumCommentOut(BaseModel):
 
 class PublicForumCommentListOut(BaseModel):
     items: list[PublicForumCommentOut]
+
+
+class PublicForumCommentCursorPageOut(BaseModel):
+    items: list[PublicForumCommentOut]
+    next_cursor: str | None = None
+    has_more: bool = False
 
 
 class PublicUserProjectOut(BaseModel):

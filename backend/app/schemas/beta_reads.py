@@ -155,3 +155,80 @@ class BetaReadJobRunOut(BaseModel):
     expired_count: int = 0
     missed_count: int = 0
     completed_count: int = 0
+
+
+class BetaReadConsensusSummaryOut(BaseModel):
+    reader_count: int = 0
+    submitted_reader_count: int = 0
+    feedback_item_count: int = 0
+    open_feedback_count: int = 0
+    hotspot_count: int = 0
+    disagreement_count: int = 0
+
+
+class BetaReadChapterHotspotOut(BaseModel):
+    chapter_number: int
+    signal_score: int = 0
+    reader_count: int = 0
+    confusing_count: int = 0
+    boring_count: int = 0
+    favorite_count: int = 0
+    comment_count: int = 0
+    disagreement: bool = False
+    evidence: list[str] = Field(default_factory=list)
+
+
+class BetaReadThemeOut(BaseModel):
+    label: str
+    mention_count: int = 0
+    reader_count: int = 0
+    chapter_numbers: list[int] = Field(default_factory=list)
+    evidence: list[str] = Field(default_factory=list)
+
+
+class BetaReadQuestionConsensusOut(BaseModel):
+    question_id: str
+    prompt: str
+    answer_count: int = 0
+    reader_count: int = 0
+    answers: list[str] = Field(default_factory=list)
+
+
+class BetaReadRevisionCandidateOut(BaseModel):
+    id: str
+    title: str
+    description: str
+    severity: str
+    chapter_number: int | None = None
+    feedback_item_ids: list[str] = Field(default_factory=list)
+
+
+class BetaReadConsensusOut(BaseModel):
+    summary: BetaReadConsensusSummaryOut = Field(default_factory=BetaReadConsensusSummaryOut)
+    chapter_hotspots: list[BetaReadChapterHotspotOut] = Field(default_factory=list)
+    themes: list[BetaReadThemeOut] = Field(default_factory=list)
+    question_consensus: list[BetaReadQuestionConsensusOut] = Field(default_factory=list)
+    revision_candidates: list[BetaReadRevisionCandidateOut] = Field(default_factory=list)
+
+
+class BetaReadGuestLinkOut(BaseModel):
+    share_url: str
+    expires_at: datetime
+
+
+class BetaReadGuestProgressBody(BaseModel):
+    chapter_number: int = Field(..., ge=1)
+
+
+class BetaReadGuestChapterOut(BaseModel):
+    number: int
+    title: str
+    text: str
+
+
+class BetaReadGuestReviewOut(BaseModel):
+    assignment: BetaReadAssignmentOut
+    author_questions: list[BetaReadQuestionOut]
+    feedback_items: list[BetaReadFeedbackItemOut]
+    feedback_summary: BetaReadFeedbackSummaryOut
+    chapters: list[BetaReadGuestChapterOut] = Field(default_factory=list)

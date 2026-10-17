@@ -1,6 +1,6 @@
 "use client"
 
-import { createContext, useContext, type ReactNode } from "react"
+import { createContext, useContext, useEffect, useState, type ReactNode } from "react"
 import {
   BarChart3,
   BookOpen,
@@ -67,12 +67,89 @@ export function modeLabel(mode: string) {
   return MODES.find((item) => item.value === mode)?.label ?? "Casual"
 }
 
+export function useActiveSettingsSection(query = "", hydrated = true) {
+  const [activeSectionId, setActiveSectionId] = useState(SETTINGS_NAV[0].id)
+
+  useEffect(() => {
+    let frameId: number | null = null
+
+    const updateActiveSection = () => {
+      const anchorY = Math.min(window.innerHeight * 0.22, 160)
+      const activationY = Math.min(window.innerHeight * 0.16, 112)
+      const sections = SETTINGS_NAV
+        .map((item) => {
+          const element = document.getElementById(item.id)
+          return element ? { id: element.id, rect: element.getBoundingClientRect() } : null
+        })
+        .filter((section): section is { id: string; rect: DOMRect } => Boolean(section))
+
+      if (!sections.length) return
+
+      const visibleSections = sections.filter((section) => section.rect.bottom > 0 && section.rect.top < window.innerHeight)
+      const candidates = visibleSections.length ? visibleSections : sections
+      const activeAtHeader = candidates.filter((section) => section.rect.top <= activationY && section.rect.bottom > activationY)
+      const activeSection = activeAtHeader.at(-1)
+        ?? [...candidates].sort(
+          (first, second) => Math.abs(first.rect.top - anchorY) - Math.abs(second.rect.top - anchorY),
+        )[0]
+
+      setActiveSectionId(activeSection.id)
+    }
+
+    const scheduleUpdate = () => {
+      if (frameId !== null) return
+      frameId = window.requestAnimationFrame(() => {
+        frameId = null
+        updateActiveSection()
+      })
+    }
+
+    updateActiveSection()
+    window.addEventListener("scroll", scheduleUpdate, { passive: true })
+    window.addEventListener("resize", scheduleUpdate)
+    window.addEventListener("scrollend", scheduleUpdate)
+    document.addEventListener("scroll", scheduleUpdate, { capture: true, passive: true })
+    const sectionObserver =
+      typeof window.IntersectionObserver === "function"
+        ? new IntersectionObserver(scheduleUpdate, {
+            root: null,
+            rootMargin: "-25% 0px -55% 0px",
+            threshold: [0, 0.25, 0.5, 0.75, 1],
+          })
+        : null
+    const resizeObserver =
+      typeof window.ResizeObserver === "function" ? new ResizeObserver(scheduleUpdate) : null
+    const observedSections = SETTINGS_NAV
+      .map((item) => document.getElementById(item.id))
+      .filter((element): element is HTMLElement => Boolean(element))
+    observedSections.forEach((section) => {
+      sectionObserver?.observe(section)
+      resizeObserver?.observe(section)
+    })
+    resizeObserver?.observe(document.body)
+
+    return () => {
+      if (frameId !== null) {
+        window.cancelAnimationFrame(frameId)
+      }
+      window.removeEventListener("scroll", scheduleUpdate)
+      window.removeEventListener("resize", scheduleUpdate)
+      window.removeEventListener("scrollend", scheduleUpdate)
+      document.removeEventListener("scroll", scheduleUpdate, { capture: true })
+      sectionObserver?.disconnect()
+      resizeObserver?.disconnect()
+    }
+  }, [query, hydrated])
+
+  return { activeSectionId, setActiveSectionId }
+}
+
 export function SettingsPanel({ id, title, compact = false, children }: { id: string; title: string; compact?: boolean; children: ReactNode }) {
   const visibleSectionIds = useContext(SettingsSearchContext)
   if (visibleSectionIds && !visibleSectionIds.has(id)) return null
   return (
-    <section id={id} className={compact ? "settings-panel settings-panel--compact" : "settings-panel"}>
-      <h2 className="settings-panel__title">{title}</h2>
+    <section id={id} aria-labelledby={`${id}-title`} className={compact ? "settings-panel settings-panel--compact" : "settings-panel"}>
+      <h2 id={`${id}-title`} className="settings-panel__title">{title}</h2>
       <div className={compact ? "mt-3" : "mt-5"}>{children}</div>
     </section>
   )
@@ -133,7 +210,7 @@ export function SelectableCard({
 }
 
 export function InlineMessage({ message, tone, className = "" }: { message: string; tone: "warning" | "neutral"; className?: string }) {
-  return <div className={`settings-message ${tone === "warning" ? "settings-message--warning" : ""} ${className}`.trim()}>{message}</div>
+  return <div role={tone === "warning" ? "alert" : "status"} className={`settings-message ${tone === "warning" ? "settings-message--warning" : ""} ${className}`.trim()}>{message}</div>
 }
 
 export function GoalRing({ progress }: { progress: number }) {

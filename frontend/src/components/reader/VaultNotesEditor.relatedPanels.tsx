@@ -1,9 +1,8 @@
 import type { VaultGraphEdge, VaultNote, VaultNoteLink, VaultNoteRelations } from "@/types/book"
 
-import { MiniGraphPreview, PanelCard, PanelLink, RelationStack } from "./VaultNotesEditor.components"
+import { MiniGraphPreview, PanelCard, RelationStack } from "./VaultNotesEditor.components"
 import { formatRelativeTime, noteTitle } from "./VaultNotesEditor.helpers"
-import { IconArrowUpRight, IconPlus } from "./VaultNotesEditor.icons"
-import { Tooltip } from "@/components/ui/Tooltip"
+import { IconArrowUpRight } from "./VaultNotesEditor.icons"
 
 export function VaultNoteRelatedPanels({
   isDark,
@@ -33,7 +32,6 @@ export function VaultNoteRelatedPanels({
           emptyLabel="No backlinks yet."
           isDark={isDark}
         />
-        {Boolean(relations?.backlinks.length) ? <PanelLink isDark={isDark}>View all backlinks</PanelLink> : null}
       </PanelCard>
 
       <PanelCard isDark={isDark} title="Outgoing links" count={selectedOutgoingLinks.length}>
@@ -43,25 +41,19 @@ export function VaultNoteRelatedPanels({
           emptyLabel="No outgoing links yet."
           isDark={isDark}
         />
-        {selectedOutgoingLinks.length ? <PanelLink isDark={isDark}>View all outgoing links</PanelLink> : null}
       </PanelCard>
 
       <PanelCard isDark={isDark} title="Tags">
         {relations?.tags.length ? (
           <div className="flex flex-wrap items-center gap-2">
             {relations.tags.map((tag) => (
-              <span key={tag.id} className={`rounded-xl px-3 py-1.5 text-xs font-medium ${isDark ? "bg-white/[0.05] text-slate-200" : "bg-stone-100 text-stone-700"}`}>
+              <span key={tag.id} className={`rounded-sm px-3 py-1.5 text-xs font-medium ${isDark ? "bg-white/[0.05] text-slate-200" : "bg-stone-100 text-stone-700"}`}>
                 {tag.tag_name}
               </span>
             ))}
-            <Tooltip content="Add tag">
-              <button type="button" aria-label="Add tag" className={`inline-flex h-8 w-8 items-center justify-center rounded-xl ${isDark ? "bg-white/[0.05] text-slate-300" : "bg-stone-100 text-stone-700"}`}>
-                <IconPlus />
-              </button>
-            </Tooltip>
           </div>
         ) : (
-          <p className={`text-sm ${isDark ? "text-slate-500" : "text-stone-500"}`}>No tags found for this note.</p>
+          <p className={`text-sm ${isDark ? "text-slate-400" : "text-stone-600"}`}>No tags found for this note.</p>
         )}
       </PanelCard>
 

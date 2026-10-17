@@ -3,14 +3,14 @@ export function clamp(value: number, min: number, max: number) {
 }
 
 export function formatNumber(value: number | null | undefined) {
-  if (typeof value !== "number" || Number.isNaN(value)) return "Syncing"
+  if (typeof value !== "number" || Number.isNaN(value)) return "Unavailable"
   return value.toLocaleString()
 }
 
 export function formatDate(value: string | null | undefined) {
-  if (!value) return "Today"
+  if (!value) return "Unavailable"
   const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return "Today"
+  if (Number.isNaN(date.getTime())) return "Unavailable"
   return date.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })
 }
 
@@ -21,9 +21,9 @@ export function panelClass(isDark: boolean, extra = "") {
 }
 
 export function severityClass(severity: string, isDark: boolean) {
-  if (severity === "High") return isDark ? "bg-rose-500/10 text-rose-300" : "bg-rose-50 text-rose-600"
-  if (severity === "Medium") return isDark ? "bg-amber-500/10 text-amber-300" : "bg-amber-50 text-amber-600"
-  return isDark ? "bg-emerald-500/10 text-emerald-300" : "bg-emerald-50 text-emerald-600"
+  if (severity === "High") return isDark ? "bg-rose-500/10 text-rose-300" : "bg-rose-50 text-rose-800"
+  if (severity === "Medium") return isDark ? "bg-amber-500/10 text-amber-300" : "bg-amber-50 text-amber-800"
+  return isDark ? "bg-emerald-500/10 text-emerald-300" : "bg-emerald-50 text-emerald-800"
 }
 
 export function formatDateInputValue(date: Date) {

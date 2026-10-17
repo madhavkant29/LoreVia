@@ -28,7 +28,7 @@ class FakeDB:
     async def refresh(self, value):
         self.refreshed.append(value)
 
-    async def get(self, model, item_id):
+    async def get(self, model, item_id, **_kwargs):
         assert model is AdvisorSuggestionJob
         return self.stored if self.stored is not None and self.stored.id == item_id else None
 
@@ -84,6 +84,11 @@ async def test_create_get_and_serialize_advisor_suggestion_job():
         "error": None,
     }
 
+    created.status = jobs.ADVISOR_SUGGESTION_STATUS_FAILED
+    created.error_code = "llm_budget"
+    created.error_detail = "AI capacity resets on September 1."
+    assert jobs.serialize_advisor_suggestion_job(created)["error"] == created.error_detail
+
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("operation", ["running", "complete", "failed"])
@@ -136,6 +141,41 @@ async def test_job_state_transitions_return_none_for_missing_jobs(operation):
         )
     assert result is None
     assert db.commits == 0
+
+
+@pytest.mark.asyncio
+async def test_suggestion_job_claim_rejects_duplicate_and_stale_completion():
+    job = build_job()
+    db = FakeDB(job)
+
+    claimed = await jobs.mark_advisor_suggestion_job_running(
+        db,
+        job_id=job.id,
+        execution_id="scan-one",
+    )
+    duplicate = await jobs.mark_advisor_suggestion_job_running(
+        db,
+        job_id=job.id,
+        execution_id="scan-two",
+    )
+    stale_completion = await jobs.mark_advisor_suggestion_job_complete(
+        db,
+        job_id=job.id,
+        execution_id="scan-two",
+        result_payload={"suggestions": ["stale"]},
+    )
+    completed = await jobs.mark_advisor_suggestion_job_complete(
+        db,
+        job_id=job.id,
+        execution_id="scan-one",
+        result_payload={"suggestions": ["current"]},
+    )
+
+    assert claimed is job
+    assert duplicate is None
+    assert stale_completion is None
+    assert completed is job
+    assert jobs.serialize_advisor_suggestion_job(job)["result"] == {"suggestions": ["current"]}
 
 
 @pytest.mark.asyncio

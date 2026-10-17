@@ -8,6 +8,7 @@ import { useQuery } from "@tanstack/react-query"
 import { publicApi } from "@/lib/api/public"
 import { asQueryKey } from "@/lib/query/cacheKeys"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
+import { resolveAssetUrl } from "@/lib/utils/assetUrls"
 import type { PublicBook } from "@/types/book"
 import type { PublicRankedBookListResponse, PublicUploadsOverview } from "@/types/public"
 
@@ -45,11 +46,11 @@ function formatNumber(value: number) {
 
 function MetricCard({ label, value, note, isDark }: { label: string; value: string; note: string; isDark: boolean }) {
   return (
-    <article className={`rounded-lg border p-5 ${isDark ? "border-white/10 bg-white/[0.035]" : "border-stone-200 bg-white"}`}>
-      <p className={`text-3xs font-semibold uppercase tracking-[0.2em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>{label}</p>
-      <p className="mt-3 text-3xl font-semibold">{value}</p>
-      <p className={`mt-2 text-sm ${isDark ? "text-slate-400" : "text-stone-600"}`}>{note}</p>
-    </article>
+    <div>
+      <p className={`text-sm font-semibold ${isDark ? "text-slate-400" : "text-stone-600"}`}>{label}</p>
+      <p className="mt-2 text-2xl font-semibold tracking-[-0.02em]">{value}</p>
+      <p className={`mt-1 text-xs leading-5 ${isDark ? "text-slate-500" : "text-stone-500"}`}>{note}</p>
+    </div>
   )
 }
 
@@ -86,52 +87,31 @@ function RankingSelect({
 
 function CreatorBookCard({ book, isDark }: { book: PublicBook; isDark: boolean }) {
   return (
-    <article className={`rounded-lg border p-6 ${isDark ? "border-white/10 bg-white/[0.035]" : "border-stone-200 bg-white"}`}>
-      {book.ranking?.label ? (
-        <div className="flex flex-wrap items-center gap-2">
-          <span className={`rounded-full px-3 py-1 text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "bg-teal-300/10 text-teal-200" : "bg-teal-50 text-teal-800"}`}>
-            #{book.ranking.position ?? "?"} {book.ranking.label}
-          </span>
+    <article className={`grid grid-cols-[4.5rem_minmax(0,1fr)] gap-5 border-b py-6 last:border-b-0 sm:grid-cols-[5.5rem_minmax(0,1fr)_auto] sm:items-center ${isDark ? "border-white/10" : "border-stone-200"}`}>
+      <Link href={`/public/${book.public_slug || book.id}` as Route} className={`flex aspect-[2/3] items-center justify-center overflow-hidden border text-center text-xs ${isDark ? "border-white/10 bg-white/[0.04] text-slate-500" : "border-stone-200 bg-stone-100 text-stone-500"}`} aria-label={`Open ${book.title}`}>
+        {resolveAssetUrl(book.cover_url) ? (
+          <img src={resolveAssetUrl(book.cover_url) ?? undefined} alt={`Cover of ${book.title}`} className="h-full w-full object-cover" />
+        ) : <span className="px-2">No cover</span>}
+      </Link>
+      <div className="min-w-0">
+        <p className={`text-xs font-medium ${isDark ? "text-slate-500" : "text-stone-500"}`}>
+          {book.ranking?.position ? `#${book.ranking.position} / ` : ""}Creator-published original{book.genre ? ` / ${book.genre}` : ""}
+        </p>
+        <h2 className="mt-2 text-2xl font-semibold"><Link href={`/public/${book.public_slug || book.id}` as Route} className="hover:underline hover:underline-offset-4">{book.title}</Link></h2>
+        {book.author_username ? (
+          <Link href={`/public/writers/${book.author_username}` as Route} className={`mt-2 inline-flex text-sm font-semibold ${isDark ? "text-teal-200 hover:text-white" : "text-teal-700 hover:text-teal-900"}`}>@{book.author_username}</Link>
+        ) : book.author ? <p className={`mt-2 text-sm ${isDark ? "text-slate-300" : "text-stone-600"}`}>by {book.author}</p> : null}
+        {book.description ? <p className={`mt-3 max-w-3xl text-sm leading-7 ${isDark ? "text-slate-300" : "text-stone-600"}`}>{book.description}</p> : null}
+        <div className={`mt-4 flex flex-wrap gap-x-4 gap-y-2 text-xs ${isDark ? "text-slate-400" : "text-stone-500"}`}>
+          <span>{book.total_chapters ?? 0} chapters</span>
+          <span>{formatCompactDate(book.public_updated_at || book.published_at)}</span>
+          {book.ranking?.label ? <span>{book.ranking.label}</span> : null}
         </div>
-      ) : null}
-      <p className={`mt-3 text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>
-        Creator-published original
-        {book.genre ? ` - ${book.genre}` : ""}
-      </p>
-      <h2 className="mt-3 text-2xl font-semibold">{book.title}</h2>
-      {book.author_username ? (
-        <Link href={`/public/writers/${book.author_username}` as Route} className={`mt-2 inline-flex text-sm font-semibold ${isDark ? "text-teal-200 hover:text-white" : "text-teal-700 hover:text-teal-900"}`}>
-          @{book.author_username}
-        </Link>
-      ) : book.author ? (
-        <p className={`mt-2 text-sm ${isDark ? "text-slate-300" : "text-stone-600"}`}>by {book.author}</p>
-      ) : null}
-      {book.description ? (
-        <p className={`mt-4 text-sm leading-7 ${isDark ? "text-slate-300" : "text-stone-600"}`}>{book.description}</p>
-      ) : null}
-      <div className={`mt-5 flex flex-wrap gap-2 text-xs ${isDark ? "text-slate-400" : "text-stone-500"}`}>
-        <span>{book.total_chapters ?? 0} chapters</span>
-        <span>-</span>
-        <span>{formatCompactDate(book.public_updated_at || book.published_at)}</span>
+        {book.ranking?.supporting_note ? <p className={`mt-2 text-xs leading-5 ${isDark ? "text-slate-500" : "text-stone-500"}`}>{book.ranking.supporting_note}</p> : null}
       </div>
-      {book.ranking?.supporting_note ? (
-        <p className={`mt-4 text-xs leading-6 ${isDark ? "text-slate-400" : "text-stone-500"}`}>{book.ranking.supporting_note}</p>
-      ) : null}
-      <div className="mt-6 flex flex-wrap gap-3">
-        <Link
-          href={`/public/${book.public_slug || book.id}` as Route}
-          className={`inline-flex rounded-md px-4 py-2 text-sm font-semibold ${isDark ? "bg-teal-300 text-slate-950 hover:bg-teal-200" : "bg-[#1f615d] text-white hover:bg-[#174c49]"}`}
-        >
-          Open book
-        </Link>
-        {book.active_forum_post_id ? (
-          <Link
-            href={`/public/forum/${book.active_forum_post_id}` as Route}
-            className={`inline-flex rounded-md px-4 py-2 text-sm font-semibold ${isDark ? "border border-white/10 bg-white/5 text-white hover:bg-white/10" : "border border-stone-200 bg-white text-stone-900 hover:bg-stone-50"}`}
-          >
-            Open discussion
-          </Link>
-        ) : null}
+      <div className="col-span-2 flex flex-wrap gap-4 text-sm font-semibold sm:col-span-1 sm:flex-col sm:items-end">
+        <Link href={`/public/${book.public_slug || book.id}` as Route} className={isDark ? "text-teal-200 hover:text-white" : "text-teal-700 hover:text-teal-900"}>Open book &rarr;</Link>
+        {book.active_forum_post_id ? <Link href={`/public/forum/${book.active_forum_post_id}` as Route} className={isDark ? "text-slate-400 hover:text-white" : "text-stone-600 hover:text-stone-900"}>Discussion</Link> : null}
       </div>
     </article>
   )
@@ -210,7 +190,7 @@ export function PublicUploadsPageClient({
         </div>
 
         {overview ? (
-          <section className="mt-10 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <section aria-label="Public upload summary" className={`mt-10 grid gap-6 border-y py-6 sm:grid-cols-2 xl:grid-cols-4 ${isDark ? "border-white/10" : "border-stone-200"}`}>
             <MetricCard isDark={isDark} label="Public books" value={formatNumber(overview.total_public_books)} note="Creator-published titles currently visible." />
             <MetricCard isDark={isDark} label="Authors" value={formatNumber(overview.total_authors)} note="Distinct writers with visible public uploads." />
             <MetricCard isDark={isDark} label="Visible words" value={formatNumber(overview.total_visible_words)} note={`${formatNumber(overview.total_visible_chapters)} chapters across public uploads.`} />
@@ -233,23 +213,23 @@ export function PublicUploadsPageClient({
         </section>
 
         {rankingData?.items?.[0]?.ranking?.label ? (
-          <div className={`mt-6 rounded-md border px-5 py-4 text-sm ${isDark ? "border-white/10 bg-white/[0.04] text-slate-300" : "border-stone-200 bg-white text-stone-700"}`}>
+          <div className={`mt-6 border-l-2 px-4 py-2 text-sm ${isDark ? "border-teal-300 text-slate-300" : "border-teal-700 text-stone-700"}`}>
             <span className="font-semibold">{rankingData.items[0].ranking.label}</span>
             {rankingData.items[0].ranking.supporting_note ? ` / ${rankingData.items[0].ranking.supporting_note}` : ""}
           </div>
         ) : null}
 
         {booksLoading ? (
-          <div className={`mt-12 rounded-md border px-6 py-12 text-center ${isDark ? "border-white/10 bg-white/5 text-slate-400" : "border-stone-200 bg-white text-stone-500"}`}>
+          <div className={`mt-12 border-y px-6 py-12 text-center ${isDark ? "border-white/10 text-slate-400" : "border-stone-200 text-stone-500"}`}>
             Loading creator uploads...
           </div>
         ) : books.length === 0 ? (
-          <div className={`mt-12 rounded-md border px-6 py-12 text-center ${isDark ? "border-white/10 bg-white/5 text-slate-400" : "border-stone-200 bg-white text-stone-500"}`}>
+          <div className={`mt-12 border-y px-6 py-12 text-center ${isDark ? "border-white/10 text-slate-400" : "border-stone-200 text-stone-500"}`}>
             No creator-published public books matched that ranking yet.
           </div>
         ) : (
           <>
-            <div className="mt-12 grid gap-5 md:grid-cols-2 xl:grid-cols-3">
+            <div data-testid="creator-upload-list" className={`mt-12 border-y ${isDark ? "border-white/10" : "border-stone-200"}`}>
               {books.map((book) => (
                 <CreatorBookCard key={book.id} book={book} isDark={isDark} />
               ))}

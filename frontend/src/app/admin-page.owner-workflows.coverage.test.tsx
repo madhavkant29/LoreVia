@@ -19,26 +19,28 @@ describe("AdminPage owner workflows", () => {
   it("renders the owner console and drives admin workflows", async () => {
     await renderPage(<AdminPage />)
     await waitForText("Operations Console")
-    await waitForText("Gate Draft")
 
     expect(getContainer().textContent).toContain("Platform Overview")
     expect(getContainer().textContent).toContain("Worker Queues")
     expect(getContainer().textContent).toContain("Redis Key Prefixes")
     expect(getContainer().textContent).toContain("advisor:book")
+    expect(getContainer().textContent).not.toContain("Gate Draft")
+    expect(adminApiMock.publicShares).not.toHaveBeenCalled()
+    expect(adminApiMock.refunds).not.toHaveBeenCalled()
+    expect(adminApiMock.access).not.toHaveBeenCalled()
+
+    await act(async () => {
+      clickButton("Moderation")
+      await flush()
+    })
+    await waitForText("Gate Draft")
     expect(getContainer().textContent).toContain("Creator Strikes")
     expect(getContainer().textContent).toContain("Public Demo Books")
-    expect(getContainer().textContent).toContain("Subscription Metrics")
-    expect(getContainer().textContent).toContain("Admin Access")
-    expect(getContainer().textContent).toContain("Audit")
-    expect(getContainer().textContent).toContain("Author Monthly")
-    expect(getContainer().textContent).toContain("$19/mo")
-    expect(getContainer().textContent).toContain("Author Annual")
-    expect(getContainer().textContent).toContain("$190/year")
-    expect(getContainer().textContent).toContain("Architect Monthly")
-    expect(getContainer().textContent).toContain("$39/mo")
-    expect(getContainer().textContent).toContain("Architect Annual")
-    expect(getContainer().textContent).toContain("$390/year")
 
+    await act(async () => {
+      clickButton("Review", sectionByHeading("Moderation"))
+      await flush()
+    })
     await act(async () => {
       clickButton("Approve", sectionByHeading("Moderation"))
       await flush()
@@ -46,6 +48,10 @@ describe("AdminPage owner workflows", () => {
     expect(adminApiMock.reviewPublicShare).toHaveBeenCalledWith("book-1", { approved: true, reason: undefined })
 
     const moderation = sectionByHeading("Moderation")
+    await act(async () => {
+      clickButton("Manual book action", moderation)
+      await flush()
+    })
     const moderationFields = moderation.querySelectorAll("input,textarea")
     setFieldValue(moderationFields[0] as HTMLInputElement, "book-1")
     setFieldValue(moderationFields[1] as HTMLTextAreaElement, "Policy reason")
@@ -55,6 +61,11 @@ describe("AdminPage owner workflows", () => {
     })
     expect(adminApiMock.hideBook).toHaveBeenCalledWith("book-1", "Policy reason")
 
+    await act(async () => {
+      clickButton("Reliability")
+      await flush()
+    })
+    await waitForText("Rate Limits")
     const rateLimits = sectionByHeading("Rate Limits")
     setFieldValue(rateLimits.querySelector("input") as HTMLInputElement, "user-rate")
     await act(async () => {
@@ -73,7 +84,26 @@ describe("AdminPage owner workflows", () => {
       api_per_minute: null,
     })
 
+    await act(async () => {
+      clickButton("Billing")
+      await flush()
+    })
+    await waitForText("Refunds")
+    expect(getContainer().textContent).toContain("Subscription Metrics")
+    const configurationSummary = getContainer().querySelector("summary")
+    await act(async () => {
+      configurationSummary?.dispatchEvent(new MouseEvent("click", { bubbles: true }))
+      await flush()
+    })
+    expect(getContainer().textContent).toContain("Author Monthly")
+    expect(getContainer().textContent).toContain("$19/mo")
+    expect(getContainer().textContent).toContain("Architect Annual")
+    expect(getContainer().textContent).toContain("$390/year")
     const refunds = sectionByHeading("Refunds")
+    await act(async () => {
+      clickButton("Review", refunds)
+      await flush()
+    })
     setFieldValue(refunds.querySelector("textarea") as HTMLTextAreaElement, "Refund reason")
     ;(refunds.querySelector("input[type='checkbox']") as HTMLInputElement).click()
     await act(async () => {
@@ -85,7 +115,17 @@ describe("AdminPage owner workflows", () => {
       provider_followup_only: true,
     })
 
+    await act(async () => {
+      clickButton("Access & audit")
+      await flush()
+    })
+    await waitForText("Admin Access")
+    expect(getContainer().textContent).toContain("Audit")
     const access = sectionByHeading("Admin Access")
+    await act(async () => {
+      clickButton("Grant access", access)
+      await flush()
+    })
     const accessFields = access.querySelectorAll("input,textarea")
     setFieldValue(accessFields[0] as HTMLInputElement, "new-admin")
     setFieldValue(accessFields[1] as HTMLTextAreaElement, "Owner reason")

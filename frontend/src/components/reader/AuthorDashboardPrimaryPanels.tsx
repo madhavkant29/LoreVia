@@ -1,17 +1,17 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useState } from "react"
 import type { Route } from "next"
 import Link from "next/link"
 
 import { Icon } from "@/components/overview/Icon"
 import type { IconName } from "@/components/overview/types"
-import { clamp, formatNumber, panelClass, severityClass } from "@/components/overview/utils"
+import { clamp, formatNumber, panelClass } from "@/components/overview/utils"
 import { CoverEditOverlay } from "@/components/ui/CoverEditOverlay"
 import { ErrorCard } from "@/components/ui/ErrorCard"
 import { SmartBookCover } from "@/components/ui/SmartBookCover"
-import { buildIssueDisplay } from "@/lib/utils/storyFeedback"
-import type { Book, PreWritingCheck, StoryHealth } from "@/types/book"
+import { WorkspaceModeSwitcher } from "@/components/reader/WorkspaceModeSwitcher"
+import type { Book, StoryHealth } from "@/types/book"
 import type { ChapterListResponse } from "@/types/reader"
 
 export function OverviewHeader({
@@ -19,7 +19,6 @@ export function OverviewHeader({
   activeBookMode,
   canUseAuthorMode,
   modeSaving,
-  greetingName,
   onModeChange,
   onToggleTheme,
 }: {
@@ -27,44 +26,35 @@ export function OverviewHeader({
   activeBookMode: "reader" | "author"
   canUseAuthorMode: boolean
   modeSaving: boolean
-  greetingName: string
   onModeChange: (nextMode: "reader" | "author") => void
   onToggleTheme: () => void
 }) {
   return (
-    <section className={panelClass(isDark, "overflow-hidden p-4 sm:p-5")}>
-      <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+    <header className={`flex flex-col gap-4 border-b pb-4 sm:flex-row sm:items-end sm:justify-between ${isDark ? "border-white/[0.08]" : "border-stone-200"}`}>
         <div className="min-w-0">
-          <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-teal-200/80" : "text-teal-800"}`}>Author workspace</p>
-          <h1 className={`mt-2 font-serif text-3xl leading-none sm:text-4xl ${isDark ? "text-white" : "text-slate-900"}`}>
-            Welcome back, {greetingName}.
-          </h1>
-          <p className={`mt-3 max-w-3xl text-sm leading-7 ${isDark ? "text-slate-300" : "text-slate-600"}`}>
-            Drafting, revision pressure, and story memory now live in one calmer workspace.
-          </p>
+          <h1 className={`text-2xl font-semibold tracking-tight sm:text-3xl ${isDark ? "text-white" : "text-stone-950"}`}>Book overview</h1>
+          <p className={`mt-1 text-sm ${isDark ? "text-slate-400" : "text-stone-600"}`}>Draft progress, recent chapters, and the issues that need attention.</p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          {canUseAuthorMode ? (
-            <ModeToggle
-              isDark={isDark}
-              activeMode={activeBookMode}
-              modeSaving={modeSaving}
-              onModeChange={onModeChange}
-            />
-          ) : null}
+          <WorkspaceModeSwitcher
+            isDark={isDark}
+            activeMode={activeBookMode}
+            modeSaving={modeSaving}
+            writingAvailable={canUseAuthorMode}
+            onModeChange={onModeChange}
+          />
 
           <button
             type="button"
             onClick={onToggleTheme}
-            className={`flex h-11 w-11 items-center justify-center rounded-full border transition ${isDark ? "border-white/10 bg-white/[0.04] text-slate-200 hover:bg-white/[0.08]" : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"}`}
+            className={`flex h-10 w-10 items-center justify-center rounded-sm border transition-colors ${isDark ? "border-white/10 text-slate-300 hover:bg-white/[0.06]" : "border-stone-200 text-stone-600 hover:bg-stone-50"}`}
             aria-label={`Switch to ${isDark ? "light" : "dark"} mode`}
           >
             <Icon name={isDark ? "sun" : "moon"} />
           </button>
         </div>
-      </div>
-    </section>
+    </header>
   )
 }
 
@@ -79,42 +69,52 @@ export function CurrentProjectCard({
   dailyTarget,
   loginStreakDays,
   onOpenManuscript,
-  onOpenRelationships,
-  onNavigate,
   bookId,
   resolvedCoverUrl,
   onCoverUpdated,
+  manuscriptRecap = null,
+  recapChapterCount = 0,
 }: {
   book: Book
   isDark: boolean
   canOpenManuscript: boolean
   currentWords: number | null
-  targetWords: number
+  targetWords: number | null
   percentComplete: number
   dailyWords: number
   dailyTarget: number
   loginStreakDays: number
   onOpenManuscript: () => void
-  onOpenRelationships: () => void
-  onNavigate: (href: string) => void
   bookId: string
   resolvedCoverUrl: string | null | undefined
   onCoverUpdated: (book: Book) => void
+  manuscriptRecap?: string | null
+  recapChapterCount?: number
 }) {
   const goalProgress = clamp((dailyWords / Math.max(1, dailyTarget)) * 100, 0, 100)
-  const manuscriptProgress = clamp(percentComplete || (currentWords ? (currentWords / targetWords) * 100 : 0), 0, 100)
-  const etaDays = currentWords && dailyTarget > 0 ? Math.max(1, Math.ceil(Math.max(0, targetWords - currentWords) / dailyTarget)) : null
-  const etaDate = etaDays ? new Date(Date.now() + etaDays * 24 * 60 * 60 * 1000).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }) : "Syncing"
+  const hasBookTarget = typeof targetWords === "number" && targetWords > 0
+  const manuscriptProgress = clamp(
+    hasBookTarget && currentWords !== null ? (currentWords / targetWords) * 100 : percentComplete,
+    0,
+    100,
+  )
+  const etaDays = hasBookTarget && currentWords !== null && dailyTarget > 0
+    ? Math.max(0, Math.ceil(Math.max(0, targetWords - currentWords) / dailyTarget))
+    : null
+  const createdAt = new Date(book.created_at)
+  const createdLabel = Number.isNaN(createdAt.getTime())
+    ? null
+    : createdAt.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" })
 
   return (
-    <section className={panelClass(isDark, "h-full p-4 sm:p-5")}>
-      <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Current project</p>
-      <div className="mt-4 grid gap-5 md:grid-cols-[9rem_minmax(0,1fr)] xl:grid-cols-[10rem_minmax(0,1fr)]">
+    <section className={panelClass(isDark, "h-full overflow-hidden p-4 sm:p-6")}>
+      <p className={`font-serif text-lg font-semibold ${isDark ? "text-slate-100" : "text-stone-900"}`}>Current project</p>
+      <div className="mt-3 grid grid-cols-[6rem_minmax(0,1fr)] items-start gap-4 sm:grid-cols-[10rem_minmax(0,1fr)] sm:gap-6 lg:grid-cols-[12rem_minmax(0,1fr)]">
         <SmartBookCover
           src={resolvedCoverUrl}
           title={book.title}
           isDark={isDark}
-          className="aspect-[0.72] min-h-48 overflow-hidden rounded-lg"
+          className="aspect-[0.72] w-full max-w-[12rem] overflow-hidden rounded-sm"
           overlay={
             <CoverEditOverlay
               bookId={bookId}
@@ -125,42 +125,59 @@ export function CurrentProjectCard({
           }
         />
         <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-3">
-            <h2 className={`break-words text-2xl font-semibold tracking-tight sm:text-3xl ${isDark ? "text-white" : "text-slate-950"}`}>{book.title}</h2>
-            <span className="text-xs font-semibold text-teal-600">{book.work_type === "screenplay" ? "Screenplay" : "Manuscript"}</span>
+          <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+            <h2 className={`break-words font-serif text-2xl font-semibold tracking-tight sm:text-3xl ${isDark ? "text-white" : "text-stone-950"}`}>{book.title}</h2>
           </div>
-          <p className={`mt-3 max-w-xl break-words text-sm leading-7 ${isDark ? "text-slate-300" : "text-slate-600"}`}>
-            {book.public_description?.trim() || `The draft is ${Math.round(manuscriptProgress)}% complete, with the next pass centered on pacing, continuity, and scene-by-scene momentum.`}
+          <p className={`mt-2 text-xs ${isDark ? "text-slate-400" : "text-stone-500"}`}>
+            {book.work_type === "screenplay" ? "Screenplay" : "Novel"}{book.genre ? ` · ${book.genre}` : ""} · {book.status === "ready" ? "Draft ready" : book.status.replace(/_/g, " ")}
           </p>
-          <div className="mt-5 flex flex-wrap gap-3">
+          <p className={`mt-3 max-w-xl break-words text-sm leading-7 ${isDark ? "text-slate-300" : "text-slate-600"}`}>
+            {book.public_description?.trim() || (
+              currentWords !== null
+                ? `${currentWords.toLocaleString()} manuscript words saved${hasBookTarget ? ` toward a ${targetWords.toLocaleString()}-word target` : ""}.`
+                : "No project description has been added."
+            )}
+          </p>
+          {manuscriptRecap ? (
+            <details className={`mt-4 border-t pt-4 ${isDark ? "border-white/[0.08]" : "border-stone-200"}`}>
+              <summary className={`cursor-pointer text-sm font-semibold ${isDark ? "text-slate-200" : "text-stone-800"}`}>Manuscript recap</summary>
+              <p className={`mt-2 text-sm leading-6 ${isDark ? "text-slate-400" : "text-stone-600"}`}>{manuscriptRecap}</p>
+              <p className={`mt-2 text-xs ${isDark ? "text-slate-400" : "text-stone-600"}`}>Compiled from {recapChapterCount} available chapter recap{recapChapterCount === 1 ? "" : "s"}.</p>
+            </details>
+          ) : null}
+          <div className="mt-5 flex flex-wrap gap-2">
             {canOpenManuscript ? (
               <button
                 type="button"
                 onClick={onOpenManuscript}
-                className={`inline-flex min-h-11 items-center gap-2 rounded-md px-5 py-2.5 text-sm font-semibold transition ${isDark ? "bg-teal-800 text-white hover:bg-teal-700" : "bg-teal-800 text-white hover:bg-teal-700"}`}
+                className="inline-flex min-h-10 items-center gap-2 rounded-sm bg-teal-800 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-teal-700"
               >
                 <Icon name="book" />
                 Open Manuscript Editor
                 <Icon name="chevron" />
               </button>
             ) : null}
-            <button type="button" onClick={onOpenRelationships} className={secondaryButtonClass(isDark)}>
-              <Icon name="users" />
-              Open relationship map
-            </button>
-            <button type="button" onClick={() => onNavigate(`/${bookId}/summaries`)} className={secondaryButtonClass(isDark)}>
-              <Icon name="search" />
-              Open summaries
-            </button>
+            <Link
+              href={`/${bookId}/author-loop` as Route}
+              className={`inline-flex min-h-10 items-center rounded-sm border px-4 py-2 text-sm font-semibold transition-colors ${isDark ? "border-white/10 text-slate-200 hover:bg-white/[0.06]" : "border-stone-300 text-stone-700 hover:bg-stone-50"}`}
+            >
+              Resume revision workflow
+            </Link>
           </div>
+          <dl className={`mt-5 grid gap-2 border-t pt-4 text-xs sm:grid-cols-2 ${isDark ? "border-white/[0.08]" : "border-stone-200"}`}>
+            {book.genre ? <div><dt className={isDark ? "text-slate-400" : "text-stone-500"}>Genre</dt><dd className="mt-1 font-medium">{book.genre}</dd></div> : null}
+            <div><dt className={isDark ? "text-slate-400" : "text-stone-500"}>Manuscript status</dt><dd className="mt-1 font-medium capitalize">{book.status.replace(/_/g, " ")}</dd></div>
+            {createdLabel ? <div><dt className={isDark ? "text-slate-400" : "text-stone-500"}>Created</dt><dd className="mt-1 font-medium">{createdLabel}</dd></div> : null}
+            {hasBookTarget ? <div><dt className={isDark ? "text-slate-400" : "text-stone-500"}>Manuscript progress</dt><dd className="mt-1 font-medium">{Math.round(manuscriptProgress)}%</dd></div> : null}
+          </dl>
         </div>
       </div>
 
-      <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <HeroMetric isDark={isDark} label="Draft progress" value={`${formatNumber(currentWords)} / ${targetWords.toLocaleString()}`} note={`${Math.round(manuscriptProgress)}% of target`} progress={manuscriptProgress} />
+      <div className={`mt-5 grid grid-cols-2 gap-y-4 border-t pt-4 xl:grid-cols-4 ${isDark ? "border-white/[0.08]" : "border-stone-200"}`}>
+        <HeroMetric isDark={isDark} label="Draft progress" value={hasBookTarget ? `${formatNumber(currentWords)} / ${targetWords.toLocaleString()}` : `${formatNumber(currentWords)} words`} note={hasBookTarget ? `${Math.round(manuscriptProgress)}% of target` : "No book target set"} progress={hasBookTarget ? manuscriptProgress : undefined} />
         <HeroMetric isDark={isDark} label="Daily target" value={`${dailyWords.toLocaleString()} / ${dailyTarget.toLocaleString()}`} note="Today's quota" progress={goalProgress} />
-        <HeroMetric isDark={isDark} label="Writing rhythm" value={`${loginStreakDays} day${loginStreakDays === 1 ? "" : "s"}`} note="Current streak" progress={Math.min(100, loginStreakDays * 12)} />
-        <HeroMetric isDark={isDark} label="Est. completion" value={etaDate} note={etaDays ? `In ${etaDays} day${etaDays === 1 ? "" : "s"}` : "Add a daily goal"} progress={etaDays ? clamp(100 - etaDays, 6, 100) : 0} />
+        <HeroMetric isDark={isDark} label="Sign-in streak" value={`${loginStreakDays} day${loginStreakDays === 1 ? "" : "s"}`} note="Consecutive login days" />
+        <HeroMetric isDark={isDark} label="Est. completion" value={etaDays !== null ? (etaDays === 0 ? "Target reached" : `In ${etaDays} day${etaDays === 1 ? "" : "s"}`) : "No target set"} note={etaDays !== null ? "At the current daily target" : "Set a book target to calculate"} />
       </div>
     </section>
   )
@@ -189,39 +206,36 @@ export function RecentChaptersCard({
     <section className={panelClass(isDark, "h-full p-4 sm:p-5")}>
       <div className="flex items-start justify-between gap-3">
         <div>
-          <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Recent chapters</p>
-          <div className="mt-3 flex flex-wrap gap-2">
-            <StatusPill isDark={isDark} label={book.status === "ready" ? "Drafting" : book.status.replace(/_/g, " ")} tone="violet" />
-            <StatusPill isDark={isDark} label={`${chapters.length} indexed ${unitTitle.toLowerCase()}${chapters.length === 1 ? "" : "s"}`} tone="slate" />
-          </div>
+          <h2 className={`text-sm font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>Latest {unitTitle.toLowerCase()}s</h2>
+          <p className={`mt-1 text-xs ${isDark ? "text-slate-400" : "text-stone-500"}`}>{chapters.length} indexed · {book.status === "ready" ? "Draft ready" : book.status.replace(/_/g, " ")}</p>
         </div>
-        <button type="button" onClick={() => onNavigate(`/${bookId}/manuscript`)} className="text-xs font-semibold text-teal-600">
+        <button type="button" onClick={() => onNavigate(`/${bookId}/manuscript`)} className={`text-xs font-semibold ${isDark ? "text-teal-300" : "text-teal-700"}`}>
           Open draft
         </button>
       </div>
-      <div className="mt-5 space-y-3">
+      <div className={`mt-4 divide-y border-y ${isDark ? "divide-white/[0.07] border-white/[0.07]" : "divide-stone-200 border-stone-200"}`}>
         {recentChapters.length > 0 ? recentChapters.map((chapter) => (
           <button
             key={chapter.number}
             type="button"
             onClick={() => onNavigate(`/${bookId}/chapter/${chapter.number}`)}
-            className={`flex w-full items-start justify-between gap-3 rounded-md border px-4 py-3 text-left transition ${isDark ? "border-white/[0.06] bg-white/[0.03] hover:bg-white/[0.06]" : "border-slate-200 bg-white hover:bg-slate-50"}`}
+            className={`flex w-full items-start justify-between gap-3 px-1 py-3 text-left transition-colors ${isDark ? "hover:bg-white/[0.03]" : "hover:bg-stone-50"}`}
           >
             <div className="min-w-0">
-              <p className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>{unitPrefix} {chapter.number}</p>
+              <p className={`text-xs font-medium ${isDark ? "text-slate-400" : "text-stone-500"}`}>{unitPrefix} {chapter.number}</p>
               <p className={`mt-1 break-words text-sm font-medium leading-6 ${isDark ? "text-slate-100" : "text-slate-800"}`}>{chapter.title || `${unitTitle} ${chapter.number}`}</p>
-              <p className={`mt-1 text-xs ${isDark ? "text-slate-500" : "text-slate-400"}`}>{chapter.read ? "Opened recently" : "Ready to draft"}</p>
+              <p className={`mt-1 text-xs ${isDark ? "text-slate-300" : "text-slate-600"}`}>{chapter.read ? "Opened" : "Not opened"}</p>
             </div>
-            <span className="text-xs font-semibold text-teal-600">{chapter.read ? "Read" : "Open"}</span>
+            <span className={`text-xs font-semibold ${isDark ? "text-teal-300" : "text-teal-700"}`}>{chapter.read ? "Read" : "Open"}</span>
           </button>
         )) : (
-          <p className={`rounded-md border border-dashed px-4 py-6 text-sm ${isDark ? "border-white/[0.08] text-slate-500" : "border-slate-200 text-slate-400"}`}>
-            {unitTitle} indexing is still syncing.
+          <p className={`px-1 py-5 text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>
+            No {unitTitle.toLowerCase()}s are available yet.
           </p>
         )}
       </div>
       <button type="button" onClick={() => onNavigate(`/${bookId}/chapters`)} className={footerLinkClass(isDark)}>
-        View all chapters <Icon name="chevron" />
+        View all {unitTitle.toLowerCase()}s <Icon name="chevron" />
       </button>
     </section>
   )
@@ -244,7 +258,7 @@ export function StoryPulseCard({
   if (storyHealthError && !storyHealth && onRetryStoryHealth) {
     return (
       <section className={panelClass(isDark, "h-full p-4 sm:p-5")}>
-        <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Story pulse</p>
+        <p className={`text-sm font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>Story health</p>
         <div className="mt-4">
           <ErrorCard
             message="Failed to load story health"
@@ -257,54 +271,45 @@ export function StoryPulseCard({
     )
   }
 
-  const score = storyHealth?.score ?? 0
-  const status = storyHealth?.status ?? "Syncing"
-  const summary = storyHealth?.summary ?? "LoreVia is still building the latest story pulse."
-  const healthColor = score >= 85 ? "#45d483" : score >= 70 ? "#8b5cf6" : score >= 55 ? "#f5bf3d" : "#fb7185"
-  const topMetrics = (storyHealth?.metrics ?? []).slice(0, 3)
+  const healthAvailable = Boolean(storyHealth && storyHealth.available !== false)
+  const score = healthAvailable ? storyHealth!.score : 0
+  const status = storyHealth?.status ?? "Not available"
+  const summary = storyHealth?.summary ?? "Story health needs analyzed manuscript evidence before a score can be calculated."
+  const topMetrics = (storyHealth?.metrics ?? []).filter((metric) => metric.available !== false).slice(0, 3)
   const selectedMetric = topMetrics.find((metric) => metric.label === selectedMetricLabel) ?? null
 
   return (
     <section className={panelClass(isDark, "h-full p-4 sm:p-5")}>
       <div className="flex items-start justify-between gap-3">
         <div>
-          <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Story pulse</p>
-          <h2 className={`mt-2 text-lg font-semibold ${isDark ? "text-white" : "text-slate-900"}`}>Key metrics only.</h2>
+          <p className={`text-sm font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>Story health</p>
+          <p className={`mt-1 text-xs ${isDark ? "text-slate-400" : "text-stone-500"}`}>{status}</p>
         </div>
-        <span className={`rounded-full px-3 py-1 text-3xs font-semibold ${isDark ? "bg-white/[0.05] text-slate-300" : "bg-slate-100 text-slate-600"}`}>{status}</span>
+        {healthAvailable ? <span className={`text-3xl font-semibold tabular-nums ${isDark ? "text-white" : "text-stone-950"}`}>{score}<span className={`ml-1 text-sm font-normal ${isDark ? "text-slate-400" : "text-stone-600"}`}>/100</span></span> : null}
       </div>
 
-      <div className="mt-5 flex items-center gap-4">
-        <div
-          className="relative flex h-24 w-24 items-center justify-center rounded-full"
-          style={{ background: `conic-gradient(${healthColor} 0 ${score}%, ${isDark ? "#1b2430" : "#edf0f5"} ${score}% 100%)` }}
-        >
-          <div className={`flex h-[4.6rem] w-[4.6rem] flex-col items-center justify-center rounded-full ${isDark ? "bg-[#0d141c]" : "bg-white"}`}>
-            <span className={`text-2xl font-semibold ${isDark ? "text-white" : "text-slate-950"}`}>{score}</span>
-            <span className={`text-3xs ${isDark ? "text-slate-500" : "text-slate-400"}`}>health</span>
-          </div>
-        </div>
-        <p className={`min-w-0 break-words text-sm leading-6 ${isDark ? "text-slate-300" : "text-slate-600"}`}>{summary}</p>
-      </div>
+      <p className={`mt-4 min-w-0 break-words text-sm leading-6 ${isDark ? "text-slate-300" : "text-stone-600"}`}>{summary}</p>
 
-      <div className="mt-5 space-y-3">
+      <div className={`mt-4 divide-y border-y ${isDark ? "divide-white/[0.07] border-white/[0.07]" : "divide-stone-200 border-stone-200"}`}>
         {topMetrics.map((metric) => (
           <button
             key={metric.label}
             type="button"
+            aria-label={`${metric.label}: ${metric.score}%`}
+            aria-expanded={selectedMetricLabel === metric.label}
             onClick={() => setSelectedMetricLabel((current) => current === metric.label ? null : metric.label)}
-            className={`w-full rounded-md border px-4 py-3 text-left transition ${isDark ? "border-white/[0.06] bg-white/[0.03] hover:bg-white/[0.06]" : "border-slate-200 bg-white hover:bg-slate-50"} ${selectedMetricLabel === metric.label ? (isDark ? "ring-1 ring-sky-400/60" : "ring-1 ring-sky-500/50") : ""}`}
+            className={`w-full px-1 py-3 text-left transition-colors ${isDark ? "hover:bg-white/[0.03]" : "hover:bg-stone-50"}`}
           >
             <div className="flex items-center justify-between gap-3">
               <span className={isDark ? "min-w-0 break-words text-sm text-slate-200" : "min-w-0 break-words text-sm text-slate-700"}>{metric.label}</span>
-              <span className="text-sm font-semibold text-teal-700">{metric.score}%</span>
+              <span className="text-sm font-semibold text-teal-700 dark:text-teal-300">{metric.score}%</span>
             </div>
           </button>
         ))}
       </div>
 
       {selectedMetric ? (
-        <div className={`mt-4 rounded-md border px-4 py-3 ${isDark ? "border-sky-400/30 bg-sky-500/10" : "border-sky-200 bg-sky-50"}`}>
+        <div className={`mt-4 border-l-2 pl-3 ${isDark ? "border-teal-400" : "border-teal-700"}`}>
           <p className={`text-sm font-semibold ${isDark ? "text-sky-100" : "text-sky-800"}`}>{selectedMetric.label}: {selectedMetric.score}%</p>
           <p className={`mt-2 text-xs leading-5 ${isDark ? "text-slate-300" : "text-slate-600"}`}>{selectedMetric.detail}</p>
         </div>
@@ -312,9 +317,7 @@ export function StoryPulseCard({
 
       <Link
         href={`/${bookId}/analysis` as Route}
-        className={`mt-5 inline-flex w-full items-center justify-center rounded-md border px-4 py-3 text-sm font-semibold transition ${
-          isDark ? "border-white/10 bg-white/[0.04] text-teal-200 hover:bg-white/[0.08]" : "border-slate-200 bg-white text-teal-800 hover:bg-slate-50"
-        }`}
+        className={`mt-4 inline-flex text-sm font-semibold ${isDark ? "text-teal-300 hover:text-teal-200" : "text-teal-800 hover:text-teal-700"}`}
       >
         View full report
       </Link>
@@ -332,38 +335,33 @@ export function ActiveIssuesCard({
   processingSummary,
 }: {
   isDark: boolean
-  continuityIssueCount: number
-  worldGapCount: number
-  timelineIssueCount: number
+  continuityIssueCount: number | null
+  worldGapCount: number | null
+  timelineIssueCount: number | null
   onNavigate: (href: string) => void
   bookId: string
   processingSummary: string | null
 }) {
   const issues = [
-    { title: "Character Inconsistencies", rawCount: continuityIssueCount, severity: "High", icon: "users" as IconName, href: `/${bookId}/reports` },
-    { title: "World Gaps", rawCount: worldGapCount, severity: "Medium", icon: "gap" as IconName, href: `/${bookId}/world-gap` },
-    { title: "Timeline Conflicts", rawCount: timelineIssueCount, severity: "Low", icon: "timeline" as IconName, href: `/${bookId}/timeline` },
+    { title: "Continuity Flags", rawCount: continuityIssueCount, icon: "users" as IconName, href: `/${bookId}/reports` },
+    { title: "World Gaps", rawCount: worldGapCount, icon: "gap" as IconName, href: `/${bookId}/world-gap` },
+    { title: "Timeline Conflicts", rawCount: timelineIssueCount, icon: "timeline" as IconName, href: `/${bookId}/timeline` },
   ].map((issue) => ({
     ...issue,
-    ...buildIssueDisplay(issue.rawCount),
+    label: issue.rawCount === null ? "Open to check findings" : issue.rawCount === 0 ? "No findings reported" : `${issue.rawCount} issue${issue.rawCount === 1 ? "" : "s"} detected`,
   }))
 
   return (
       <section className={panelClass(isDark, "h-full p-4 sm:p-5")}>
         <div className="flex items-center justify-between gap-3">
           <div>
-            <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Next actions</p>
-            <h2 className={`mt-2 text-xl font-semibold ${isDark ? "text-white" : "text-slate-900"}`}>Keep the risky parts visible.</h2>
+            <h2 className={`text-sm font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>Revision priorities</h2>
+            <p className={`mt-1 text-xs ${isDark ? "text-slate-400" : "text-stone-500"}`}>Open findings by category</p>
           </div>
-          <Icon name="spark" className="h-5 w-5 text-teal-700" />
         </div>
 
-        <p className={`mt-4 text-sm leading-6 ${isDark ? "text-slate-300" : "text-slate-600"}`}>
-          Keep revision fallout visible before it reaches readers.
-        </p>
-
         {processingSummary ? (
-          <p className={`mt-4 rounded-md border px-4 py-3 text-sm leading-6 ${isDark ? "border-white/[0.06] bg-white/[0.03] text-slate-300" : "border-slate-200 bg-slate-50 text-slate-600"}`}>
+          <p className={`mt-4 border-l-2 pl-3 text-xs leading-5 ${isDark ? "border-slate-600 text-slate-400" : "border-stone-300 text-stone-500"}`}>
             {processingSummary}
           </p>
         ) : null}
@@ -371,170 +369,28 @@ export function ActiveIssuesCard({
         <button
           type="button"
           onClick={() => onNavigate(`/${bookId}/reports`)}
-          className={`mt-4 inline-flex items-center gap-2 rounded-md px-4 py-2 text-sm font-semibold transition ${isDark ? "bg-teal-800 text-white hover:bg-teal-700" : "bg-teal-800 text-white hover:bg-teal-700"}`}
+          className={`mt-4 text-sm font-semibold ${isDark ? "text-teal-300 hover:text-teal-200" : "text-teal-800 hover:text-teal-700"}`}
         >
-          Create revision checklist
+          Review all findings
         </button>
 
-        <div className="mt-4 space-y-3">
+        <div className={`mt-4 divide-y border-y ${isDark ? "divide-white/[0.07] border-white/[0.07]" : "divide-stone-200 border-stone-200"}`}>
         {issues.map((issue) => (
           <button
             key={issue.title}
             type="button"
             onClick={() => onNavigate(issue.href)}
-            className={`flex w-full items-center gap-3 rounded-md border px-4 py-3 text-left transition ${isDark ? "border-white/[0.06] bg-white/[0.03] hover:bg-white/[0.06]" : "border-slate-200 bg-white hover:bg-slate-50"}`}
+            className={`flex w-full items-center gap-3 px-1 py-3 text-left transition-colors ${isDark ? "hover:bg-white/[0.03]" : "hover:bg-stone-50"}`}
           >
             <Icon name={issue.icon} className="h-5 w-5 text-teal-700" />
             <div className="min-w-0 flex-1">
               <p className={`break-words text-sm font-semibold leading-6 ${isDark ? "text-slate-100" : "text-slate-800"}`}>{issue.title}</p>
-              <p className={`mt-1 break-words text-xs leading-5 ${isDark ? "text-slate-500" : "text-slate-400"}`}>{issue.label}</p>
-            </div>
-            <span className={`rounded-full px-2 py-1 text-3xs font-semibold ${severityClass(issue.severity, isDark)}`}>{issue.severity}</span>
-          </button>
-        ))}
-      </div>
-    </section>
-  )
-}
-
-export function CompactQuickLinksCard({
-  isDark,
-  links,
-  onNavigate,
-}: {
-  isDark: boolean
-  links: Array<{ title: string; body: string; href: string; icon: IconName }>
-  onNavigate: (href: string) => void
-}) {
-  return (
-    <section className={panelClass(isDark, "h-full p-4 sm:p-5")}>
-      <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Workspace links</p>
-      <div className="mt-4 space-y-3">
-        {links.map((link) => (
-          <button
-            key={link.title}
-            type="button"
-            onClick={() => onNavigate(link.href)}
-            className={`flex w-full items-start gap-3 rounded-md border px-4 py-3 text-left transition ${isDark ? "border-white/[0.06] bg-white/[0.03] hover:bg-white/[0.06]" : "border-slate-200 bg-white hover:bg-slate-50"}`}
-          >
-            <Icon name={link.icon} className="mt-0.5 h-5 w-5 text-teal-700" />
-            <div className="min-w-0">
-              <p className={`break-words text-sm font-semibold ${isDark ? "text-slate-100" : "text-slate-800"}`}>{link.title}</p>
-              <p className={`mt-1 break-words text-xs leading-5 ${isDark ? "text-slate-500" : "text-slate-400"}`}>{link.body}</p>
+              <p className={`mt-1 break-words text-xs leading-5 ${isDark ? "text-slate-300" : "text-slate-600"}`}>{issue.label}</p>
             </div>
           </button>
         ))}
       </div>
     </section>
-  )
-}
-
-export function RecentSignalsCard({
-  isDark,
-  unitTitle,
-  recentAlerts,
-  chapters,
-  onNavigate,
-  bookId,
-  preWritingCheckError,
-  onRetryPreWritingCheck,
-}: {
-  isDark: boolean
-  unitTitle: string
-  recentAlerts: PreWritingCheck["alerts"]
-  chapters: ChapterListResponse["chapters"]
-  onNavigate: (href: string) => void
-  bookId: string
-  preWritingCheckError?: boolean
-  onRetryPreWritingCheck?: () => void
-}) {
-  const recentEntries = useMemo(() => {
-    const chapterSignals = chapters.slice(-2).reverse().map((chapter) => ({
-      title: `${unitTitle} ${chapter.number}: ${chapter.title || `${unitTitle} ${chapter.number}`}`,
-      note: chapter.read ? "Recently opened" : "Ready to review",
-      href: `/${bookId}/chapter/${chapter.number}`,
-    }))
-
-    return [
-      ...recentAlerts.slice(0, 2).map((alert) => ({
-        title: alert.title,
-        note: alert.chapter_ref ? `Chapter ${alert.chapter_ref}` : "Author alert",
-        href: `/${bookId}/analysis`,
-      })),
-      ...chapterSignals,
-    ].slice(0, 4)
-  }, [bookId, chapters, recentAlerts, unitTitle])
-
-  if (preWritingCheckError && recentAlerts.length === 0 && chapters.length === 0 && onRetryPreWritingCheck) {
-    return (
-      <section className={panelClass(isDark, "h-full p-4 sm:p-5")}>
-        <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Recent signals</p>
-        <div className="mt-4">
-          <ErrorCard
-            message="Failed to load recent signals"
-            onRetry={onRetryPreWritingCheck}
-            variant="compact"
-            isDark={isDark}
-          />
-        </div>
-      </section>
-    )
-  }
-
-  return (
-    <section className={panelClass(isDark, "h-full p-4 sm:p-5")}>
-      <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Recent signals</p>
-      <div className="mt-4 space-y-3">
-        {recentEntries.length > 0 ? recentEntries.map((entry) => (
-          <button
-            key={`${entry.title}-${entry.note}`}
-            type="button"
-            onClick={() => onNavigate(entry.href)}
-            className={`w-full rounded-md border px-4 py-3 text-left transition ${isDark ? "border-white/[0.06] bg-white/[0.03] hover:bg-white/[0.06]" : "border-slate-200 bg-white hover:bg-slate-50"}`}
-          >
-              <p className={`break-words text-sm font-medium leading-6 ${isDark ? "text-slate-100" : "text-slate-800"}`}>{entry.title}</p>
-              <p className={`mt-1 break-words text-xs leading-5 ${isDark ? "text-slate-500" : "text-slate-400"}`}>{entry.note}</p>
-            </button>
-        )) : (
-          <p className={isDark ? "text-sm text-slate-500" : "text-sm text-slate-400"}>Signals will appear here as the workspace syncs.</p>
-        )}
-      </div>
-    </section>
-  )
-}
-
-function ModeToggle({
-  isDark,
-  activeMode,
-  modeSaving,
-  onModeChange,
-}: {
-  isDark: boolean
-  activeMode: "reader" | "author"
-  modeSaving: boolean
-  onModeChange: (nextMode: "reader" | "author") => void
-}) {
-  return (
-    <div className={`flex rounded-full border p-1 ${isDark ? "border-white/10 bg-white/[0.04]" : "border-slate-200 bg-slate-50"}`}>
-      {(["reader", "author"] as const).map((mode) => (
-        <button
-          key={mode}
-          type="button"
-          disabled={modeSaving}
-          aria-pressed={activeMode === mode}
-          onClick={() => onModeChange(mode)}
-          className={`rounded-full px-4 py-2 text-xs font-semibold capitalize transition ${
-            activeMode === mode
-              ? "bg-teal-800 text-white"
-              : isDark
-                ? "text-slate-300 hover:bg-white/[0.06]"
-                : "text-slate-600 hover:bg-white"
-          }`}
-        >
-          {mode}
-        </button>
-      ))}
-    </div>
   )
 }
 
@@ -549,47 +405,28 @@ function HeroMetric({
   label: string
   value: string
   note: string
-  progress: number
+  progress?: number
 }) {
   return (
-    <div className={`rounded-md border p-3 ${isDark ? "border-white/[0.06] bg-white/[0.025]" : "border-slate-200 bg-slate-50"}`}>
-      <p className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>{label}</p>
+    <div className={`px-1 sm:border-l sm:px-4 first:sm:border-l-0 first:sm:pl-0 ${isDark ? "border-white/[0.08]" : "border-stone-200"}`}>
+      <p className={`text-xs ${isDark ? "text-slate-400" : "text-stone-500"}`}>{label}</p>
       <p className={`mt-2 break-words text-sm font-semibold ${isDark ? "text-slate-100" : "text-slate-800"}`}>{value}</p>
-      <div className={`mt-3 h-1.5 overflow-hidden rounded-full ${isDark ? "bg-white/[0.08]" : "bg-slate-200"}`}>
-        <div className="h-full rounded-full bg-teal-700" style={{ width: `${clamp(progress, 0, 100)}%` }} />
-      </div>
-      <p className={`mt-2 text-3xs ${isDark ? "text-slate-500" : "text-slate-400"}`}>{note}</p>
+      {typeof progress === "number" ? (
+        <div className={`mt-3 h-1 overflow-hidden ${isDark ? "bg-white/[0.08]" : "bg-stone-200"}`}>
+          <div className="h-full bg-teal-700" style={{ width: `${clamp(progress, 0, 100)}%` }} />
+        </div>
+      ) : null}
+      <p className={`mt-2 text-xs ${isDark ? "text-slate-300" : "text-slate-600"}`}>{note}</p>
     </div>
   )
-}
-
-function StatusPill({
-  isDark,
-  label,
-  tone,
-}: {
-  isDark: boolean
-  label: string
-  tone: "violet" | "slate"
-}) {
-  const toneClass = tone === "violet"
-    ? isDark ? "bg-violet-500/10 text-violet-200" : "bg-violet-50 text-violet-700"
-    : isDark ? "bg-white/[0.06] text-slate-300" : "bg-slate-100 text-slate-600"
-  return <span className={`rounded-full px-2.5 py-1 text-3xs font-semibold capitalize ${toneClass}`}>{label}</span>
 }
 
 export function RevisionPreviewPlaceholder({ isDark }: { isDark: boolean }) {
   return (
     <section className={panelClass(isDark, "flex min-h-64 items-center justify-center p-5")}>
-      <p className={`text-sm ${isDark ? "text-slate-500" : "text-slate-400"}`}>Revision intelligence is still syncing.</p>
+      <p className={`text-sm ${isDark ? "text-slate-300" : "text-slate-600"}`}>Revision intelligence is still syncing.</p>
     </section>
   )
-}
-
-function secondaryButtonClass(isDark: boolean) {
-  return `inline-flex min-h-11 items-center gap-2 rounded-md border px-4 py-2.5 text-sm font-semibold transition ${
-    isDark ? "border-white/10 bg-white/[0.04] text-slate-100 hover:bg-white/[0.08]" : "border-slate-200 bg-white text-slate-800 hover:bg-slate-50"
-  }`
 }
 
 function footerLinkClass(isDark: boolean) {

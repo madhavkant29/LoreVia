@@ -1,7 +1,9 @@
 import { create } from "zustand"
 import { resetIdentity } from "@/lib/analytics/posthog"
 import { normalizeUser } from "@/lib/billing/plans"
+import { resetSessionQueries } from "@/lib/query/queryClient"
 import type { User } from "@/types/user"
+import { useBookModeStore } from "./bookModeStore"
 import { useUiPreferencesStore } from "./uiPreferencesStore"
 
 const AUTH_USER_STORAGE_KEY = "lorevia-auth-user"
@@ -51,6 +53,8 @@ export const useAuthStore = create<AuthStore>()((set) => ({
     writeCachedAuthUser(normalizedUser)
     const previousUserId = useAuthStore.getState().user?.id ?? null
     if (previousUserId && previousUserId !== normalizedUser.id) {
+      void resetSessionQueries()
+      useBookModeStore.getState().clearAllModes()
       useUiPreferencesStore.getState().clearActiveUser()
       resetIdentity()
     }
@@ -60,6 +64,8 @@ export const useAuthStore = create<AuthStore>()((set) => ({
   setHydrated: () => set({ hydrated: true }),
   logout: () => {
     clearCachedAuthUser()
+    void resetSessionQueries()
+    useBookModeStore.getState().clearAllModes()
     useUiPreferencesStore.getState().clearActiveUser()
     resetIdentity()
     set({ user: null, hydrated: true })

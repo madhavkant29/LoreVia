@@ -87,6 +87,15 @@ describe("overview goal calendar", () => {
     expect(getContainer().textContent).toContain("1,200 words")
     expect(getContainer().textContent).toContain("Planner saved")
 
+    const nextMonth = getContainer().querySelector('button[aria-label="Show next month"]')!
+    act(() => nextMonth.dispatchEvent(new MouseEvent("click", { bubbles: true })))
+    expect(getContainer().textContent).toContain("July 2026")
+    const previousMonth = getContainer().querySelector('button[aria-label="Show previous month"]')!
+    act(() => previousMonth.dispatchEvent(new MouseEvent("click", { bubbles: true })))
+    expect(getContainer().textContent).toContain("June 2026")
+    expect(getContainer().querySelector('input[aria-label="Planning date"]')).not.toBeNull()
+    expect(getContainer().querySelector('select[aria-label="Quota unit"]')).not.toBeNull()
+
     const titleInput = getContainer().querySelector("input[aria-label='Planning item']") as HTMLInputElement
     const quotaInput = getContainer().querySelector("input[aria-label='Planning quota']") as HTMLInputElement
     const unitSelect = getContainer().querySelector("select") as HTMLSelectElement

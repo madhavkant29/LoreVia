@@ -43,7 +43,8 @@ describe("runtime ReaderView", () => {
     }
     await renderElement(<ReaderView bookId="book-1" chapterNum={2} />)
     await act(flush)
-    expect(replaceMock).toHaveBeenCalledWith("/library")
+    expect(replaceMock).not.toHaveBeenCalled()
+    expect(text()).toContain("Retry chapter")
     expect(text()).toContain("Chapter unavailable")
 
     cleanupRuntimeUi()

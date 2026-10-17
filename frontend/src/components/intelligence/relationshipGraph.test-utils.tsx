@@ -3,7 +3,7 @@
 import { act, type ReactElement, type ReactNode } from "react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { createRoot, type Root } from "react-dom/client"
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, vi } from "vitest"
 
 const readerApiMock = vi.hoisted(() => ({
   getRelationships: vi.fn(),
@@ -166,6 +166,8 @@ class FakeCy {
   }
 
   fit() {}
+
+  resize() {}
 
   animate() {}
 
@@ -370,6 +372,7 @@ export function graphHandle() {
 }
 
 beforeEach(() => {
+  Object.defineProperty(window, "matchMedia", { configurable: true, value: () => ({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() }) })
   Object.defineProperty(window, "localStorage", {
     configurable: true,
     value: localStorageMock,

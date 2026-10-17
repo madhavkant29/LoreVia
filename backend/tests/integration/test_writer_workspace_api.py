@@ -411,6 +411,77 @@ async def test_reorder_chapter_scenes_persists_sort_order_and_structure_version(
 
 
 @pytest.mark.asyncio
+async def test_chapter_content_save_endpoint_persists_paste_and_accepts_identical_retry(
+    client, db, monkeypatch
+):
+    storage: dict[str, bytes] = {}
+
+    def _upload_text(key: str, content: str) -> str:
+        storage[key] = content.encode("utf-8")
+        return key
+
+    def _download_book(key: str) -> bytes:
+        return storage[key]
+
+    for target in (
+        "app.core.storage",
+        "app.utils.books.manuscript",
+        "app.utils.reader_utils",
+        "app.services.chapter_content_service.storage",
+    ):
+        monkeypatch.setattr(f"{target}.download_book", _download_book, raising=False)
+    monkeypatch.setattr("app.core.storage.upload_text", _upload_text, raising=False)
+    monkeypatch.setattr("app.utils.books.manuscript.upload_text", _upload_text, raising=False)
+
+    headers, user_id = await _register_user(
+        client, f"chapter-save-{uuid.uuid4().hex[:8]}@lorevia.app"
+    )
+    book = Book(
+        user_id=user_id,
+        title="Chapter Save",
+        format="txt",
+        s3_key="books/chapter-save.txt",
+        status="ready",
+        mode="author",
+        total_chapters=0,
+    )
+    db.add(book)
+    await db.commit()
+
+    payload = {
+        "title": "The Oath",
+        "text": "Mara repeats the gate oath.",
+        "expected_content_version": 0,
+        "client_mutation_id": "mutation-1",
+    }
+    response = await client.put(
+        f"/api/v1/books/{book.id}/chapters/1/content",
+        headers=headers,
+        json=payload,
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "created"
+    assert body["content_version"] == 1
+    assert body["story_memory_status"] == "queued"
+
+    persisted_chapter = (
+        await db.execute(select(Chapter).where(Chapter.book_id == book.id, Chapter.number == 1))
+    ).scalar_one()
+    stored = deserialize_manuscript_content(_download_book(persisted_chapter.s3_key))
+    assert stored["text"] == "Mara repeats the gate oath."
+    assert persisted_chapter.title == "The Oath"
+
+    retry = await client.put(
+        f"/api/v1/books/{book.id}/chapters/1/content",
+        headers=headers,
+        json={**payload, "expected_content_version": 1, "client_mutation_id": "mutation-2"},
+    )
+    assert retry.status_code == 200
+    assert retry.json()["status"] == "unchanged"
+
+
+@pytest.mark.asyncio
 async def test_reorder_chapter_scenes_rejects_stale_structure_versions(client, db):
     headers, user_id = await _register_user(
         client, f"scene-order-conflict-{uuid.uuid4().hex[:8]}@lorevia.app"

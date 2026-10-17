@@ -92,7 +92,7 @@ export function useUploadWorkflow({
     const [editorial, suggestions, threads, synopsis] = await Promise.all([
       intelligenceApi.editorialReview(bookId, content, chapterNum),
       intelligenceApi.advisorSuggestions(bookId),
-      readerApi.getPlotThreads(bookId, chapterNum ?? 9999),
+      readerApi.getPlotThreads(bookId, chapterNum),
       intelligenceApi.synopsis(bookId, "minimal").catch(() => null),
     ])
     setPostImportReview(editorial.review)

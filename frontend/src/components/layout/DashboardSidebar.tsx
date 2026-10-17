@@ -11,9 +11,8 @@ import { booksApi } from "@/lib/api/books"
 import { BrandLockup } from "@/components/layout/BrandLockup"
 import { ChatLauncher } from "@/components/layout/ChatLauncher"
 import { NotificationBell } from "@/components/layout/NotificationBell"
-import { asQueryKey, booksListCacheKey } from "@/lib/query/cacheKeys"
+import { asQueryKey, booksSelectorCacheKey } from "@/lib/query/cacheKeys"
 import { queryClient } from "@/lib/query/queryClient"
-import { prefetchChatsSidebarData, prefetchNotificationsSidebarData } from "@/lib/query/sidebarPrefetch"
 import { useAuthStore } from "@/lib/stores/authStore"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 import { useUiPreferencesStore } from "@/lib/stores/uiPreferencesStore"
@@ -24,6 +23,7 @@ type NavItem = {
   id: string
   href: Route
   label: string
+  description?: string
   icon: (className?: string) => ReactNode
   group?: "primary" | "secondary"
 }
@@ -72,14 +72,17 @@ export function DashboardSidebar({ children }: { children: ReactNode }) {
   const [mobileOpen, setMobileOpen] = useState(false)
   const [desktopNav, setDesktopNav] = useState(false)
   const [badgeQueriesEnabled, setBadgeQueriesEnabled] = useState(false)
-  const sidebarPrefetchedRef = useRef(false)
   const libraryPrefetchedRef = useRef(false)
   const pathname = usePathname()
+  const focusedBilling = pathname === "/upgrade"
   const isDark = theme === "dark"
   const showUserChrome = authHydrated && !!user
   const navItems = useMemo<NavItem[]>(() => {
     const resolved = resolveWorkspaceTools(DASHBOARD_TOOLS, {
-      mode: uiPreferences.complexity_mode ?? "standard",
+      // Keep the dashboard navigation complete. Explicit user visibility
+      // preferences still apply, while focused mode continues to control
+      // book-level tools and other contextual surfaces.
+      mode: "standard",
       activePath: pathname,
       globalPreference: uiPreferences,
       placement: "dashboard",
@@ -91,6 +94,7 @@ export function DashboardSidebar({ children }: { children: ReactNode }) {
         id: tool.id,
         href: href as Route,
         label: tool.label,
+        description: tool.purpose ?? tool.description,
         icon: iconForTool(tool.icon),
         group: navGroupForToolGroup(tool.group),
       }))
@@ -113,7 +117,7 @@ export function DashboardSidebar({ children }: { children: ReactNode }) {
   }, [])
 
   useEffect(() => {
-    if (!user || !authHydrated || badgeQueriesEnabled) return
+    if (focusedBilling || !user || !authHydrated || badgeQueriesEnabled) return
 
     const scheduleEnablement =
       typeof window.requestIdleCallback === "function"
@@ -127,15 +131,10 @@ export function DashboardSidebar({ children }: { children: ReactNode }) {
 
     const handle = scheduleEnablement(() => {
       setBadgeQueriesEnabled(true)
-      if (!sidebarPrefetchedRef.current) {
-        sidebarPrefetchedRef.current = true
-        void prefetchNotificationsSidebarData()
-        void prefetchChatsSidebarData()
-      }
     })
 
     return () => cancelEnablement(handle)
-  }, [authHydrated, badgeQueriesEnabled, user])
+  }, [authHydrated, badgeQueriesEnabled, focusedBilling, user])
 
   const profileInitial = useMemo(() => {
     const source = user?.username || user?.email || "?"
@@ -149,10 +148,41 @@ export function DashboardSidebar({ children }: { children: ReactNode }) {
     if (libraryPrefetchedRef.current) return
     libraryPrefetchedRef.current = true
     queryClient.prefetchQuery({
-      queryKey: asQueryKey(booksListCacheKey(true)),
-      queryFn: () => booksApi.list(true),
+      queryKey: asQueryKey(booksSelectorCacheKey(true)),
+      queryFn: () => booksApi.listSelector(true),
     })
   }, [])
+
+  if (focusedBilling) {
+    return (
+      <div className="min-h-screen bg-[#f4f6f8] text-stone-950 transition-colors duration-150 dark:bg-[rgb(20,24,27)] dark:text-[#efe9df]">
+        <header className="border-b border-stone-200 px-4 py-4 dark:border-white/[0.12] sm:px-6 lg:px-8">
+          <div className="mx-auto flex max-w-[1160px] items-center justify-between gap-4">
+            <Link href="/library" aria-label="Return to LoreVia workspace">
+              <BrandLockup size="lg" />
+            </Link>
+            <div className="flex items-center gap-3">
+              <Link href="/library" className="text-sm font-semibold text-stone-600 hover:text-stone-950 dark:text-slate-300 dark:hover:text-white">
+                Back to workspace
+              </Link>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={toggleTheme}
+                className="inline-flex h-10 w-10 items-center justify-center rounded-full px-0 py-0"
+                aria-label="Toggle theme"
+              >
+                {isDark ? <SunIcon /> : <MoonIcon />}
+              </Button>
+            </div>
+          </div>
+        </header>
+        <main className="mx-auto max-w-[1160px] px-4 pb-16 pt-10 sm:px-6 lg:px-8 lg:pt-14">
+          {children}
+        </main>
+      </div>
+    )
+  }
 
   return (
     <div className="min-h-screen bg-[#f4f6f8] text-stone-950 transition-colors duration-150 dark:bg-[rgb(20,24,27)] dark:text-[#efe9df]">
@@ -300,6 +330,8 @@ function NavLink({
     <div className={separated ? "mt-7 border-t border-stone-200 pt-5 dark:border-white/[0.08]" : undefined}>
       <Link
         href={item.href}
+        title={item.description ?? `Open ${item.label}`}
+        aria-label={item.description ? `${item.label}: ${item.description}` : `Open ${item.label}`}
         aria-current={active ? "page" : undefined}
         onClick={onClick}
         onMouseEnter={onLibraryPrefetch}
@@ -307,7 +339,7 @@ function NavLink({
         className={`group relative flex min-h-12 items-center gap-3 rounded-sm px-4 text-sm font-medium transition-colors ${
           active
             ? "bg-stone-200 text-stone-950 before:absolute before:bottom-0 before:left-0 before:top-0 before:w-1 before:bg-teal-400 dark:bg-white/[0.08] dark:text-white"
-            : "text-[rgb(var(--muted-foreground))] hover:bg-stone-200/70 hover:text-stone-950 dark:hover:bg-white/[0.05] dark:hover:text-white"
+            : "text-stone-600 hover:bg-stone-200/70 hover:text-stone-950 dark:text-slate-300 dark:hover:bg-white/[0.05] dark:hover:text-white"
         }`}
       >
         <span className={active ? "text-teal-500" : "text-current"}>{item.icon("h-5 w-5")}</span>

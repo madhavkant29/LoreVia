@@ -12,18 +12,15 @@ const booksApiMock = vi.hoisted(() => ({
   listCollaborators: vi.fn(),
   updateCollaborator: vi.fn(),
 }))
-const betaReadsApiMock = vi.hoisted(() => ({
-  createAssignment: vi.fn(),
-  listBookAssignments: vi.fn(),
-  revokeAssignment: vi.fn(),
-}))
 
-vi.mock("@tanstack/react-query", () => ({ useQuery: useQueryMock }))
+vi.mock("@tanstack/react-query", () => ({ useQuery: useQueryMock, useQueryClient: () => ({ cancelQueries: vi.fn(), setQueryData: vi.fn(), invalidateQueries: vi.fn() }) }))
 vi.mock("next/dynamic", () => ({
   default: () => function MockAuthorToolsNav() {
     return <nav>Author tools nav</nav>
   },
 }))
+vi.mock("@/lib/stores/authStore", () => ({ useAuthStore: (selector: (state: unknown) => unknown) => selector({ user: { tier: "author" } }) }))
+vi.mock("@/components/ui/ConfirmDialog", () => ({ useConfirmDialog: () => async () => true }))
 vi.mock("next/navigation", () => ({ useParams: () => ({ bookId: "book-1" }) }))
 vi.mock("@/components/reader/WorkspaceFamilyHeader", () => ({
   WorkspaceFamilyHeader: ({ title, description }: { title: string; description: string }) => (
@@ -37,7 +34,6 @@ vi.mock("@/components/ui/Tooltip", () => ({
   Tooltip: ({ children }: { children: ReactNode }) => <>{children}</>,
 }))
 vi.mock("@/lib/api/books", () => ({ booksApi: booksApiMock }))
-vi.mock("@/lib/api/betaReads", () => ({ betaReadsApi: betaReadsApiMock }))
 vi.mock("@/lib/query/cacheKeys", () => ({
   asQueryKey: (value: unknown) => value,
   bookCacheKey: (...parts: string[]) => parts.join(":"),
@@ -52,6 +48,7 @@ let root: Root | null = null
 const bookFixture = {
   id: "book-1",
   title: "Gate Draft",
+  access_class: "owner",
   workspace_shell: "author",
   mode: "author",
 }
@@ -182,15 +179,13 @@ async function click(label: string, index = 0) {
 }
 
 beforeEach(() => {
+  Element.prototype.scrollIntoView = vi.fn()
   const refetch = vi.fn().mockResolvedValue({})
-  booksApiMock.createCollaborator.mockResolvedValue({})
-  booksApiMock.updateCollaborator.mockResolvedValue({})
-  betaReadsApiMock.createAssignment.mockResolvedValue({})
-  betaReadsApiMock.revokeAssignment.mockResolvedValue({})
-  useQueryMock.mockImplementation(({ queryKey }: { queryKey: string }) => {
+  booksApiMock.createCollaborator.mockResolvedValue({ ...collaboratorFixture, id: "new-person", email: "new@example.com" })
+  booksApiMock.updateCollaborator.mockResolvedValue({ ...collaboratorFixture, invite_status: "revoked" })
+  useQueryMock.mockImplementation(({ queryKey }: { queryKey: string | string[] }) => {
     if (queryKey === "book-1:detail") return { data: bookFixture, isLoading: false, refetch }
-    if (queryKey === "collaboration:book-1:collaborators") return { data: [collaboratorFixture], isLoading: false, refetch }
-    if (queryKey === "collaboration:book-1:beta-assignments") return { data: [betaAssignmentFixture], isLoading: false, refetch }
+    if (queryKey === "book-1:collaborators") return { data: [collaboratorFixture], isLoading: false, refetch }
     if (String(queryKey).includes("collaborator-activity") || String(queryKey).includes("all-activity")) {
       return { data: activityFixture, isLoading: false, refetch }
     }
@@ -212,51 +207,36 @@ afterEach(() => {
 })
 
 describe("CollaborationPage", () => {
-  it("renders collaboration activity and drives share and beta-read actions", async () => {
+  it("renders a people table and drives invitation, activity, and revoke actions", async () => {
     await renderPage(<CollaborationPage />)
-    await waitForText("Gate Draft collaborators")
+    await waitForText("Collaborators")
     await waitForText("Edda Editor")
-    await waitForText("Chapter note")
-    await waitForText("Chapters 1-3 response")
 
+    await click("Invite collaborator")
     setFieldValue(container?.querySelector("#collaborator-email") as HTMLInputElement, "new@example.com")
     setFieldValue(container?.querySelector("#collaborator-display-name") as HTMLInputElement, "New Reader")
     setFieldValue(container?.querySelector("#collaborator-role") as HTMLSelectElement, "commenter")
-    await click("Save share")
+    await click("Grant access")
     expect(booksApiMock.createCollaborator).toHaveBeenCalledWith("book-1", expect.objectContaining({
       email: "new@example.com",
       displayName: "New Reader",
       role: "commenter",
     }))
-    await waitForText("Share saved.")
+    await waitForText("Access granted.")
 
     await click("View activity")
-    await waitForText("Recent activity from Edda Editor.")
-    await click("All")
-    await waitForText("Activity from all 1 collaborator.")
+    await waitForText("Recent collaboration activity")
+    await waitForText("Chapter note")
 
     await click("Revoke")
     expect(booksApiMock.updateCollaborator).toHaveBeenCalledWith("book-1", "collab-1", { inviteStatus: "revoked" })
+  })
 
-    setFieldValue(container?.querySelector("#beta-reader-email") as HTMLInputElement, "beta@example.com")
-    setFieldValue(container?.querySelector("#beta-task-label") as HTMLInputElement, "Middle act beta read")
-    await click("Section")
-    setFieldValue(container?.querySelector("#beta-start-chapter") as HTMLInputElement, "4")
-    setFieldValue(container?.querySelector("#beta-end-chapter") as HTMLInputElement, "7")
-    setFieldValue(container?.querySelector("#beta-section-label") as HTMLInputElement, "Middle act")
-    setFieldValue(container?.querySelector("#beta-author-questions") as HTMLTextAreaElement, "What dragged?\nWhat surprised you?")
-    await click("Grant beta read")
-    expect(betaReadsApiMock.createAssignment).toHaveBeenCalledWith("book-1", expect.objectContaining({
-      readerEmail: "beta@example.com",
-      taskLabel: "Middle act beta read",
-      scopeKind: "section",
-      chapterStart: 4,
-      chapterEnd: 7,
-      sectionLabel: "Middle act",
-      authorQuestions: ["What dragged?", "What surprised you?"],
-    }))
-
-    await click("Revoke beta read")
-    expect(betaReadsApiMock.revokeAssignment).toHaveBeenCalledWith("book-1", "assignment-1")
+  it("does not request collaborator activity before a person is selected", async () => {
+    await renderPage(<CollaborationPage />)
+    const activityOptions = useQueryMock.mock.calls
+      .map(([options]) => options as { queryKey: unknown; enabled?: boolean })
+      .find(({ queryKey }) => String(queryKey).includes("activity:idle"))
+    expect(activityOptions?.enabled).toBe(false)
   })
 })

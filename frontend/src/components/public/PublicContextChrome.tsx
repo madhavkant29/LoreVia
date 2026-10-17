@@ -1,9 +1,9 @@
 "use client"
 
 import { ArrowLeft, BookOpen, MessageCircle, Moon, Sun } from "lucide-react"
-import Image from "next/image"
 import Link from "next/link"
 
+import { ThemeBrandImage } from "@/components/layout/ThemeBrandImage"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 
 export function PublicContextChrome() {
@@ -14,8 +14,8 @@ export function PublicContextChrome() {
     <header className="border-b border-[rgba(var(--border),0.75)] bg-[rgb(var(--background))]">
       <nav aria-label="Public navigation" className="mx-auto flex min-h-16 max-w-[1240px] items-center gap-3 px-4 md:px-8 lg:px-10">
         <Link href="/public" className="mr-auto inline-flex min-h-11 items-center" aria-label="LoreVia public library">
-          <Image src="/image.png" alt="LoreVia" width={44} height={44} className="h-10 w-10 object-contain invert dark:invert-0 sm:hidden" priority />
-          <Image src="/logoandtext.png" alt="" width={164} height={44} className="hidden h-11 w-auto object-contain invert dark:invert-0 sm:block" priority />
+          <ThemeBrandImage variant="icon" mode={theme} alt="LoreVia" className="h-9 w-9 object-contain sm:hidden" priority />
+          <ThemeBrandImage variant="lockup" mode={theme} alt="LoreVia" className="hidden h-9 w-auto object-contain sm:block" priority />
         </Link>
         <div className="hidden items-center gap-1 sm:flex">
           <Link href="/public" className="inline-flex min-h-11 items-center gap-2 px-3 text-sm font-semibold text-[rgb(var(--muted-foreground))] hover:text-[rgb(var(--foreground))]">
@@ -24,7 +24,7 @@ export function PublicContextChrome() {
           </Link>
           <Link href="/public/forum" className="inline-flex min-h-11 items-center gap-2 px-3 text-sm font-semibold text-[rgb(var(--muted-foreground))] hover:text-[rgb(var(--foreground))]">
             <MessageCircle className="h-4 w-4" aria-hidden="true" />
-            Forum
+            Book discussions
           </Link>
         </div>
         <button

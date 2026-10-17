@@ -57,8 +57,8 @@ export function WhatsTheWordPanel({
       <button
         type="button"
         onClick={() => setOpen((current) => !current)}
-        className={`inline-flex items-center rounded-full px-4 py-2 text-sm font-medium ${
-          isDark ? "bg-white/10 text-slate-100" : "bg-stone-100 text-stone-800"
+        className={`inline-flex items-center rounded-sm border px-3 py-2 text-sm font-medium transition-colors ${
+          isDark ? "border-white/10 text-slate-200 hover:bg-white/[0.04]" : "border-stone-200 text-stone-700 hover:bg-stone-50"
         }`}
       >
         {open ? "Hide what's the word" : "What's the word"}
@@ -145,8 +145,8 @@ export function WhatsTheWordPanel({
                   type="button"
                   onClick={() => void requestWord(true)}
                   disabled={!canSubmit || !result || loading}
-                  className={`rounded-full px-4 py-2 text-sm font-medium ${
-                    isDark ? "bg-white/10 text-slate-200 disabled:opacity-40" : "bg-stone-100 text-stone-700 disabled:opacity-40"
+                  className={`rounded-sm border px-4 py-2 text-sm font-medium ${
+                    isDark ? "border-white/10 text-slate-200 disabled:opacity-40" : "border-stone-200 text-stone-700 disabled:opacity-40"
                   }`}
                 >
                   Try again

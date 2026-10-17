@@ -8,7 +8,10 @@ describe("PublicContextChrome", () => {
     const markup = renderToStaticMarkup(<PublicContextChrome />)
 
     expect(markup).toContain('aria-label="Public navigation"')
-    expect(markup).toContain("%2Flogoandtext.png")
+    expect(markup).toContain('/logoandtextlight.png')
+    expect(markup).not.toContain('/logoandtext.png')
+    expect(markup).toContain('/imagelight.png')
+    expect(markup).not.toContain("invert")
     expect(markup).toContain('alt="LoreVia"')
     expect(markup).toContain('href="/public/forum"')
     expect(markup).toContain('href="/library"')

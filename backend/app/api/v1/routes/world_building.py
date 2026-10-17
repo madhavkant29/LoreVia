@@ -11,7 +11,6 @@ from app.api.deps.auth import get_current_user
 from app.api.deps.rate_limit import rate_limit_world_building_ai
 from app.api.v1.routes import world_building_documents, world_building_notes
 from app.core.database import get_db
-from app.core.storage import download_book
 from app.models.book import Book, Series
 from app.models.intelligence import (
     WikiEntry,
@@ -33,6 +32,7 @@ from app.schemas.world_building import (
     WorldQueryRequest,
     WorldQueryResponse,
 )
+from app.services.world_analysis_refresh_service import enqueue_world_analysis_refresh
 from app.services.world_building_access_service import get_owned_world_building_book
 from app.utils.billing_utils import require_author_access
 from app.utils.tag_utils import (
@@ -42,7 +42,6 @@ from app.utils.tag_utils import (
 from app.utils.world_building_document_utils import (
     get_world_building_document,
     list_world_building_documents,
-    load_world_building_document_payload,
 )
 from app.utils.world_building_note_utils import save_canon_override, save_world_note
 from app.utils.world_building_response_utils import (
@@ -56,14 +55,30 @@ from app.utils.world_building_utils import (
     detect_integration_analysis,
     detect_series_world_analysis,
     detect_world_gaps,
-    extract_world_elements,
     list_extracted_world_elements,
+    read_integration_analysis_snapshot,
+    read_series_world_analysis_snapshot,
+    read_world_gap_analysis_snapshot,
 )
 from app.utils.world_building_wiki_utils import generate_wiki_from_manuscript
 
 router = APIRouter()
 router.include_router(world_building_documents.router)
 router.include_router(world_building_notes.router)
+
+
+async def _queue_stale_world_snapshot(
+    payload: dict,
+    *,
+    scope: str,
+    target_id: uuid.UUID,
+) -> dict:
+    if not payload.get("is_stale") or payload.get("refresh_job_id"):
+        return payload
+    refresh_job_id = await enqueue_world_analysis_refresh(scope=scope, target_id=target_id)
+    if refresh_job_id:
+        return {**payload, "refresh_job_id": refresh_job_id}
+    return payload
 
 
 @router.get("/{book_id}/world-building/bootstrap", response_model=WorldBuildingBootstrapOut)
@@ -80,9 +95,9 @@ async def get_world_building_bootstrap(
     selected_document = None
     if document_id is not None:
         document = await get_world_building_document(db, book, document_id)
-        selected_document = serialize_world_document(
-            document, payload=await load_world_building_document_payload(document)
-        )
+        # Bootstrap is a dashboard read: the editor fetches source content from
+        # its dedicated document endpoint after the user selects a document.
+        selected_document = serialize_world_document(document, payload={})
 
     notes = (
         (
@@ -126,11 +141,18 @@ async def get_world_building_bootstrap(
         .scalars()
         .all()
     )
-    gap_analysis = (
-        GapAnalysisResponse(**(await detect_world_gaps(db, book)))
-        if focus == "gap" and documents
-        else None
-    )
+    gap_analysis = None
+    if focus == "gap" and documents:
+        gap_payload = await read_world_gap_analysis_snapshot(db, book)
+        gap_analysis = GapAnalysisResponse(
+            **(
+                await _queue_stale_world_snapshot(
+                    gap_payload,
+                    scope="book",
+                    target_id=book.id,
+                )
+            )
+        )
     return WorldBuildingBootstrapOut(
         documents=[serialize_world_document(document) for document in documents],
         selected_document=selected_document,
@@ -166,7 +188,6 @@ async def analyze_world_building(
     book = await get_owned_world_building_book(db, book_id, current_user.id)
     require_author_access(current_user)
     mode = body.mode or classify_world_intent(body.query)
-    await extract_world_elements(db, book)
     if mode == "story_integration":
         payload = await detect_integration_analysis(db, book)
         if body.auto_create_notes:
@@ -232,7 +253,8 @@ async def get_world_gaps(
 ):
     book = await get_owned_world_building_book(db, book_id, current_user.id)
     require_author_access(current_user)
-    payload = await detect_world_gaps(db, book)
+    payload = await read_world_gap_analysis_snapshot(db, book)
+    payload = await _queue_stale_world_snapshot(payload, scope="book", target_id=book.id)
     return GapAnalysisResponse(**payload)
 
 
@@ -244,7 +266,8 @@ async def get_world_integration(
 ):
     book = await get_owned_world_building_book(db, book_id, current_user.id)
     require_author_access(current_user)
-    payload = await detect_integration_analysis(db, book)
+    payload = await read_integration_analysis_snapshot(db, book)
+    payload = await _queue_stale_world_snapshot(payload, scope="book", target_id=book.id)
     return IntegrationAnalysisResponse(**payload)
 
 
@@ -256,6 +279,8 @@ async def list_world_elements(
 ):
     book = await get_owned_world_building_book(db, book_id, current_user.id)
     require_author_access(current_user)
+    snapshot = await read_world_gap_analysis_snapshot(db, book)
+    await _queue_stale_world_snapshot(snapshot, scope="book", target_id=book.id)
     return await list_extracted_world_elements(db, book)
 
 
@@ -333,6 +358,12 @@ async def query_world_building(
     book = await get_owned_world_building_book(db, book_id, current_user.id)
     require_author_access(current_user)
     mode = body.mode or classify_world_intent(body.query)
+    snapshot = (
+        await read_integration_analysis_snapshot(db, book)
+        if mode == "story_integration"
+        else await read_world_gap_analysis_snapshot(db, book)
+    )
+    await _queue_stale_world_snapshot(snapshot, scope="book", target_id=book.id)
     payload = await build_world_logic_response(db, book, body.query, mode)
     return WorldQueryResponse(**payload)
 
@@ -347,7 +378,39 @@ async def get_series_world_analysis(
     if not series or series.user_id != current_user.id:
         raise HTTPException(404, "Series not found")
     require_author_access(current_user)
+    payload = await read_series_world_analysis_snapshot(db, series_id)
+    gap_payload = payload.get("gap_analysis") if isinstance(payload, dict) else None
+    if isinstance(gap_payload, dict):
+        queued = await _queue_stale_world_snapshot(
+            gap_payload,
+            scope="series",
+            target_id=series_id,
+        )
+        if queued is not gap_payload:
+            payload = {**payload, "gap_analysis": queued}
+            integration_payload = payload.get("integration_analysis")
+            if isinstance(integration_payload, dict):
+                payload["integration_analysis"] = {
+                    **integration_payload,
+                    "refresh_job_id": queued.get("refresh_job_id"),
+                }
+    return {**payload, "series_name": series.name}
+
+
+@router.post("/series/{series_id}/world-building/series-analysis/refresh")
+async def refresh_series_world_analysis(
+    series_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Explicitly refresh a series snapshot; reads remain storage-free."""
+
+    series = await db.get(Series, series_id)
+    if not series or series.user_id != current_user.id:
+        raise HTTPException(404, "Series not found")
+    require_author_access(current_user)
     payload = await detect_series_world_analysis(db, series_id)
+    await db.commit()
     return {**payload, "series_name": series.name}
 
 
@@ -426,5 +489,6 @@ async def create_canon_override(
         notes=body.notes,
     )
     await db.commit()
+    await enqueue_world_analysis_refresh(scope="book", target_id=book.id)
     await db.refresh(identity)
     return serialize_canon_override(identity)

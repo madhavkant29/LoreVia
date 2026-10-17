@@ -45,7 +45,7 @@ describe("Worldbuilding document editor card", () => {
     expect(markup).toContain("Document title")
     expect(markup).toContain("Worldbuilding manuscript")
     expect(markup).toContain("Create document")
-    expect(markup).toContain("Run world gap detection")
+    expect(markup).toContain("Refresh comparison")
   })
 
   it("renders edit, saving, deleting, and analysis states", () => {
@@ -71,6 +71,6 @@ describe("Worldbuilding document editor card", () => {
     expect(markup).toContain("Editing Atlas Notes")
     expect(markup).toContain("Saving...")
     expect(markup).toContain("Removing...")
-    expect(markup).toContain("Checking gaps...")
+    expect(markup).toContain("Refreshing…")
   })
 })

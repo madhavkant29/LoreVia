@@ -210,6 +210,7 @@ describe("ChapterText", () => {
     Object.defineProperty(globalThis, "fetch", {
       configurable: true,
       value: vi.fn().mockResolvedValue({
+        ok: true,
         text: () => Promise.resolve("Keeper stood beside the lantern."),
       }),
     })
@@ -218,7 +219,7 @@ describe("ChapterText", () => {
     expect(container?.textContent).toContain("Loading chapter text")
     await flush()
 
-    expect(globalThis.fetch).toHaveBeenCalledWith("/chapter.txt")
+    expect(globalThis.fetch).toHaveBeenCalledWith("/chapter.txt", { signal: expect.any(AbortSignal) })
     expect(container?.textContent).toContain("Keeper stood beside the lantern.")
     expect(container?.textContent).toContain("5 words in this chapter")
 
@@ -259,5 +260,34 @@ describe("ChapterText", () => {
     expect(preventDefault).toHaveBeenCalled()
     expect(container?.textContent).toContain("Private share: copying disabled")
     expect(container?.textContent).toContain("Copy is disabled")
+  })
+
+  it("shows an explicit empty state rather than an endless skeleton", () => {
+    renderChapter({ textContent: null })
+    expect(container?.textContent).toContain("does not contain reading text yet")
+    expect(container?.querySelector('[aria-busy="true"]')).toBeNull()
+  })
+
+  it("rejects failed text responses and retries without rendering the error body", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce({ ok: false, text: () => Promise.resolve("Server error") })
+      .mockResolvedValueOnce({ ok: true, text: () => Promise.resolve("Mara returns home.") })
+    Object.defineProperty(globalThis, "fetch", { configurable: true, value: fetchMock })
+    renderChapter({ textContent: null, textUrl: "/chapter.txt" }); await flush()
+    expect(container?.textContent).toContain("could not be loaded")
+    expect(container?.textContent).not.toContain("Server error")
+    act(() => { container?.querySelector("button")?.click() }); await flush()
+    expect(container?.textContent).toContain("Mara returns home.")
+  })
+
+  it("aborts obsolete text requests before they can replace a new chapter", async () => {
+    let finish: (value: { ok: boolean; text: () => Promise<string> }) => void = () => {}
+    const fetchMock = vi.fn().mockReturnValue(new Promise(done => { finish = done }))
+    Object.defineProperty(globalThis, "fetch", { configurable: true, value: fetchMock })
+    renderChapter({ textContent: null, textUrl: "/old.txt" })
+    act(() => { root?.render(<ChapterText {...defaultProps({ textContent: "The new chapter.", textUrl: null })} />) })
+    expect(fetchMock.mock.calls[0][1].signal.aborted).toBe(true)
+    await act(async () => { finish({ ok: true, text: async () => "The old chapter." }); await Promise.resolve() })
+    expect(container?.textContent).toContain("The new chapter.")
+    expect(container?.textContent).not.toContain("The old chapter.")
   })
 })

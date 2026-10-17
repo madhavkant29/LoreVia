@@ -1,8 +1,9 @@
 "use client"
 
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react"
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react"
+import { createPortal } from "react-dom"
 import { EditorContent, useEditor } from "@tiptap/react"
-import { Extension, Mark, Node, mergeAttributes } from "@tiptap/core"
+import { Extension, Node, mergeAttributes, type CommandProps } from "@tiptap/core"
 import StarterKit from "@tiptap/starter-kit"
 import Underline from "@tiptap/extension-underline"
 import TextAlign from "@tiptap/extension-text-align"
@@ -111,8 +112,8 @@ const FontFamily = Extension.create({
   },
   addCommands() {
     return {
-      setFontFamily: (fontFamily: string) => ({ chain }: { chain: any }) => chain().setMark("textStyle", { fontFamily }).run(),
-      unsetFontFamily: () => ({ chain }: { chain: any }) => chain().setMark("textStyle", { fontFamily: null }).removeEmptyTextStyle().run(),
+      setFontFamily: (fontFamily: string) => ({ chain }: Pick<CommandProps, "chain">) => chain().setMark("textStyle", { fontFamily }).run(),
+      unsetFontFamily: () => ({ chain }: Pick<CommandProps, "chain">) => chain().setMark("textStyle", { fontFamily: null }).removeEmptyTextStyle().run(),
     }
   },
 })
@@ -136,8 +137,8 @@ const FontSize = Extension.create({
   },
   addCommands() {
     return {
-      setFontSize: (fontSize: string) => ({ chain }: { chain: any }) => chain().setMark("textStyle", { fontSize }).run(),
-      unsetFontSize: () => ({ chain }: { chain: any }) => chain().setMark("textStyle", { fontSize: null }).removeEmptyTextStyle().run(),
+      setFontSize: (fontSize: string) => ({ chain }: Pick<CommandProps, "chain">) => chain().setMark("textStyle", { fontSize }).run(),
+      unsetFontSize: () => ({ chain }: Pick<CommandProps, "chain">) => chain().setMark("textStyle", { fontSize: null }).removeEmptyTextStyle().run(),
     }
   },
 })
@@ -168,9 +169,9 @@ const ParagraphStyle = Extension.create({
   },
   addCommands() {
     return {
-      setLineHeight: (lineHeight: string | null) => ({ chain }: { chain: any }) => chain().updateAttributes("paragraph", { lineHeight }).updateAttributes("heading", { lineHeight }).updateAttributes("blockquote", { lineHeight }).run(),
-      setParagraphSpacing: (marginBottom: string | null) => ({ chain }: { chain: any }) => chain().updateAttributes("paragraph", { marginBottom }).updateAttributes("heading", { marginBottom }).updateAttributes("blockquote", { marginBottom }).run(),
-      setFirstLineIndent: (textIndent: string | null) => ({ chain }: { chain: any }) => chain().updateAttributes("paragraph", { textIndent }).run(),
+      setLineHeight: (lineHeight: string | null) => ({ chain }: Pick<CommandProps, "chain">) => chain().updateAttributes("paragraph", { lineHeight }).updateAttributes("heading", { lineHeight }).updateAttributes("blockquote", { lineHeight }).run(),
+      setParagraphSpacing: (marginBottom: string | null) => ({ chain }: Pick<CommandProps, "chain">) => chain().updateAttributes("paragraph", { marginBottom }).updateAttributes("heading", { marginBottom }).updateAttributes("blockquote", { marginBottom }).run(),
+      setFirstLineIndent: (textIndent: string | null) => ({ chain }: Pick<CommandProps, "chain">) => chain().updateAttributes("paragraph", { textIndent }).run(),
     }
   },
 })
@@ -263,6 +264,7 @@ function ToolbarButtonInDropdown({
 
 export function EditorToolbar({
   isDark,
+  portalFormattingMenu = false,
   compact = false,
   characters = [],
   editorKey,
@@ -270,6 +272,7 @@ export function EditorToolbar({
   onOpenNotes,
 }: {
   isDark: boolean
+  portalFormattingMenu?: boolean
   compact?: boolean
   characters?: Character[]
   editorKey?: string
@@ -277,14 +280,44 @@ export function EditorToolbar({
   onOpenNotes?: () => void
 }) {
   const [showMentionPicker, setShowMentionPicker] = useState(false)
+  const [formatMenuPosition, setFormatMenuPosition] = useState<{ top: number; left: number } | null>(null)
+  const formatDetailsRef = useRef<HTMLDetailsElement | null>(null)
+  const formatMenuRef = useRef<HTMLDivElement | null>(null)
+  const formatMenuId = useId()
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const prompt = usePromptDialog()
   const editor = currentEditor(editorKey)
+  const positionFormatMenu = useCallback(() => {
+    if (!formatDetailsRef.current?.open) { setFormatMenuPosition(null); return }
+    const rect = formatDetailsRef.current.getBoundingClientRect()
+    setFormatMenuPosition({ top: Math.max(8, Math.min(rect.bottom + 8, window.innerHeight - 260)), left: Math.max(8, Math.min(rect.left, window.innerWidth - 264)) })
+  }, [])
+
+  useEffect(() => {
+    const close = (event: Event) => {
+      if (!formatDetailsRef.current?.open) return
+      if (event.type === "keydown" && (event as KeyboardEvent).key !== "Escape") return
+      if (event.type !== "keydown" && event.target instanceof globalThis.Node && (formatDetailsRef.current.contains(event.target) || formatMenuRef.current?.contains(event.target))) return
+      formatDetailsRef.current.open = false
+      setFormatMenuPosition(null)
+      if (event.type === "keydown") formatDetailsRef.current.querySelector("summary")?.focus()
+    }
+    document.addEventListener("pointerdown", close)
+    document.addEventListener("keydown", close)
+    window.addEventListener("scroll", positionFormatMenu, true)
+    window.addEventListener("resize", positionFormatMenu)
+    return () => {
+      document.removeEventListener("pointerdown", close)
+      document.removeEventListener("keydown", close)
+      window.removeEventListener("scroll", positionFormatMenu, true)
+      window.removeEventListener("resize", positionFormatMenu)
+    }
+  }, [positionFormatMenu])
 
   const shellClass = compact
     ? `rounded-sm border px-2 py-2 ${isDark ? "border-white/10 bg-[#0b1014]" : "border-stone-200 bg-white"}`
     : ""
-  const groupClass = "flex flex-wrap items-center gap-1"
+  const groupClass = "flex min-w-max flex-nowrap items-center gap-1 sm:min-w-0 sm:flex-wrap"
   const buttonClass = `rounded-sm px-2.5 py-2 text-3xs font-semibold transition focus:outline-none focus:ring-2 focus:ring-teal-300/40 ${isDark ? "text-slate-200 hover:bg-white/[0.07]" : "text-stone-700 hover:bg-stone-100"}`
   const selectClass = `rounded-sm border px-2 py-2 text-3xs focus:outline-none focus:ring-2 focus:ring-teal-300/40 ${isDark ? "border-white/10 bg-[#0f1418] text-slate-200" : "border-stone-200 bg-white text-stone-700"}`
   const dividerClass = isDark ? "h-5 w-px bg-white/10" : "h-5 w-px bg-stone-200"
@@ -310,7 +343,7 @@ export function EditorToolbar({
   }
 
   return (
-    <div className={`flex flex-wrap items-center justify-between gap-3 ${shellClass}`}>
+    <div className={`flex min-w-max flex-nowrap items-center justify-between gap-3 sm:min-w-0 sm:flex-wrap ${shellClass}`}>
       <input
         ref={fileInputRef}
         type="file"
@@ -376,9 +409,9 @@ export function EditorToolbar({
         <span className={dividerClass} />
         <ToolbarButton title="Undo" onClick={() => run((instance) => instance.chain().focus().undo().run())} className={buttonClass}>Undo</ToolbarButton>
         <ToolbarButton title="Redo" onClick={() => run((instance) => instance.chain().focus().redo().run())} className={buttonClass}>Redo</ToolbarButton>
-        <details className="relative">
-          <summary aria-label="More formatting controls" className={`${buttonClass} list-none cursor-pointer`}>More</summary>
-          <div className={`absolute right-0 top-full z-30 mt-2 grid w-64 gap-2 rounded-md border p-3 ${isDark ? "border-white/10 bg-[#0d1117]" : "border-stone-200 bg-white"}`}>
+        <details ref={formatDetailsRef} className="relative" onToggle={positionFormatMenu}>
+          <summary aria-label="More formatting controls" aria-expanded={Boolean(formatMenuPosition)} aria-controls={formatMenuId} className={`${buttonClass} list-none cursor-pointer`}>More</summary>
+          {formatMenuPosition && formatDetailsRef.current ? createPortal(<div ref={formatMenuRef} id={formatMenuId} role="region" aria-label="Additional formatting controls" style={portalFormattingMenu ? formatMenuPosition : undefined} className={`${portalFormattingMenu ? "fixed z-[95]" : "absolute left-0 top-full z-30 mt-2 lg:left-auto lg:right-0"} grid max-h-[calc(100dvh-1rem)] w-64 gap-2 overflow-y-auto rounded-sm border p-3 ${isDark ? "border-white/10 bg-[#0d1117]" : "border-stone-200 bg-white"}`}>
             <div className="grid grid-cols-2 gap-2">
               <Tooltip content="Text color">
                 <select aria-label="Text color" title="Text color" className={selectClass} defaultValue={COLOR_OPTIONS[0]} onChange={(event) => run((instance) => instance.chain().focus().setColor(colorValue(event.target.value)).run())}>
@@ -411,7 +444,7 @@ export function EditorToolbar({
               <ToolbarButtonInDropdown title="Page break" onClick={() => run((instance) => instance.chain().focus().insertContent({ type: "pageBreak" }).run())} className={buttonClass}>Page</ToolbarButtonInDropdown>
               <ToolbarButtonInDropdown title="First-line indent" onClick={() => run((instance) => focusedRichTextChain(instance).setFirstLineIndent("1.5em").run())} className={buttonClass}>Indent</ToolbarButtonInDropdown>
             </div>
-          </div>
+          </div>, portalFormattingMenu ? document.body : formatDetailsRef.current) : null}
         </details>
       </div>
     </div>
@@ -420,6 +453,7 @@ export function EditorToolbar({
 
 export function RichTextEditor({
   html,
+  ariaLabel,
   onChange,
   className,
   style,
@@ -433,6 +467,7 @@ export function RichTextEditor({
   onShortcutNotes,
 }: {
   html: string
+  ariaLabel?: string
   onChange: (html: string, text: string) => void
   className?: string
   style?: CSSProperties
@@ -479,6 +514,7 @@ export function RichTextEditor({
       attributes: {
         class: wrapperClassName,
         "data-editor-key": editorKey || "",
+        ...(ariaLabel ? { role: "textbox", "aria-label": ariaLabel, "aria-multiline": "true" } : {}),
       },
       handleClick(_view, _pos, event) {
         const target = event.target as HTMLElement | null
@@ -555,7 +591,7 @@ export function RichTextEditor({
     if (!editor) return
     if (html === latestHtmlRef.current) return
     latestHtmlRef.current = html
-    editor.commands.setContent(html || "<p></p>")
+    editor.commands.setContent(html || "<p></p>", { emitUpdate: false })
   }, [editor, html])
 
   return (

@@ -8,8 +8,7 @@ import {
   countWarnings,
   deriveLibraryCollections,
   deriveLibraryMetrics,
-  estimateTargetWordCount,
-  estimateWordCount,
+  getBookWordCount,
   formatNumber,
   formatRelativeTime,
   getActiveUnit,
@@ -60,6 +59,13 @@ beforeEach(() => {
 })
 
 describe("LibraryClient helpers", () => {
+  it("shows every explicit pin in the selected sort order and excludes archived pins", () => {
+    const visibleBooks = ["D", "B", "C", "A", "E"].map((id) => buildBook({ id, title: id }))
+    visibleBooks[4].archived_at = "2026-09-29T12:00:00Z"
+    const result = deriveLibraryCollections({ visibleBooks, showArchived: true, modeFilter: "all", statusFilter: "all", normalizedSearch: "", sortBy: "title", pinnedIds: { A: true, B: true, C: true, D: true, E: true } })
+    expect(result.pinnedBooks.map((book) => book.id)).toEqual(["A", "B", "C", "D"])
+    expect(result.allProjectBooks.map((book) => book.id)).toEqual(["E"])
+  })
   it("formats story units, progress, numbers, and relative timestamps", () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date("2026-06-05T02:00:00Z"))
@@ -102,10 +108,9 @@ describe("LibraryClient helpers", () => {
     expect(getBookUpdatedAt(processingBook)).toBe("2026-06-06T00:00:00Z")
     expect(getActiveUnit(processingBook)).toBe(4)
     expect(getProgressLine(processingBook)).toBe("Chapter 4 - The Ash Gate")
-    expect(estimateWordCount(processingBook)).toBe(18_000)
-    expect(estimateWordCount(screenplay)).toBe(3_600)
-    expect(estimateTargetWordCount(screenplay, 3_600)).toBe(18_000)
-    expect(estimateTargetWordCount(processingBook, 18_000)).toBe(100_000)
+    expect(getBookWordCount(processingBook)).toBe(0)
+    expect(getBookWordCount(screenplay)).toBe(0)
+    expect(getBookWordCount(buildBook({ id: "measured", title: "Measured", total_words: 12_345 }))).toBe(12_345)
   })
 
   it("filters and sorts books consistently", () => {
@@ -130,7 +135,7 @@ describe("LibraryClient helpers", () => {
     expect([alpha, beta].sort((left, right) => compareBooks(left, right, "recent"))).toEqual([beta, alpha])
   })
 
-  it("derives visible collections, pin fallback, metrics, and recent activity", () => {
+  it("derives visible collections, explicit pins, metrics, and recent activity", () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date("2026-06-10T00:00:00Z"))
 
@@ -188,7 +193,8 @@ describe("LibraryClient helpers", () => {
       sortBy: "recent",
       pinnedIds: {},
     })
-    expect(fallbackCollections.pinnedBooks.map((book) => book.id)).toEqual(["ready", "processing"])
+    expect(fallbackCollections.pinnedBooks).toEqual([])
+    expect(fallbackCollections.allProjectBooks.map((book) => book.id)).toEqual(["processing", "ready"])
 
     expect(deriveLibraryMetrics(visibleBooks)).toEqual({
       totalProjects: 2,

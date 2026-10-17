@@ -13,8 +13,13 @@ function getApiOrigin() {
 const nextConfig = {
   typedRoutes: true,
   output: "standalone",
+  transpilePackages: ["next-mdx-remote"],
+  outputFileTracingIncludes: {
+    "/*": ["./src/content/**/*.mdx"],
+  },
   productionBrowserSourceMaps: false,
   experimental: {
+    webpackBuildWorker: false,
     optimizePackageImports: [
       "@tiptap/core",
       "@tiptap/react",
@@ -35,6 +40,8 @@ const nextConfig = {
     "http://127.0.0.1:3000",
     "http://localhost:3001",
     "http://127.0.0.1:3001",
+    "http://localhost:3002",
+    "http://127.0.0.1:3002",
   ],
   async rewrites() {
     const apiOrigin = getApiOrigin()
@@ -58,4 +65,25 @@ const nextConfig = {
     ]
   },
 }
+
+if (process.env.E2E_NEXT_DIST_DIR) {
+  if (!/^\.next-e2e-\d+$/.test(process.env.E2E_NEXT_DIST_DIR)) {
+    throw new Error("Refusing to use an unexpected E2E build directory.")
+  }
+  nextConfig.distDir = process.env.E2E_NEXT_DIST_DIR
+}
+
+// Fail closed: a production bundle must never carry the E2E mock flag unless a
+// server-only acknowledgement was explicitly set for an approved test build.
+if (
+  process.env.NODE_ENV === "production" &&
+  process.env.NEXT_PUBLIC_E2E_MOCK_API === "1" &&
+  process.env.ADMIN_E2E_ALLOW_PRODUCTION !== "1"
+) {
+  throw new Error(
+    "Refusing to build a production bundle with NEXT_PUBLIC_E2E_MOCK_API=1. " +
+      "Unset the flag, or set ADMIN_E2E_ALLOW_PRODUCTION=1 for an approved test build.",
+  )
+}
+
 module.exports = nextConfig

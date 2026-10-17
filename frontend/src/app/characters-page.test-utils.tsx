@@ -2,7 +2,7 @@
 
 import { act, type ReactElement, type ReactNode } from "react"
 import { createRoot, type Root } from "react-dom/client"
-import { afterEach, beforeEach, expect, vi } from "vitest"
+import { afterEach, beforeEach, vi } from "vitest"
 
 const useQueryMock = vi.hoisted(() => vi.fn())
 const routerMock = vi.hoisted(() => ({ push: vi.fn(), replace: vi.fn(), refresh: vi.fn() }))
@@ -84,6 +84,10 @@ vi.mock("@/lib/stores/preferencesStore", () => ({
 vi.mock("@/lib/utils/notes", () => ({ saveContextualVaultNote: vi.fn().mockResolvedValue({}) }))
 vi.mock("@/components/ui/ConfirmDialog", () => ({ useConfirmDialog: () => vi.fn().mockResolvedValue(true) }))
 vi.mock("@/components/ui/PromptDialog", () => ({ usePromptDialog: () => promptMock }))
+vi.mock("@/components/ui/ShortcutHelp", () => ({ SUPPORT_HELP_EVENT: "lorevia:open-support-help" }))
+vi.mock("@/components/layout/AuthorToolsNav", () => ({
+  AuthorToolsNav: () => <nav>Book tools</nav>,
+}))
 vi.mock("@/components/reader/CharacterEvidencePanel", () => ({
   CharacterEvidencePanel: ({ evidence, results }: { evidence?: unknown[]; results?: unknown[] }) => (
     <div>Evidence panel {(results ?? evidence ?? []).length}</div>
@@ -411,6 +415,7 @@ export function firstField<T extends HTMLInputElement | HTMLTextAreaElement | HT
 }
 
 beforeEach(() => {
+  window.matchMedia = vi.fn().mockReturnValue({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() })
   window.requestIdleCallback = ((callback: IdleRequestCallback) => {
     window.setTimeout(() => callback({ didTimeout: false, timeRemaining: () => 50 } as IdleDeadline), 0)
     return 1

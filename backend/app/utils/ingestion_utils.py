@@ -520,7 +520,9 @@ async def mark_book_processing_cancelled(
     from app.services.editor_project_service import fail_rebuild_if_active
 
     await fail_rebuild_if_active(
-        db, book, error=last_error or f"Book was removed while processing at {stage} stage."
+        db,
+        book,
+        error=last_error or f"Book was removed while processing at {stage} stage.",
     )
     await db.commit()
 
@@ -769,7 +771,15 @@ def is_retryable_processing_error(exc: BaseException) -> bool:
     status_code = getattr(getattr(exc, "response", None), "status_code", None) or getattr(
         exc, "status_code", None
     )
-    if isinstance(status_code, int) and status_code in {408, 425, 429, 500, 502, 503, 504}:
+    if isinstance(status_code, int) and status_code in {
+        408,
+        425,
+        429,
+        500,
+        502,
+        503,
+        504,
+    }:
         return True
 
     message = str(exc).lower()
@@ -796,8 +806,36 @@ def is_llm_usage_limit_error(exc: BaseException) -> bool:
         return False
 
     detail = getattr(exc, "detail", None)
+    if isinstance(detail, dict) and detail.get("kind") in {"llm_tokens", "llm_budget"}:
+        return True
     message = " ".join(str(detail if detail is not None else exc).lower().split())
     return "token limit exceeded" in message and "window" in message
+
+
+def llm_usage_limit_blocker(exc: BaseException) -> dict[str, Any]:
+    detail = getattr(exc, "detail", None)
+    if isinstance(detail, dict):
+        message = str(detail.get("detail") or detail.get("message") or exc)
+        return {
+            "kind": str(detail.get("kind") or "llm_tokens"),
+            "detail": message,
+            "window": detail.get("window"),
+            "windows": detail.get("windows") or [],
+            "next_resume_at": detail.get("next_resume_at"),
+            "auto_resume": bool(detail.get("auto_resume")),
+            "permanent": bool(detail.get("permanent")),
+        }
+    return {
+        "kind": "llm_tokens",
+        "detail": str(detail if detail is not None else exc),
+        "next_resume_at": None,
+        "auto_resume": False,
+        # Legacy string-only limit errors do not carry enough information to
+        # prove that a request can never fit. Keep them paused for manual
+        # continuation; only structured allowance errors may declare a
+        # permanent blocker.
+        "permanent": False,
+    }
 
 
 def is_llm_coordination_retry_error(exc: BaseException) -> bool:
@@ -808,4 +846,13 @@ def is_llm_coordination_retry_error(exc: BaseException) -> bool:
         return False
     detail = getattr(exc, "detail", None)
     message = " ".join(str(detail if detail is not None else exc).lower().split())
-    return "llm capacity" in message or "llm coordination" in message
+    # Covers the coordination limiter ("LLM capacity"), the provider circuit
+    # breaker ("LLM provider capacity"), and the system-scope limiter
+    # ("System AI capacity"). All three are transient and must pause, not fail.
+    coordination_markers = (
+        "llm capacity",
+        "llm coordination",
+        "llm provider capacity",
+        "ai capacity",
+    )
+    return any(marker in message for marker in coordination_markers)

@@ -1,14 +1,16 @@
 "use client"
 import dynamic from "next/dynamic"
-import { useState, useEffect, useRef, useMemo } from "react"
+import { useState, useEffect, useRef, useCallback } from "react"
 import type { Route } from "next"
-import { useRouter } from "next/navigation"
+import Link from "next/link"
 
+import { useReaderPosition } from "@/lib/hooks/useReaderPosition"
+import { readerFontSize } from "@/lib/utils/readerPosition"
 import { useReader } from "@/lib/hooks/useReader"
+import { useBookDetail } from "@/lib/hooks/useBookDetail"
 import { isReaderFontFamily, type ReaderFontFamily } from "@/lib/utils/readerTypography"
 import { ReaderToolbar } from "./ReaderToolbar"
 import { ChapterText } from "./ChapterText"
-import { ReaderQuickRail } from "./ReaderQuickRail"
 import { ReadingProgressRail } from "./ReadingProgressRail"
 import { MobileActionBar } from "@/components/ui/MobileActionBar"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
@@ -17,14 +19,7 @@ import { Skeleton } from "@/components/ui/Skeleton"
 
 interface Props { bookId: string; chapterNum: number }
 type ReaderTheme = "light" | "dark"
-interface ReaderBookmark {
-  bookId: string
-  chapter: number
-  chapterTitle: string | null
-  scrollPct: number
-  selectedText: string | null
-  savedAt: string
-}
+
 
 const ContextPanel = dynamic(
   () => import("./ContextPanel").then((module) => module.ContextPanel),
@@ -42,15 +37,16 @@ const ReaderChapterFeedback = dynamic(
 )
 
 export function ReaderView({ bookId, chapterNum }: Props) {
-  const router = useRouter()
-  const { data, loading, error, tap, contextResult, contextLoading, clearContext, saveProgress } = useReader(bookId, chapterNum)
-  const { setTheme: setAppTheme } = usePreferencesStore()
 
-  useEffect(() => {
-    if (error) {
-      router.replace("/library")
-    }
-  }, [error, router])
+  const { data, loading, error, tap, contextResult, contextLoading, clearContext, saveProgress, refetch, isFetching, previousChapter, nextChapter, chaptersError, retryChapters, contextError, retryContext, progressError, retryProgress } = useReader(bookId, chapterNum)
+  const { setTheme: setAppTheme } = usePreferencesStore()
+  const { data: book } = useBookDetail(bookId)
+  const panelDraft = useRef({ dirty: false, busy: false })
+  const [panelKey, setPanelKey] = useState(0)
+  const onPanelDraft = useCallback((dirty: boolean, busy: boolean) => { panelDraft.current = { dirty, busy } }, [])
+  const canChangeContext = () => !panelDraft.current.busy && (!panelDraft.current.dirty || window.confirm("Discard the unsaved reading notes?"))
+
+
   const [showSummary, setShowSummary] = useState(false)
   const [showFeedbackPanel, setShowFeedbackPanel] = useState(false)
   const [selectedQuote, setSelectedQuote] = useState<string | null>(null)
@@ -60,18 +56,12 @@ export function ReaderView({ bookId, chapterNum }: Props) {
   const [displayStyle, setDisplayStyle] = useState<ReaderDisplayStyle>("published")
   const [quoteModeEnabled, setQuoteModeEnabled] = useState(false)
   const [canUseQuoteMode, setCanUseQuoteMode] = useState(false)
-  const [scrollPct, setScrollPct] = useState(0)
+  const [preferencesReady, setPreferencesReady] = useState(false)
+  const [textReady, setTextReady] = useState(false)
+  const [totalWords, setTotalWords] = useState(0)
   const scrollRef = useRef<HTMLDivElement | null>(null)
-  const restoreBookmarkRef = useRef<ReaderBookmark | null>(null)
-  const progressTimeoutRef = useRef<number | null>(null)
-
-  useEffect(() => {
-    return () => {
-      if (progressTimeoutRef.current) {
-        window.clearTimeout(progressTimeoutRef.current)
-      }
-    }
-  }, [])
+  const { scrollPct, storageError } = useReaderPosition({ bookId, chapterNum,
+    chapterTitle: data?.chapter_title ?? null, ready: Boolean(data) && textReady && preferencesReady, scrollRef, saveProgress })
 
   useEffect(() => {
     setShowFeedbackPanel(false)
@@ -86,33 +76,28 @@ export function ReaderView({ bookId, chapterNum }: Props) {
   }, [bookId, chapterNum])
 
   useEffect(() => {
-    const storedTheme = window.localStorage.getItem("reader-theme")
-    if (storedTheme === "light" || storedTheme === "dark") setTheme(storedTheme)
+    try {
+      const storedTheme = window.localStorage.getItem("reader-theme")
+      if (storedTheme === "light" || storedTheme === "dark") setTheme(storedTheme)
     setSelectedQuote(null)
-    setScrollPct(0)
 
-    const storedSize = window.localStorage.getItem("reader-font-size")
-    if (storedSize) setFontSize(parseInt(storedSize))
 
-    const storedFont = window.localStorage.getItem("reader-font-family")
-    if (isReaderFontFamily(storedFont)) setFontFamily(storedFont)
+      const storedSize = window.localStorage.getItem("reader-font-size")
+      setFontSize(readerFontSize(storedSize))
 
-    const storedDisplayStyle = window.localStorage.getItem("reader-display-style")
-    if (storedDisplayStyle === "relaxed" || storedDisplayStyle === "published") setDisplayStyle(storedDisplayStyle)
+      const storedFont = window.localStorage.getItem("reader-font-family")
+      if (isReaderFontFamily(storedFont)) setFontFamily(storedFont)
 
-    if (!storedTheme) setTheme("dark")
+      const storedDisplayStyle = window.localStorage.getItem("reader-display-style")
+      if (storedDisplayStyle === "relaxed" || storedDisplayStyle === "published") setDisplayStyle(storedDisplayStyle)
 
-    const bookmarkKey = `reader-bookmark:${bookId}`
-    const bookmark = window.localStorage.getItem(bookmarkKey)
-    if (bookmark) {
-      try {
-        const parsed = JSON.parse(bookmark) as ReaderBookmark
-        restoreBookmarkRef.current = parsed?.chapter === chapterNum ? parsed : null
-      } catch { }
-    }
+      if (!storedTheme) setTheme("dark")
+
+    } catch { /* Reading remains available when browser storage is unavailable. */ }
+    setPreferencesReady(true)
 
     const updateQuoteModeCapability = () => {
-      const mobile = window.matchMedia("(max-width: 767px)").matches || window.matchMedia("(pointer: coarse)").matches
+      const mobile = window.matchMedia("(max-width: 1023px)").matches || window.matchMedia("(pointer: coarse)").matches
       setCanUseQuoteMode(mobile)
       if (!mobile) setQuoteModeEnabled(false)
     }
@@ -123,83 +108,23 @@ export function ReaderView({ bookId, chapterNum }: Props) {
   }, [bookId, chapterNum])
 
   useEffect(() => {
-    window.localStorage.setItem("reader-theme", theme)
-    window.localStorage.setItem("app-theme", theme)
-    window.localStorage.setItem("reader-font-size", fontSize.toString())
-    window.localStorage.setItem("reader-font-family", fontFamily)
-    window.localStorage.setItem("reader-display-style", displayStyle)
-    setAppTheme(theme)
-  }, [theme, fontSize, fontFamily, displayStyle, setAppTheme])
-
-  const chapterText = useMemo(() => data?.text_content ?? "", [data?.text_content])
-
-  useEffect(() => {
-    const container = scrollRef.current
-    if (!container) return
-
-    const computeScrollPct = () => {
-      const maxScroll = Math.max(1, container.scrollHeight - container.clientHeight)
-      return Math.max(0, Math.min(1, container.scrollTop / maxScroll))
+    if (!preferencesReady) return
+    try {
+      window.localStorage.setItem("reader-theme", theme)
+      window.localStorage.setItem("app-theme", theme)
+      window.localStorage.setItem("reader-font-size", fontSize.toString())
+      window.localStorage.setItem("reader-font-family", fontFamily)
+      window.localStorage.setItem("reader-display-style", displayStyle)
+      setAppTheme(theme)
+    } catch {
+      document.documentElement.dataset.theme = theme
+      document.documentElement.classList.toggle("dark", theme === "dark")
     }
-
-    const syncProgress = () => {
-      const nextPct = computeScrollPct()
-      setScrollPct(nextPct)
-      if (progressTimeoutRef.current) window.clearTimeout(progressTimeoutRef.current)
-      progressTimeoutRef.current = window.setTimeout(() => {
-        saveProgress(nextPct)
-      }, 350)
-    }
-
-    syncProgress()
-    container.addEventListener("scroll", syncProgress, { passive: true })
-    return () => {
-      container.removeEventListener("scroll", syncProgress)
-      if (progressTimeoutRef.current) window.clearTimeout(progressTimeoutRef.current)
-    }
-  }, [chapterNum, data, saveProgress])
-
-  useEffect(() => {
-    if (!data) return
-    const pendingBookmark = restoreBookmarkRef.current
-    const container = scrollRef.current
-    if (!container || !pendingBookmark || pendingBookmark.chapter !== chapterNum) return
-
-    let attempts = 0
-    const restoreScroll = () => {
-      attempts += 1
-      const maxScroll = Math.max(0, container.scrollHeight - container.clientHeight)
-      if (maxScroll > 0 || attempts >= 12) {
-        const nextTop = maxScroll * Math.max(0, Math.min(1, pendingBookmark.scrollPct ?? 0))
-        container.scrollTop = nextTop
-        setScrollPct(pendingBookmark.scrollPct ?? 0)
-        if (pendingBookmark.selectedText) setSelectedQuote(pendingBookmark.selectedText)
-        restoreBookmarkRef.current = null
-        return
-      }
-      window.setTimeout(restoreScroll, 120)
-    }
-
-    window.setTimeout(restoreScroll, 80)
-  }, [chapterNum, data])
-
-  useEffect(() => {
-    if (typeof window === "undefined" || !data) return
-    const bookmarkKey = `reader-bookmark:${bookId}`
-    const bookmark: ReaderBookmark = {
-      bookId,
-      chapter: chapterNum,
-      chapterTitle: data.chapter_title ?? null,
-      scrollPct,
-      selectedText: selectedQuote?.trim() ? selectedQuote.trim() : null,
-      savedAt: new Date().toISOString(),
-    }
-    window.localStorage.setItem(bookmarkKey, JSON.stringify(bookmark))
-    restoreBookmarkRef.current = bookmark
-  }, [bookId, chapterNum, data, scrollPct, selectedQuote])
+  }, [preferencesReady, theme, fontSize, fontFamily, displayStyle, setAppTheme])
 
   const toggleTheme = () => setTheme((current) => current === "dark" ? "light" : "dark")
   const clearPanel = () => {
+    panelDraft.current = { dirty: false, busy: false }
     clearContext()
     setSelectedQuote(null)
     setQuoteModeEnabled(false)
@@ -210,29 +135,30 @@ export function ReaderView({ bookId, chapterNum }: Props) {
     setQuoteModeEnabled((current) => !current)
   }
 
-  const totalWords = countWords(chapterText)
   const wordsRead = totalWords > 0 ? Math.min(totalWords, Math.max(0, Math.round(totalWords * scrollPct))) : 0
-  const progressPercent = totalWords > 0 ? Math.round(scrollPct * 100) : null
-  const hasActiveContext = Boolean(contextResult || selectedQuote)
-  const showMobileSheet = canUseQuoteMode && (hasActiveContext || contextLoading)
+  const progressPercent = textReady ? Math.round(scrollPct * 100) : null
+  const hasActiveContext = Boolean(contextResult || selectedQuote || contextError)
 
   if (loading) {
     return <ReaderChapterSkeleton />
   }
 
-  if (error || !data) {
+  if (!data) {
     return (
       <div className="reader-display-shell flex min-h-[100dvh] items-center justify-center bg-[#080d17] px-6 text-slate-300">
         <div className="w-full max-w-md rounded-lg border border-white/10 bg-white/[0.03] px-8 py-10 text-center">
           <p className="text-sm uppercase tracking-[0.22em] text-slate-500">Reader</p>
-          <p className="mt-3 text-lg text-slate-100">{error ?? "Chapter not found"}</p>
+          <h1 className="mt-3 text-lg text-slate-100">{error ?? "Chapter not found"}</h1>
+          <p className="mt-3 text-sm">The chapter could not be opened. Retry or return to the project.</p>
+          <button type="button" disabled={isFetching} onClick={() => void refetch()} className="mt-5 min-h-11 rounded-sm border border-white/30 px-4">{isFetching ? "Retrying…" : "Retry chapter"}</button>
+          <Link href={`/${bookId}`} className="mt-4 block underline">Project overview</Link>
         </div>
       </div>
     )
   }
 
   return (
-    <div className={`reader-display-shell flex h-[100dvh] min-h-[100dvh] overflow-hidden transition-colors ${theme === "dark"
+    <div data-chapter-reader data-reader-theme={theme} className={`reader-display-shell flex h-[100dvh] min-h-[100dvh] overflow-hidden transition-colors ${theme === "dark"
         ? "bg-[#070c16] text-stone-100"
         : "bg-stone-50 text-slate-950"
       }`}>
@@ -242,6 +168,8 @@ export function ReaderView({ bookId, chapterNum }: Props) {
           chapterNum={chapterNum}
           chapterTitle={data.chapter_title}
           totalChapters={data.total_chapters ?? null}
+          previousChapter={previousChapter}
+          nextChapter={nextChapter}
           wordsRead={wordsRead}
           totalWords={totalWords}
           onSummary={() => setShowSummary(true)}
@@ -258,31 +186,36 @@ export function ReaderView({ bookId, chapterNum }: Props) {
           onToggleQuoteMode={toggleQuoteMode}
           progressPercent={progressPercent}
         />
+        {(error || chaptersError || progressError || storageError) ? <div role="status" className="reader-notice flex flex-wrap gap-3 border-b px-5 py-3 text-sm">
+          {error ? <span>Could not refresh this chapter. <button type="button" className="underline" onClick={() => void refetch()}>Retry chapter</button></span> : null}
+          {chaptersError ? <span>Chapter navigation is unavailable. <button type="button" className="underline" onClick={() => void retryChapters()}>Retry navigation</button></span> : null}
+          {progressError ? <span>Progress has not synced. <button type="button" className="underline" onClick={() => void retryProgress()}>Retry sync</button></span> : null}
+          {storageError ? <span>This browser could not save your position. Keep this page open to retain your place.</span> : null}
+        </div> : null}
         <div
           ref={scrollRef}
+          tabIndex={0}
+          role="region"
+          aria-label="Chapter reading surface"
           className={`reader-scrollbar min-h-0 flex-1 overflow-y-auto overscroll-y-contain ${theme === "dark" ? "bg-[#071211]" : ""}`}
         >
-          <div className="mx-auto w-full max-w-[1620px] px-4 pb-12 pt-4 sm:px-6 lg:px-8 xl:px-10">
-            <div className="grid gap-6 xl:grid-cols-[64px_minmax(0,1fr)_88px] xl:items-start">
-              <ReaderQuickRail
-                bookId={bookId}
-                chapterNum={chapterNum}
-                theme={theme}
-                onSummary={() => setShowSummary(true)}
-              />
+          <div className="mx-auto w-full max-w-[1620px] px-4 pb-28 pt-4 sm:px-6 md:pb-12 lg:px-8 xl:px-10">
+            <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_132px] xl:items-start">
               <ChapterText
                 bookId={bookId}
                 chapterNum={chapterNum}
                 chapterTitle={data.chapter_title}
                 totalChapters={data.total_chapters ?? null}
                 canCopyManuscript={data.can_copy_manuscript ?? true}
+                onReady={setTextReady}
+                onWordCount={setTotalWords}
                 textUrl={data.text_url}
                 textContent={data.text_content ?? null}
                 htmlContent={data.html_content ?? null}
                 media={data.media ?? []}
                 characters={data.characters}
-                onTap={tap}
-                onQuoteSelect={(text) => setSelectedQuote(text)}
+                onTap={(word) => { if (canChangeContext()) { setSelectedQuote(null); setPanelKey((key) => key + 1); void tap(word) } }}
+                onQuoteSelect={(text) => { if (canChangeContext()) { clearContext(); setPanelKey((key) => key + 1); setSelectedQuote(text) } }}
                 theme={theme}
                 fontSize={fontSize}
                 fontFamily={fontFamily}
@@ -309,17 +242,13 @@ export function ReaderView({ bookId, chapterNum }: Props) {
         </div>
       </div>
 
-      {showMobileSheet ? (
-        <button
-          type="button"
-          aria-label="Close reading context"
-          onClick={clearPanel}
-          className="fixed inset-0 z-30 bg-[rgba(2,6,23,0.52)] md:hidden"
-        />
-      ) : null}
-
       {(hasActiveContext || contextLoading) && (
         <ContextPanel
+          key={panelKey}
+          canEdit={book?.access_class === "owner" && book.mode === "author"}
+          onDraftState={onPanelDraft}
+          error={contextError}
+          onRetry={retryContext}
           result={contextResult}
           loading={contextLoading}
           onClose={clearPanel}
@@ -335,20 +264,18 @@ export function ReaderView({ bookId, chapterNum }: Props) {
       {showSummary && (
         <SummaryPanel bookId={bookId} chapterNum={chapterNum} onClose={() => setShowSummary(false)} theme={theme} />
       )}
-      <MobileActionBar
+      {!hasActiveContext && !contextLoading ? <MobileActionBar
         actions={[
-          { id: "reader-summary", label: "Summary", onSelect: () => setShowSummary(true), tone: "secondary" },
+          { id: "reader-summary", label: "Recap", onSelect: () => setShowSummary(true), tone: "secondary" },
           { id: "reader-ask", label: "Ask LoreVia", href: `/${bookId}/ask` as Route },
         ]}
-      />
+        moreActions={[
+          { id: "reader-search", label: "Search this chapter", href: `/${bookId}/search?chapter=${chapterNum}` as Route },
+          { id: "reader-notes", label: "Chapter notes", href: `/${bookId}/notes?chapter=${chapterNum}` as Route },
+        ]}
+      /> : null}
     </div>
   )
-}
-
-function countWords(text: string): number {
-  const normalized = text.replace(/\[\[IMAGE:[^\]]+\]\]/g, " ")
-  const matches = normalized.match(/\b[\p{L}\p{N}']+\b/gu)
-  return matches?.length ?? 0
 }
 
 function ReaderChapterSkeleton() {
@@ -385,11 +312,7 @@ function ReaderChapterSkeleton() {
         </div>
         <main className="reader-scrollbar min-h-0 flex-1 overflow-y-auto bg-[#071211]">
           <div className="mx-auto w-full max-w-[1620px] px-4 pb-12 pt-4 sm:px-6 lg:px-8 xl:px-10">
-            <div className="grid gap-6 xl:grid-cols-[64px_minmax(0,1fr)_88px] xl:items-start">
-              <div className="hidden space-y-3 xl:block">
-                <Skeleton className="h-12 w-12 rounded-md bg-white/10" />
-                <Skeleton className="h-12 w-12 rounded-md bg-white/10" />
-              </div>
+            <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_132px] xl:items-start">
               <article className="mx-auto w-full max-w-[72ch] rounded-md border border-white/10 bg-white/[0.03] px-5 py-8 sm:px-8">
                 <Skeleton className="h-8 w-2/3 bg-white/10" />
                 <div className="mt-8 space-y-4">

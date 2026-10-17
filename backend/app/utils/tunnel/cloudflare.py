@@ -14,6 +14,8 @@ import ipaddress
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
+from app.utils.client_identity import edge_verification_values_match
+
 _HEALTHCHECK_PATHS = frozenset({"/health", "/ready"})
 _TRUSTED_EDGE_PROXY_NETS = (
     ipaddress.ip_network("10.0.0.0/8"),
@@ -45,7 +47,10 @@ class CloudflareTunnelMiddleware:
         direct_host = direct_client[0] if direct_client else ""
         if (
             not _is_trusted_edge_proxy(direct_host)
-            or headers.get(b"x-lorevia-edge-verified") != b"1"
+            or not edge_verification_values_match(
+                _header_text(headers.get(b"x-lorevia-edge-verified")),
+                _header_text(headers.get(b"x-lorevia-edge-token")),
+            )
             or b"cf-connecting-ip" not in headers
         ):
             response = JSONResponse(
@@ -56,6 +61,15 @@ class CloudflareTunnelMiddleware:
             return
 
         await self.app(scope, receive, send)
+
+
+def _header_text(value: bytes | None) -> str | None:
+    if value is None:
+        return None
+    try:
+        return value.decode("ascii")
+    except UnicodeDecodeError:
+        return None
 
 
 def _is_trusted_edge_proxy(host: str) -> bool:

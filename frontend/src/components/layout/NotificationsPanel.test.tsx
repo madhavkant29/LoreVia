@@ -154,7 +154,6 @@ describe("NotificationsPanel", () => {
       enabled: false,
       pollMs: 60_000,
       refreshOnFocus: true,
-      syncRevisionDigests: false,
     })
   })
 
@@ -176,7 +175,6 @@ describe("NotificationsPanel", () => {
       enabled: true,
       pollMs: 60_000,
       refreshOnFocus: true,
-      syncRevisionDigests: false,
     })
   })
 })

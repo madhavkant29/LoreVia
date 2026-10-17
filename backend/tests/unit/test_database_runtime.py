@@ -27,12 +27,16 @@ class _FakeConnection:
         return self.cursor_instance
 
 
-def test_initialize_postgres_session_sets_public_search_path() -> None:
+def test_initialize_postgres_session_sets_search_path_and_timeouts() -> None:
     connection = _FakeConnection()
 
     _initialize_postgres_session(connection)
 
-    assert connection.cursor_instance.executed == ["SET search_path TO public, extensions"]
+    assert connection.cursor_instance.executed == [
+        "SET search_path TO public, extensions",
+        "SET statement_timeout TO 120000",
+        "SET idle_in_transaction_session_timeout TO 60000",
+    ]
     assert connection.cursor_instance.closed is True
 
 
@@ -61,5 +65,9 @@ def test_initialize_postgres_session_closes_non_context_cursor() -> None:
 
     _initialize_postgres_session(connection)
 
-    assert connection.cursor_instance.executed == ["SET search_path TO public, extensions"]
+    assert connection.cursor_instance.executed == [
+        "SET search_path TO public, extensions",
+        "SET statement_timeout TO 120000",
+        "SET idle_in_transaction_session_timeout TO 60000",
+    ]
     assert connection.cursor_instance.closed is True

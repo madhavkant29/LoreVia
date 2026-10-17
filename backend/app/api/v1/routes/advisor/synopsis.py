@@ -1,11 +1,11 @@
 from __future__ import annotations
 
+import asyncio
 import uuid
 from typing import Any, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.encoders import jsonable_encoder
-from openai import AsyncOpenAI
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -17,6 +17,7 @@ from app.api.v1.routes.advisor.chat import (
 )
 from app.core.config import settings
 from app.core.database import get_db
+from app.core.llm import get_openai_client
 from app.core.redis import get_synopsis_cache, set_synopsis_cache
 from app.core.storage import download_book
 from app.models.book import Book, Chapter
@@ -30,9 +31,11 @@ from app.utils.advisor_utils import (
     normalize_synopsis_result,
 )
 from app.utils.billing_utils import require_author_access
-from app.utils.llm_usage_utils import create_tracked_chat_completion
+from app.utils.llm_usage_utils import (
+    create_tracked_chat_completion,
+    public_llm_http_error_message,
+)
 from app.utils.logging.errors import public_error_message
-from app.utils.retry_utils import LLM_MAX_RETRIES
 
 router = APIRouter()
 
@@ -73,7 +76,9 @@ async def manuscript_synopsis(
         chapter_text = ""
         if s3_key:
             try:
-                chapter_text = download_book(s3_key).decode("utf-8", errors="ignore")
+                chapter_text = (await asyncio.to_thread(download_book, s3_key)).decode(
+                    "utf-8", errors="ignore"
+                )
             except ADVISOR_CONTENT_READ_ERRORS:
                 chapter_text = ""
         chapter_ref = f"Chapter {number}"
@@ -82,7 +87,7 @@ async def manuscript_synopsis(
         passage_blocks.append(f"[{chapter_ref}]\n{chapter_text[:1400]}")
 
     story_context = await build_story_context(db, book_id, book.total_chapters or len(chapter_rows))
-    client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY, max_retries=LLM_MAX_RETRIES)
+    client = get_openai_client()
     try:
         response = await create_tracked_chat_completion(
             client=client,
@@ -141,7 +146,7 @@ async def manuscript_synopsis_stream(
             )
             yield _advisor_sse("done", cast(dict[str, Any], jsonable_encoder(payload)))
         except HTTPException as exc:
-            yield _advisor_sse("error", {"error": public_error_message(exc.status_code)})
+            yield _advisor_sse("error", {"error": public_llm_http_error_message(exc)})
         except ADVISOR_STREAM_ERRORS:
             yield _advisor_sse("error", {"error": public_error_message(500)})
 

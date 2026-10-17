@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import ARRAY, Boolean, DateTime, Float, ForeignKey, Integer, func
+from sqlalchemy import ARRAY, Boolean, DateTime, Float, ForeignKey, Integer, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -10,6 +10,13 @@ from app.core.database import Base
 
 class ReadingProgress(Base):
     __tablename__ = "reading_progress"
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id",
+            "book_id",
+            name="uq_reading_progress_user_id_book_id",
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = mapped_column(

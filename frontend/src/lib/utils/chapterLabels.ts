@@ -58,6 +58,12 @@ const CHAPTER_KIND_LABELS: Record<ChapterKind, string> = {
   index: "Index",
   title_page: "Title Page",
   copyright: "Copyright",
+  chronology: "Chronology",
+  part_opening: "Part opening",
+  notes: "Author notes",
+  glossary: "Glossary",
+  interlude: "Interlude",
+  unknown: "Section",
 }
 
 export function chapterKindLabel(

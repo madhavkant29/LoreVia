@@ -45,9 +45,9 @@ export function CharacterReviewTab({
       <div className="space-y-5">
         <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
           <div>
-            <p className={`text-3xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-teal-300" : "text-teal-700"}`}>Review queue</p>
+            <p className={`text-xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-teal-300" : "text-teal-700"}`}>Review queue</p>
             <h2 className={`mt-2 text-3xl font-semibold tracking-tight ${isDark ? "text-white" : "text-stone-950"}`}>Grounded review workspace</h2>
-            <p className={`mt-2 text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>
+            <p className={`mt-2 text-sm ${isDark ? "text-slate-400" : "text-stone-600"}`}>
               Review held candidates and unresolved relationships with their evidence, resolver reasons, and promotion blockers.
             </p>
           </div>
@@ -62,12 +62,12 @@ export function CharacterReviewTab({
           <SurfaceCard title="Candidate summary" isDark={isDark}>
             <div className="flex flex-wrap items-start justify-between gap-4">
               <div className="flex items-start gap-4">
-                <div className={`flex h-14 w-14 shrink-0 items-center justify-center rounded-full text-2xl font-semibold ${isDark ? "bg-violet-500/18 text-violet-100 ring-1 ring-violet-400/25" : "bg-violet-100 text-violet-700"}`}>
+                <div className={`flex h-14 w-14 shrink-0 items-center justify-center rounded-sm text-2xl font-semibold ${isDark ? "bg-violet-500/18 text-violet-100 ring-1 ring-violet-400/25" : "bg-violet-100 text-violet-700"}`}>
                   {characterInitial(selectedCandidate.proposed_name)}
                 </div>
                 <div>
                   <h3 className={`text-[1.8rem] font-semibold leading-none ${isDark ? "text-white" : "text-stone-900"}`}>{selectedCandidate.proposed_name}</h3>
-                  <p className={`mt-2 text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>
+                  <p className={`mt-2 text-sm ${isDark ? "text-slate-400" : "text-stone-600"}`}>
                     Chapter {selectedCandidate.chapter_number} - {selectedCandidate.confidence}% confidence - {formatResolverStatus(selectedCandidate.resolver_status)}
                   </p>
                 </div>
@@ -89,33 +89,33 @@ export function CharacterReviewTab({
 
             <div className={`mt-5 grid gap-4 xl:grid-cols-2 ${isDark ? "xl:divide-x xl:divide-[#17202c]" : "xl:divide-x xl:divide-stone-200"}`}>
               <div className="xl:pr-5">
-                <p className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Resolver reasons</p>
+                <p className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-400" : "text-stone-600"}`}>Resolver reasons</p>
                 <div className="mt-2 flex flex-wrap gap-2">
                   {((selectedCandidate.resolver_reasons ?? []).length > 0 ? selectedCandidate.resolver_reasons ?? [] : selectedCandidate.reason_codes ?? []).map((reason) => (
-                    <span key={reason} className={`rounded-full px-3 py-1.5 text-xs ${isDark ? "bg-teal-500/12 text-teal-100" : "bg-teal-50 text-teal-700"}`}>
+                    <span key={reason} className={`rounded-sm px-3 py-1.5 text-xs ${isDark ? "bg-teal-500/12 text-teal-100" : "bg-teal-50 text-teal-700"}`}>
                       {reason}
                     </span>
                   ))}
                 </div>
-                <p className={`mt-4 text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Cluster names</p>
+                <p className={`mt-4 text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-400" : "text-stone-600"}`}>Cluster names</p>
                 <p className={`mt-2 text-sm ${isDark ? "text-slate-300" : "text-stone-600"}`}>
                   {(selectedCandidate.cluster_names ?? []).length > 0 ? (selectedCandidate.cluster_names ?? []).join(", ") : "No cluster aliases captured yet."}
                 </p>
-                <p className={`mt-4 text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Grounding counts</p>
+                <p className={`mt-4 text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-400" : "text-stone-600"}`}>Grounding counts</p>
                 <p className={`mt-2 text-sm ${isDark ? "text-slate-300" : "text-stone-600"}`}>
                   {selectedCandidate.cluster_mention_count ?? 0} mentions across {selectedCandidate.cluster_size ?? 0} clustered names.
                 </p>
               </div>
               <div className="xl:pl-5">
-                <p className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Evidence snippets</p>
+                <p className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-400" : "text-stone-600"}`}>Evidence snippets</p>
                 <div className="mt-2 space-y-2">
                   {(selectedCandidate.snippets ?? []).map((snippet, index) => (
-                    <div key={`${selectedCandidate.id}-snippet-${index}`} className={`rounded-xl border px-3 py-3 text-sm leading-6 ${isDark ? "border-[#17202c] bg-black/20 text-slate-300" : "border-stone-200 bg-white text-stone-600"}`}>
+                    <div key={`${selectedCandidate.id}-snippet-${index}`} className={`rounded-sm border px-3 py-3 text-sm leading-6 ${isDark ? "border-[#17202c] bg-black/20 text-slate-300" : "border-stone-200 bg-white text-stone-600"}`}>
                       {snippet}
                     </div>
                   ))}
                   {(selectedCandidate.snippets ?? []).length === 0 ? (
-                    <div className={`rounded-xl border px-3 py-3 text-sm leading-6 ${isDark ? "border-[#17202c] bg-black/20 text-slate-400" : "border-stone-200 bg-white text-stone-500"}`}>
+                    <div className={`rounded-sm border px-3 py-3 text-sm leading-6 ${isDark ? "border-[#17202c] bg-black/20 text-slate-400" : "border-stone-200 bg-white text-stone-600"}`}>
                       No evidence snippet is available for this held candidate yet.
                     </div>
                   ) : null}
@@ -143,8 +143,8 @@ export function CharacterReviewTab({
             {evidenceCache[selectedCandidate.id]?.results?.length ? (
               <div className="mt-4 space-y-2">
                 {evidenceCache[selectedCandidate.id].results.slice(0, 3).map((result, index) => (
-                  <div key={`${selectedCandidate.id}-search-${index}`} className={`rounded-xl border px-3 py-3 ${isDark ? "border-[#17202c] bg-black/20" : "border-stone-200 bg-white"}`}>
-                    <p className={`text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>Chapter {result.chapter_num}</p>
+                  <div key={`${selectedCandidate.id}-search-${index}`} className={`rounded-sm border px-3 py-3 ${isDark ? "border-[#17202c] bg-black/20" : "border-stone-200 bg-white"}`}>
+                    <p className={`text-xs ${isDark ? "text-slate-400" : "text-stone-600"}`}>Chapter {result.chapter_num}</p>
                     <p className={`mt-1 text-sm font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>{result.summary}</p>
                     <p className={`mt-2 text-sm leading-6 ${isDark ? "text-slate-300" : "text-stone-600"}`}>{result.text}</p>
                   </div>
@@ -154,7 +154,7 @@ export function CharacterReviewTab({
           </SurfaceCard>
         ) : (
           <SurfaceCard title="Queue clear" isDark={isDark}>
-            <p className={isDark ? "text-sm text-slate-400" : "text-sm text-stone-500"}>No pending character candidates match the current filters.</p>
+            <p className={isDark ? "text-sm text-slate-400" : "text-sm text-stone-600"}>No pending character candidates match the current filters.</p>
           </SurfaceCard>
         )}
 
@@ -162,15 +162,15 @@ export function CharacterReviewTab({
           {relationshipCandidates.length > 0 ? (
             <div className="space-y-3">
               {relationshipCandidates.slice(0, 6).map((candidate) => (
-                <div key={candidate.id} className={`rounded-xl border px-4 py-3 ${isDark ? "border-[#17202c] bg-black/20" : "border-stone-200 bg-white"}`}>
+                <div key={candidate.id} className={`rounded-sm border px-4 py-3 ${isDark ? "border-[#17202c] bg-black/20" : "border-stone-200 bg-white"}`}>
                   <p className={`text-sm font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>{candidate.raw_character_a} {"<->"} {candidate.raw_character_b}</p>
-                  <p className={`mt-1 text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>Chapter {candidate.chapter_number}{candidate.rel_type ? ` · ${formatRelationshipType(candidate.rel_type)}` : ""}</p>
+                  <p className={`mt-1 text-xs ${isDark ? "text-slate-400" : "text-stone-600"}`}>Chapter {candidate.chapter_number}{candidate.rel_type ? ` · ${formatRelationshipType(candidate.rel_type)}` : ""}</p>
                   <p className={`mt-2 text-sm ${isDark ? "text-slate-300" : "text-stone-600"}`}>{candidate.description || candidate.reason_codes[0] || "Needs relationship review."}</p>
                 </div>
               ))}
             </div>
           ) : (
-            <p className={isDark ? "text-sm text-slate-400" : "text-sm text-stone-500"}>No unresolved relationship candidates match the current filters.</p>
+            <p className={isDark ? "text-sm text-slate-400" : "text-sm text-stone-600"}>No unresolved relationship candidates match the current filters.</p>
           )}
         </SurfaceCard>
       </div>

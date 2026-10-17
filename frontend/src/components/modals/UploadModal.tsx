@@ -1,7 +1,7 @@
 ﻿"use client"
 
 import { X } from "lucide-react"
-import { memo } from "react"
+import { memo, useEffect } from "react"
 
 import { AdvancedImportSettings } from "@/components/modals/upload/AdvancedImportSettings"
 import { ExistingProjectImportStep } from "@/components/modals/upload/ExistingProjectImportStep"
@@ -12,7 +12,6 @@ import { useUploadModalController } from "@/components/modals/upload/useUploadMo
 import { UploadWizardSteps } from "@/components/modals/upload/UploadWizardPanels"
 import { Dialog } from "@/components/ui/Dialog"
 import { ProcessingStatusPanel } from "@/components/ui/ResponsivenessStatus"
-import { Skeleton } from "@/components/ui/Skeleton"
 import type { BookMode } from "@/lib/stores/bookModeStore"
 
 export const UploadModal = memo(function UploadModal({
@@ -20,16 +19,19 @@ export const UploadModal = memo(function UploadModal({
   initialMode = "reader",
   initialExistingBookId = "",
   presentation = "modal",
+  onDraftChange,
 }: {
   onClose: () => void
   initialMode?: BookMode
   initialExistingBookId?: string
   presentation?: "modal" | "inline"
+  onDraftChange?: (hasDraft: boolean) => void
 }) {
   const {
     wizard, isInline, shellClassName, isManagingExisting, startEmpty, storyUnitLabel, storyUnitLabelTitle, isDark,
     uploadStage, processingBook, processingSummary, processingRetrying, retryProcessing, submit,
-    inputRef, coverInputRef, newUploadAccept, files, setFiles, primaryFile, isScreenplayWorkspace,
+    inputRef, coverInputRef, newUploadAccept, files, handleFilesSelected, handleCoverSelected,
+    chapterUploadAccept, primaryFile, isScreenplayWorkspace,
     importPreview, setImportPreview, dismissPreview, setDismissPreview, previewLoading, fetchPreview,
     setImportAsSingle, showEditor, setShowEditor, canUploadAuthorMode, needsUsername, settingUsername,
     usernameError, handleSetUsername, existingAuthorBooks, selectedExistingBook, existingBookSelectLabel,
@@ -38,22 +40,27 @@ export const UploadModal = memo(function UploadModal({
     replaceExisting, setReplaceExisting, chapterTitle, setChapterTitle, chapterText, setChapterText,
     chapterUploadHelp, splitIntoChapters, setSplitIntoChapters, chunkLongDocuments, setChunkLongDocuments,
     infoButtonClass, chapterReports, advancedSettingsOpen, setAdvancedSettingsOpen, preserveChapterNumbers,
-    setPreserveChapterNumbers, preserveSourceChapters, setPreserveSourceChapters, coverFile, setCoverFile,
+    setPreserveChapterNumbers, preserveSourceChapters, setPreserveSourceChapters, coverFile,
     autoExtractCover, setAutoExtractCover, error, uploading, uploadProgress, postImportReview, reportReady,
     postImportSynopsis, postImportPassages, postImportThreads, postImportSuggestions, user, confirm,
     booksApi, existingBookId, refetchBooks, primaryActionDisabled, primaryActionLabel,
   } = useUploadModalController({ onClose, initialMode, initialExistingBookId, presentation })
+  useEffect(() => {
+    onDraftChange?.(uploading || files.length > 0 || !!chapterText.trim() || !!chapterTitle.trim())
+  }, [chapterText, chapterTitle, files.length, onDraftChange, uploading])
   const TitleElement = isInline ? "h2" : "div"
 
   const content = (
       <div className={shellClassName} onClick={(e) => e.stopPropagation()}>
         <div className={`relative border-b px-6 py-5 ${isDark ? "border-white/10" : "border-slate-200/80"}`}>
           <div>
-            <TitleElement className="text-xl font-semibold tracking-normal">{isManagingExisting ? `Add New ${storyUnitLabelTitle}` : "Upload book"}</TitleElement>
+            <TitleElement className="text-xl font-semibold tracking-normal">{isManagingExisting ? `Add New ${storyUnitLabelTitle}` : "Upload manuscript"}</TitleElement>
             <p className={`mt-1 text-sm ${isDark ? "text-slate-400" : "text-slate-500"}`}>
               {isManagingExisting
                 ? "Paste or upload one scene, chapter, or script segment, process it incrementally, and review what changed before moving on."
-                : "Bring in one manuscript, choose how it should be processed, and keep setup lightweight."}
+                : wizard.mode === "author"
+                  ? "After extraction, LoreVia starts with a supportive full-manuscript read—what is working first, then evidence-backed revision opportunities."
+                  : "Bring in one manuscript, choose how it should be processed, and keep setup lightweight."}
             </p>
           </div>
           {!isManagingExisting ? (
@@ -85,6 +92,11 @@ export const UploadModal = memo(function UploadModal({
               retrying={processingRetrying}
               onRetry={processingSummary?.retryAvailable ? () => void retryProcessing() : undefined}
             />
+            {!isManagingExisting && wizard.mode === "author" ? (
+              <p className={`rounded-lg border px-4 py-3 text-sm leading-6 ${isDark ? "border-teal-300/15 bg-teal-300/5 text-slate-300" : "border-teal-900/10 bg-teal-50 text-stone-700"}`}>
+                When extraction finishes, LoreVia will read the whole manuscript for its voice, characters, scenes, and emotional core before leading you into detailed critique.
+              </p>
+            ) : null}
             <div className="flex justify-end">
               <button
                 type="button"
@@ -109,7 +121,7 @@ export const UploadModal = memo(function UploadModal({
             inputRef={inputRef}
             newUploadAccept={newUploadAccept}
             files={files}
-            setFiles={setFiles}
+            onFilesSelected={handleFilesSelected}
             primaryFile={primaryFile}
             isScreenplayWorkspace={isScreenplayWorkspace}
             importPreview={importPreview}
@@ -166,7 +178,8 @@ export const UploadModal = memo(function UploadModal({
             setChapterText={setChapterText}
             inputRef={inputRef}
             files={files}
-            setFiles={setFiles}
+            onFilesSelected={handleFilesSelected}
+            chapterUploadAccept={chapterUploadAccept}
             chapterUploadHelp={chapterUploadHelp}
             splitIntoChapters={splitIntoChapters}
             setSplitIntoChapters={setSplitIntoChapters}
@@ -174,6 +187,12 @@ export const UploadModal = memo(function UploadModal({
             setChunkLongDocuments={setChunkLongDocuments}
             infoButtonClass={infoButtonClass}
             chapterReports={chapterReports}
+            importPreview={importPreview}
+            setImportPreview={setImportPreview}
+            previewLoading={previewLoading}
+            fetchPreview={fetchPreview}
+            showEditor={showEditor}
+            setShowEditor={setShowEditor}
           />
 
           <AdvancedImportSettings
@@ -188,7 +207,7 @@ export const UploadModal = memo(function UploadModal({
             setPreserveSourceChapters={setPreserveSourceChapters}
             coverInputRef={coverInputRef}
             coverFile={coverFile}
-            setCoverFile={setCoverFile}
+            onCoverSelected={handleCoverSelected}
             autoExtractCover={autoExtractCover}
             setAutoExtractCover={setAutoExtractCover}
           />
@@ -206,13 +225,17 @@ export const UploadModal = memo(function UploadModal({
                   {uploadStage === "uploading" ? "Uploading file" : "Handing off for processing"}
                 </span>
                 <span className={isDark ? "text-slate-200" : "text-slate-700"}>
-                  {uploadStage === "uploading" ? `${uploadProgress}%` : "Queued"}
+                  {uploadStage === "uploading"
+                    ? `${uploadProgress}%`
+                    : uploadProgress > 0
+                      ? `${uploadProgress}%`
+                      : "Queued"}
                 </span>
               </div>
               <div className={`h-2 overflow-hidden rounded-full ${isDark ? "bg-white/10" : "bg-gray-200"}`}>
                 <div
                   className="h-full rounded-full bg-indigo-600 transition-all duration-200"
-                  style={{ width: `${uploadStage === "processing" ? 100 : uploadProgress}%` }}
+                  style={{ width: `${uploadStage === "uploading" ? uploadProgress : Math.max(uploadProgress, 5)}%` }}
                 />
               </div>
               <p className={`mt-2 text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}>
@@ -220,7 +243,9 @@ export const UploadModal = memo(function UploadModal({
                   ? "Large PDFs can take a bit depending on your network speed."
                   : isManagingExisting
                     ? "Your chapter is in LoreVia. Incremental extraction and continuity review are being refreshed now."
-                    : "Your book upload finished. Parsing and AI extraction continue in the background."}
+                    : wizard.mode === "author"
+                      ? "Your manuscript upload finished. Extraction continues in the background, followed by its supportive first read."
+                      : "Your book upload finished. Parsing and AI extraction continue in the background."}
               </p>
             </div>
           ) : null}
@@ -304,10 +329,10 @@ export const UploadModal = memo(function UploadModal({
     <Dialog
       open
       onClose={onClose}
-      title={isManagingExisting ? `Add New ${storyUnitLabelTitle}` : "Upload book"}
+      title={isManagingExisting ? `Add New ${storyUnitLabelTitle}` : "Upload manuscript"}
       description={isManagingExisting
         ? "Add and process the next story unit in this project."
-        : "Import a manuscript into a private workspace."}
+        : "Import a manuscript into a private workspace and begin its first read."}
       size="xl"
       className="!max-w-5xl border-0 bg-transparent shadow-none"
       contentClassName="p-0"

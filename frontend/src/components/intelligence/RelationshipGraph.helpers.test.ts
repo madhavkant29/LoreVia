@@ -5,6 +5,8 @@ import {
   buildIsolatedPositions,
   controlButtonClass,
   panelClass,
+  storedGraphLabels,
+  storedGraphPositions,
 } from "./RelationshipGraph.helpers"
 import type { RelationshipGraph as GraphData } from "@/types/character"
 
@@ -20,6 +22,14 @@ function node(id: string): GraphNode {
 }
 
 describe("RelationshipGraph helpers", () => {
+  it("ignores malformed device settings and retains only valid labels and positions", () => {
+    for (const raw of [null, "bad", "null", "[]", "42"]) {
+      expect(storedGraphLabels(raw)).toEqual({})
+      expect(storedGraphPositions(raw)).toBeNull()
+    }
+    expect(storedGraphLabels('{"a":"Nora","b":42}')).toEqual({ a: "Nora" })
+    expect(storedGraphPositions('{"a":{"x":0,"y":-1},"b":{"x":"3","y":0},"c":null}')).toEqual({ a: { x: 0, y: -1 } })
+  })
   it("defines the shared force layout constants", () => {
     expect(BASE_LAYOUT.name).toBe("cose")
     expect((BASE_LAYOUT as { padding?: number }).padding).toBe(56)
@@ -38,8 +48,9 @@ describe("RelationshipGraph helpers", () => {
   })
 
   it("returns stable graph chrome class names", () => {
-    expect(controlButtonClass()).toContain("border-white/10")
+    expect(controlButtonClass()).toContain("border-[rgb(var(--border))]")
     expect(controlButtonClass(true)).toContain("border-violet")
-    expect(panelClass()).toContain("shadow-[0_24px_80px")
+    expect(panelClass()).toContain("rounded-sm")
+    expect(panelClass()).not.toContain("shadow-")
   })
 })

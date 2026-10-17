@@ -2,13 +2,37 @@ from __future__ import annotations
 
 from typing import Any
 
-from sqlalchemy import func, select, update
+from sqlalchemy import func, select
 
 from app.core.config import settings
 from app.models.book import Book
 from app.models.user import User
 from app.parsers.chunker import count_tokens
 from app.utils.billing_utils import has_paid_reading_access
+from app.utils.ingestion_utils import update_book_processing_state
+from app.utils.processing_error_utils import friendly_processing_error
+
+
+async def _mark_budget_blocked(db, *, book: Book, reason: str) -> None:
+    """Give budget-limited uploads an author-visible failed state.
+
+    Leaving the book at ``status="error"`` without touching the workspace made
+    the UI show "Queued for processing" forever.
+    """
+    message = friendly_processing_error(reason)
+    if not isinstance(getattr(book, "writer_workspace", None), dict):
+        book.writer_workspace = {}
+    book.status = "failed"
+    book.total_tokens = 0
+    book.writer_workspace = update_book_processing_state(
+        book,
+        status="failed",
+        stage="failed",
+        total_chapters=getattr(book, "total_chapters", None),
+        completed_chapters=0,
+        last_error=message,
+    )
+    await db.commit()
 
 
 async def apply_ingestion_token_budget(
@@ -19,6 +43,14 @@ async def apply_ingestion_token_budget(
     all_chapters: list[dict[str, Any]],
 ) -> dict[str, Any]:
     full_tokens = sum(count_tokens(chapter["text"]) for chapter in all_chapters)
+    if not all_chapters:
+        return {
+            "full_tokens": 0,
+            "processed_tokens": 0,
+            "was_truncated": False,
+            "ai_chapters": [],
+            "error": None,
+        }
     if user is None or has_paid_reading_access(user):
         return {
             "full_tokens": full_tokens,
@@ -37,10 +69,11 @@ async def apply_ingestion_token_budget(
     remaining_budget = max(0, settings.FREE_TOTAL_TOKEN_BUDGET - used_so_far)
 
     if remaining_budget == 0:
-        await db.execute(
-            update(Book).where(Book.id == book.id).values(status="error", total_tokens=0)
+        await _mark_budget_blocked(
+            db,
+            book=book,
+            reason="budget_exhausted: free token budget already used",
         )
-        await db.commit()
         return {
             "full_tokens": full_tokens,
             "processed_tokens": 0,
@@ -63,10 +96,11 @@ async def apply_ingestion_token_budget(
             break
 
     if not partial_chapters:
-        await db.execute(
-            update(Book).where(Book.id == book.id).values(status="error", total_tokens=0)
+        await _mark_budget_blocked(
+            db,
+            book=book,
+            reason="insufficient_remaining_budget: free token budget too small",
         )
-        await db.commit()
         return {
             "full_tokens": full_tokens,
             "processed_tokens": 0,

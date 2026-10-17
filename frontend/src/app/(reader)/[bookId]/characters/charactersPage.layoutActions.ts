@@ -16,7 +16,6 @@ type CharacterLayoutActions = Pick<
   | "onApproveCharacter"
   | "onAttachCandidate"
   | "onAttachRelationshipCandidate"
-  | "onBack"
   | "onCancelCreate"
   | "onClearManualMerge"
   | "onCompareEvidence"
@@ -94,7 +93,6 @@ type UseCharacterLayoutActionsOptions = {
   openReviewQueue: () => void
   progressChapter: number
   refetchRepairPreview: () => MaybePromise
-  onBack: () => void
   saveCharacterWorkspaceNote: () => MaybePromise
   setActionError: Dispatch<SetStateAction<string | null>>
   setActiveTab: Dispatch<SetStateAction<CharacterProfileTab>>
@@ -147,7 +145,6 @@ export function useCharacterLayoutActions({
   openReviewQueue,
   progressChapter,
   refetchRepairPreview,
-  onBack,
   saveCharacterWorkspaceNote,
   setActionError,
   setActiveTab,
@@ -169,7 +166,6 @@ export function useCharacterLayoutActions({
     onApproveCharacter: () => void handleApproveCharacter(),
     onAttachCandidate: (candidate) => void handleAttachCandidate(candidate),
     onAttachRelationshipCandidate: (candidate, side) => void handleAttachRelationshipCandidate(candidate, side),
-    onBack,
     onCancelCreate: () => {
       setCreating(false)
       setCreateDraft(buildCreateDraft(progressChapter))

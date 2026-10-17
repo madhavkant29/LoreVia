@@ -9,6 +9,7 @@ const captureMock = vi.hoisted(() => vi.fn())
 const captureTimingMock = vi.hoisted(() => vi.fn())
 const setUserMock = vi.hoisted(() => vi.fn())
 const setBookModeMock = vi.hoisted(() => vi.fn())
+const pushMock = vi.hoisted(() => vi.fn())
 const authState = vi.hoisted(() => ({
   user: {
     id: "user-1",
@@ -22,14 +23,20 @@ vi.mock("@tanstack/react-query", () => ({
   useQuery: useQueryMock,
 }))
 
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: pushMock }),
+}))
+
 vi.mock("@/lib/api/books", () => ({
   booksApi: {
     listSeries: vi.fn(),
     list: vi.fn(),
+    listSelector: vi.fn(),
     getStats: vi.fn(),
     get: vi.fn(),
     upload: uploadMock,
     importManuscript: vi.fn(),
+    saveChapterContent: vi.fn(),
     previewUpload: vi.fn(),
     createEmptyProject: vi.fn(),
     delete: vi.fn(),
@@ -94,7 +101,7 @@ vi.mock("@/lib/analytics/posthog", () => ({
 vi.mock("@/lib/query/cacheKeys", () => ({
   asQueryKey: (value: unknown) => value,
   bookCacheKey: (...parts: string[]) => parts.join(":"),
-  booksListCacheKey: () => "books:list",
+  booksSelectorCacheKey: () => "books:selector",
   booksSeriesCacheKey: () => "books:series",
   booksStatsCacheKey: () => "books:stats",
 }))
@@ -116,6 +123,7 @@ describe("UploadModal", () => {
     useQueryMock.mockReset()
     uploadMock.mockReset()
     vi.mocked(booksApi.importManuscript).mockReset()
+    vi.mocked(booksApi.saveChapterContent).mockReset()
     vi.mocked(booksApi.previewUpload).mockReset()
     vi.mocked(booksApi.createEmptyProject).mockReset()
     vi.mocked(booksApi.delete).mockReset()
@@ -130,6 +138,7 @@ describe("UploadModal", () => {
     captureTimingMock.mockReset()
     setUserMock.mockReset()
     setBookModeMock.mockReset()
+    pushMock.mockReset()
     authState.user = {
       id: "user-1",
       email: "author@getlorevia.com",
@@ -141,6 +150,15 @@ describe("UploadModal", () => {
     uploadMock.mockResolvedValue({ book_id: "book-99" })
     vi.mocked(booksApi.previewUpload).mockResolvedValue(importPreviewFixture() as never)
     vi.mocked(booksApi.importManuscript).mockResolvedValue(importResponseFixture() as never)
+    vi.mocked(booksApi.saveChapterContent).mockResolvedValue({
+      status: "created",
+      book_id: "book-1",
+      chapter_number: 4,
+      content_version: 1,
+      client_mutation_id: "mutation-1",
+      saved_at: "2026-01-01T00:00:00Z",
+      story_memory_status: "queued",
+    } as never)
     vi.mocked(booksApi.createEmptyProject).mockResolvedValue({ book_id: "empty-1" } as never)
     vi.mocked(booksApi.delete).mockResolvedValue({} as never)
     vi.mocked(intelligenceApi.editorialReview).mockResolvedValue({
@@ -173,9 +191,20 @@ describe("UploadModal", () => {
     document.body.innerHTML = ""
   })
 
+  it("reports empty and edited chapter drafts to the host workspace", () => {
+    const onDraftChange = vi.fn()
+    const view = renderUploadModal({ initialMode: "author", initialExistingBookId: "book-1", presentation: "inline", onDraftChange })
+    expect(onDraftChange).toHaveBeenLastCalledWith(false)
+    setInputValue(view, 'input[aria-label="Chapter title"]', "The signal")
+    expect(onDraftChange).toHaveBeenLastCalledWith(true)
+    setInputValue(view, 'input[aria-label="Chapter title"]', "")
+    expect(onDraftChange).toHaveBeenLastCalledWith(false)
+  })
+
   it("prefills author mode uploads from the account username and explains the manuscript-only byline", async () => {
     const view = renderUploadModal({ initialMode: "author" })
 
+    expect(view.textContent).toContain("what is working first, then evidence-backed revision opportunities")
     expect(view.textContent).toContain("This name appears on this manuscript only.")
     expect(view.textContent).toContain("different pen name or byline")
 
@@ -198,7 +227,8 @@ describe("UploadModal", () => {
   })
 
   it("submits an overridden manuscript author without changing the account username", async () => {
-    const view = renderUploadModal({ initialMode: "author" })
+    const onClose = vi.fn()
+    const view = renderUploadModal({ initialMode: "author", onClose })
 
     const titleInput = view.querySelector('input[aria-label="Title"]') as HTMLInputElement | null
     const authorInput = view.querySelector('input[aria-label="Manuscript author or pen name"]') as HTMLInputElement | undefined
@@ -231,6 +261,7 @@ describe("UploadModal", () => {
       submitButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }))
       await Promise.resolve()
     })
+    await waitFor(() => uploadMock.mock.calls.length > 0)
 
     expect(uploadMock).toHaveBeenCalledWith(
       expect.any(File),
@@ -242,11 +273,12 @@ describe("UploadModal", () => {
     expect(authState.user.username).toBe("author")
     expect(captureMock).toHaveBeenCalledWith("upload_started", expect.objectContaining({ mode: "author", kind: "new_upload" }))
     expect(captureMock).toHaveBeenCalledWith("book_uploaded", expect.not.objectContaining({ manuscript_text: expect.anything() }))
+    expect(onClose).toHaveBeenCalledTimes(1)
   })
 
   it("removes the private workspace notice and renders author upload options with explicit colors", async () => {
     useQueryMock.mockImplementation(({ queryKey }: { queryKey: unknown }) => {
-      if (queryKey === "books:list") {
+      if (queryKey === "books:selector") {
         return {
           data: [
             {
@@ -295,7 +327,7 @@ describe("UploadModal", () => {
     await chooseFile(view, new File(["chapter"], "gate.pdf", { type: "application/pdf" }))
     await clickButton(view, "Preview structure")
     expect(view.textContent).toContain("Structure preview")
-    expect(view.textContent).toContain("92% confident")
+    expect(view.textContent).toContain("Outline ready for review")
     expect(view.textContent).toContain("Chapter One")
 
     await clickButton(view, "Edit structure")
@@ -317,7 +349,7 @@ describe("UploadModal", () => {
 
   it("imports pasted chapters into existing author books and renders post-import review", async () => {
     useQueryMock.mockImplementation(({ queryKey }: { queryKey: unknown }) => {
-      if (queryKey === "books:list") {
+      if (queryKey === "books:selector") {
         return {
           data: [
             {
@@ -343,25 +375,105 @@ describe("UploadModal", () => {
     setTextareaValue(view, "textarea", "Mara repeats the gate oath.")
     await clickButton(view, "Add Chapter & Process")
 
-    expect(booksApi.importManuscript).toHaveBeenCalledWith(
+    expect(booksApi.saveChapterContent).toHaveBeenCalledWith(
       "book-1",
+      4,
       expect.objectContaining({
         text: "Mara repeats the gate oath.",
         title: "The Oath",
-        chapterNumber: 4,
-        replaceExisting: false,
-        splitIntoChapters: true,
+        expectedContentVersion: 0,
+        clientMutationId: expect.any(String),
       }),
     )
+    expect(booksApi.importManuscript).not.toHaveBeenCalled()
     await waitForText(view, "Immediate continuity review")
     expect(view.textContent).toContain("Immediate continuity review")
     expect(view.textContent).toContain("Strong upload")
     expect(view.textContent).toContain("Oath thread")
+    expect(pushMock).toHaveBeenCalledWith("/book-1/manuscript?chapter=4")
 
     await clickButton(view, "Download continuity report")
     expect(intelligenceApi.continuityReport).toHaveBeenCalled()
   })
+  it("rejects unsupported, legacy, and oversized files locally before uploading", async () => {
+    const view = renderUploadModal({ initialMode: "author" })
+    setInputValue(view, 'input[aria-label="Title"]', "Big Draft")
+
+    await chooseFile(view, makeSizedFile("photo.png", 2048))
+    expect(view.textContent).toContain("isn't a supported format")
+
+    await chooseFile(view, makeSizedFile("manuscript.doc", 2048))
+    expect(view.textContent).toContain(".docx")
+
+    await chooseFile(view, makeSizedFile("novel.pdf", 101 * 1024 * 1024))
+    expect(view.textContent).toContain("100 MB")
+
+    const submitButton = view.querySelector('button[type="submit"]') as HTMLButtonElement | null
+    await act(async () => {
+      submitButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }))
+      await Promise.resolve()
+    })
+    expect(uploadMock).not.toHaveBeenCalled()
+  })
+
+  it("shows the specific server-side failure message when an upload is rejected", async () => {
+    uploadMock.mockRejectedValue(
+      new Error("We couldn't read this manuscript. The file may be corrupted or partially saved."),
+    )
+    const view = renderUploadModal({ initialMode: "author" })
+    setInputValue(view, 'input[aria-label="Title"]', "Broken Draft")
+    await chooseFile(view, makeSizedFile("novel.pdf", 2048))
+
+    const submitButton = view.querySelector('button[type="submit"]') as HTMLButtonElement | null
+    await act(async () => {
+      submitButton?.click()
+      await Promise.resolve()
+    })
+    await waitForText(view, "We couldn't read this manuscript")
+
+    expect(view.textContent).not.toContain("Upload failed. Please try again.")
+  })
+
+  it("renders the processing progress bar under 100% while queued", async () => {
+    const importMock = vi.mocked(booksApi.importManuscript)
+    let releaseProgress: (() => void) | null = null
+    importMock.mockImplementation(async (_bookId, payload) => {
+      payload.onProgress?.(1, 4)
+      await new Promise<void>((resolve) => {
+        releaseProgress = resolve
+      })
+      return importResponseFixture() as never
+    })
+    useQueryMock.mockImplementation(({ queryKey }: { queryKey: unknown }) => {
+      if (queryKey === "books:selector") {
+        return {
+          data: [{ id: "book-1", title: "Gate Draft", mode: "author", hidden_at: null, total_chapters: 3, work_type: "novel" }],
+          refetch: vi.fn(),
+        }
+      }
+      return { data: undefined, refetch: vi.fn() }
+    })
+    const view = renderUploadModal({ initialMode: "author", initialExistingBookId: "book-1", presentation: "inline" })
+
+    await clickButton(view, "Upload file")
+    await chooseFile(view, makeSizedFile("chapter.pdf", 2048))
+    await clickButton(view, "Add Chapter & Process")
+    await waitForText(view, "Handing off for processing")
+
+    const bar = view.querySelector(".h-full.rounded-full.bg-indigo-600") as HTMLElement | null
+    expect(bar?.style.width).toBe("25%")
+    await act(async () => {
+      releaseProgress?.()
+      await Promise.resolve()
+    })
+  })
 })
+
+function makeSizedFile(name: string, size: number, type = "application/octet-stream"): File {
+  const file = new File(["x"], name, { type })
+  Object.defineProperty(file, "size", { configurable: true, value: size })
+  return file
+}
 
 function renderUploadModal(props?: Partial<React.ComponentProps<typeof UploadModal>>) {
   container = document.createElement("div")
@@ -383,10 +495,21 @@ async function clickButton(view: HTMLElement, label: string, index = 0) {
   const button = Array.from(view.querySelectorAll("button")).filter((candidate) => candidate.textContent?.includes(label))[index]
   if (!button) throw new Error(`Missing button ${label}\n${view.textContent ?? ""}`)
   await act(async () => {
-    button.dispatchEvent(new MouseEvent("click", { bubbles: true }))
+    button.click()
     await Promise.resolve()
     await new Promise((resolve) => setTimeout(resolve, 0))
   })
+}
+
+async function waitFor(assertion: () => boolean) {
+  for (let index = 0; index < 30; index += 1) {
+    if (assertion()) return
+    await act(async () => {
+      await Promise.resolve()
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    })
+  }
+  throw new Error("Timed out waiting for condition")
 }
 
 async function chooseFile(view: HTMLElement, file: File) {

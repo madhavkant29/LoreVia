@@ -572,6 +572,10 @@ class _RetryDB:
     async def refresh(self, value):
         self.refreshed.append(value)
 
+    async def scalar(self, *_args, **_kwargs):
+        # No persisted legacy-freeze cutoff marker in these tests.
+        return None
+
 
 def test_retry_state_helpers_normalize_actions_errors_and_chapter_timestamps():
     book = SimpleNamespace(
@@ -706,22 +710,18 @@ async def test_retry_book_processing_rebuilds_editor_project_from_saved_chapters
     db = _RetryDB()
     calls = []
 
-    async def prepare(value_db, value_book, *, reason):
-        calls.append(("prepare", value_db, value_book, reason))
+    async def dispatch_manual(value_db, value_book):
+        calls.append((value_db, value_book))
         value_book.status = "processing"
-        value_book.writer_workspace = {
-            "processing": {"status": "processing", "stage": "extraction"}
-        }
-        return "run-current"
-
-    async def dispatch(value_db, value_book):
-        calls.append(("dispatch", value_db, value_book))
         return 2, 500
 
     from app.services import editor_project_service
 
-    monkeypatch.setattr(editor_project_service, "prepare_rebuild", prepare)
-    monkeypatch.setattr(editor_project_service, "dispatch_rebuild", dispatch)
+    monkeypatch.setattr(
+        editor_project_service,
+        "dispatch_manual_rebuild_with_reservations",
+        dispatch_manual,
+    )
     monkeypatch.setattr(
         pipeline_state_service,
         "_dispatch_durable_book_processing",
@@ -740,8 +740,7 @@ async def test_retry_book_processing_rebuilds_editor_project_from_saved_chapters
     )
 
     assert await pipeline_state_service.retry_book_processing(db, book) == {"status": "processing"}
-    assert [call[0] for call in calls] == ["prepare", "dispatch"]
-    assert calls[0][3] == "manual_reprocess"
+    assert calls == [(db, book)]
 
 
 @pytest.mark.asyncio

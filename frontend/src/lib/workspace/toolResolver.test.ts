@@ -100,6 +100,26 @@ describe("workspace tool resolver", () => {
     expect(userHidden.hidden).toBe(true)
   })
 
+  it("reveals standard tools when a focused user explicitly shows advanced tools", () => {
+    const bookPreference = defaultBookUiPreference("book-1", "focused")
+
+    const hidden = resolveWorkspaceTool(tool("book.scenes"), {
+      mode: "focused",
+      book: book(),
+      bookPreference,
+    })
+    bookPreference.advanced_tool_override = "show"
+    const revealed = resolveWorkspaceTool(tool("book.scenes"), {
+      mode: "focused",
+      book: book(),
+      bookPreference,
+    })
+
+    expect(hidden.reason).toBe("hidden_by_mode")
+    expect(revealed.visibility).toBe("visible")
+    expect(revealed.hidden).toBe(false)
+  })
+
   it("keeps pricing visible for unpaid users even when navigation visibility is hidden", () => {
     const preference = defaultUserUiPreference("standard")
     preference.dashboard_visibility["dashboard.pricing"] = "user_hidden"

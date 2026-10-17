@@ -57,7 +57,7 @@ describe("UX primitives", () => {
 
   it("confirms destructive actions through the dialog", () => {
     const resolve = vi.fn()
-    const rendered = render(
+    render(
       <ConfirmDialog
         pending={{
           title: "Delete note?",
@@ -102,6 +102,7 @@ describe("UX primitives", () => {
           partialReady: false,
           ready: false,
           failed: true,
+          frozen: false,
           failureKind: "recoverable",
           stateVariant: "recoverable_failure",
         }}
@@ -132,6 +133,7 @@ describe("UX primitives", () => {
           partialReady: true,
           ready: false,
           failed: false,
+          frozen: false,
           failureKind: null,
           stateVariant: "partial_ready",
         }}
@@ -140,6 +142,35 @@ describe("UX primitives", () => {
     )
 
     expect(rendered.querySelector("button")?.textContent).toContain("Continue processing")
+  })
+
+  it("shows auto-resume token pauses without a manual action", () => {
+    const rendered = render(
+      <ProcessingStatusStrip
+        status={{
+          stage: "extracting",
+          label: "Processing paused",
+          detail: "Token limit reached. Reprocessing will resume automatically around 5:30 PM.",
+          progressPct: 50,
+          chaptersCompleted: 1,
+          chaptersTotal: 2,
+          lastError: null,
+          retryAvailable: false,
+          resumeAvailable: false,
+          autoResume: true,
+          partialReady: true,
+          ready: false,
+          failed: false,
+          frozen: false,
+          failureKind: null,
+          stateVariant: "partial_ready",
+        }}
+        onRetry={() => undefined}
+      />
+    )
+
+    expect(rendered.textContent).toContain("resume automatically")
+    expect(rendered.querySelector("button")).toBeNull()
   })
 
   it("renders standardized save state copy", () => {

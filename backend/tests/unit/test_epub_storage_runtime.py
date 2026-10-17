@@ -5,6 +5,8 @@ from types import SimpleNamespace
 
 import ebooklib
 import pytest
+from bs4 import BeautifulSoup
+from ebooklib import epub
 
 from app.core import storage
 from app.parsers import epub_parser
@@ -14,6 +16,7 @@ REAL_UPLOAD_BOOK_BYTES = storage.upload_book_bytes
 REAL_UPLOAD_BINARY = storage.upload_binary
 REAL_UPLOAD_TEXT = storage.upload_text
 REAL_DOWNLOAD_BOOK = storage.download_book
+REAL_LIST_OBJECT_KEYS = storage.list_object_keys
 
 
 def restore_storage_functions(monkeypatch):
@@ -22,6 +25,7 @@ def restore_storage_functions(monkeypatch):
     monkeypatch.setattr(storage, "upload_binary", REAL_UPLOAD_BINARY)
     monkeypatch.setattr(storage, "upload_text", REAL_UPLOAD_TEXT)
     monkeypatch.setattr(storage, "download_book", REAL_DOWNLOAD_BOOK)
+    monkeypatch.setattr(storage, "list_object_keys", REAL_LIST_OBJECT_KEYS)
 
 
 class FakeEpubItem:
@@ -61,6 +65,134 @@ def test_parse_epub_extracts_documents_removes_assets_and_skips_short_items(monk
     assert "\u2726" not in chapters[0]["text"]
     assert chapters[1]["title"] == "Chapter 2"
     assert [chapter["number"] for chapter in chapters] == [1, 2]
+
+
+def test_parse_epub_uses_spine_order_and_keeps_short_real_chapters_and_paragraphs(monkeypatch):
+    first = FakeEpubItem(
+        b"<html><h1>Chapter 1</h1><p>Mara <em>keeps</em> the key near the gate.</p>"
+        b"<p>The guard notices the empty lock.</p></html>"
+    )
+    second = FakeEpubItem(b"<html><h1>Chapter 2</h1><p>The gate opens before sunrise.</p></html>")
+    fake_book = SimpleNamespace(
+        spine=[("first", "yes"), ("second", "yes")],
+        get_item_with_id=lambda item_id: {"first": first, "second": second}[item_id],
+        get_items=lambda: [second, first],
+    )
+    monkeypatch.setattr(epub_parser.epub, "read_epub", lambda path: fake_book)
+
+    chapters = epub_parser.parse_epub(b"fake epub bytes", split_large_chapters=False)
+
+    assert [chapter["title"] for chapter in chapters] == ["Chapter 1", "Chapter 2"]
+    assert "Mara keeps the key" in chapters[0]["text"]
+    assert "gate.\n\nThe guard" in chapters[0]["text"]
+    assert "The gate opens before sunrise." in chapters[1]["text"]
+
+
+def test_parse_epub_splits_multiple_chapters_in_one_spine_document(monkeypatch):
+    first = "Mara keeps the archive key while the watchman circles the gate. " * 4
+    second = "The watchman returns and sees that the key is missing. " * 4
+    fake_book = SimpleNamespace(
+        get_items=lambda: [
+            FakeEpubItem(
+                f"<html><h1>Chapter 1</h1><p>{first}</p><h1>Chapter 2</h1><p>{second}</p></html>".encode()
+            )
+        ]
+    )
+    monkeypatch.setattr(epub_parser.epub, "read_epub", lambda path: fake_book)
+
+    chapters = epub_parser.parse_epub(b"fake epub bytes", split_large_chapters=False)
+
+    assert [chapter["title"] for chapter in chapters] == ["Chapter 1", "Chapter 2"]
+    assert first.strip() in chapters[0]["text"]
+    assert second.strip() in chapters[1]["text"]
+    assert second.strip() not in chapters[0]["text"]
+
+
+def test_epub_block_extraction_keeps_div_and_section_prose_in_order(monkeypatch):
+    html = (
+        "<html><body><h2>Chapter 1</h2>"
+        "<div>Mara <em>keeps</em> the key near the gate.</div>"
+        "<section><p>The guard sees the empty lock.</p>"
+        "<div>The alarm rings before dawn.</div></section></body></html>"
+    )
+    assert epub_parser._extract_epub_blocks(BeautifulSoup(html, "html.parser")) == [
+        "Chapter 1",
+        "Mara keeps the key near the gate.",
+        "The guard sees the empty lock.",
+        "The alarm rings before dawn.",
+    ]
+    monkeypatch.setattr(
+        epub_parser.epub,
+        "read_epub",
+        lambda path: SimpleNamespace(get_items=lambda: [FakeEpubItem(html.encode())]),
+    )
+
+    chapters = epub_parser.parse_epub(b"fake epub bytes", split_large_chapters=False)
+
+    assert len(chapters) == 1
+    assert chapters[0]["title"] == "Chapter 1"
+    assert "The alarm rings before dawn." in chapters[0]["text"]
+
+
+def test_epub_block_extraction_preserves_inline_word_boundaries():
+    html = "<body><p>Un<em>break</em>able words and <strong>emphasis</strong>.</p></body>"
+
+    assert epub_parser._extract_epub_blocks(BeautifulSoup(html, "html.parser")) == [
+        "Unbreakable words and emphasis."
+    ]
+
+
+def test_parse_real_epub_obeys_spine_order_and_preserves_inline_text(tmp_path):
+    book = epub.EpubBook()
+    book.set_identifier("lorevia-spine-order-test")
+    book.set_title("Spine Order Test")
+    book.set_language("en")
+    first = epub.EpubHtml(title="Chapter 1", file_name="first.xhtml", lang="en")
+    first.content = (
+        "<html><body><h1>Chapter 1</h1><p>Un<em>break</em>able proof appears.</p></body></html>"
+    )
+    second = epub.EpubHtml(title="Chapter 2", file_name="second.xhtml", lang="en")
+    second.content = "<html><body><h1>Chapter 2</h1><p>The answer follows.</p></body></html>"
+    book.add_item(second)
+    book.add_item(first)
+    book.add_item(epub.EpubNcx())
+    book.add_item(epub.EpubNav())
+    book.toc = (first, second)
+    book.spine = [first, second]
+    path = tmp_path / "spine-order.epub"
+    epub.write_epub(str(path), book)
+
+    chapters = epub_parser.parse_epub(path.read_bytes(), split_large_chapters=False)
+
+    assert [chapter["title"] for chapter in chapters] == ["Chapter 1", "Chapter 2"]
+    assert "Unbreakable proof appears." in chapters[0]["text"]
+    assert "The answer follows." in chapters[1]["text"]
+
+
+def test_epub_keeps_a_very_short_chapter_with_an_explicit_chapter_heading(monkeypatch):
+    fake_book = SimpleNamespace(
+        get_items=lambda: [FakeEpubItem(b"<html><h1>Chapter 3</h1><p>She vanished.</p></html>")]
+    )
+    monkeypatch.setattr(epub_parser.epub, "read_epub", lambda path: fake_book)
+
+    chapters = epub_parser.parse_epub(b"fake epub bytes", split_large_chapters=False)
+
+    assert len(chapters) == 1
+    assert chapters[0]["source_number"] == 3
+    assert "She vanished." in chapters[0]["text"]
+
+
+def test_epub_keeps_a_one_word_chapter_with_an_explicit_heading(monkeypatch):
+    fake_book = SimpleNamespace(
+        get_items=lambda: [FakeEpubItem(b"<html><h1>Chapter 4</h1><p>No.</p></html>")]
+    )
+    monkeypatch.setattr(epub_parser.epub, "read_epub", lambda path: fake_book)
+
+    chapters = epub_parser.parse_epub(b"fake epub bytes", split_large_chapters=False)
+
+    assert len(chapters) == 1
+    assert chapters[0]["source_number"] == 4
+    assert "No." in chapters[0]["text"]
 
 
 def test_epub_split_helpers_split_only_at_sentence_boundaries(monkeypatch):
@@ -116,6 +248,9 @@ def test_local_storage_round_trip_move_delete_and_permissions(monkeypatch, tmp_p
     assert storage.download_book("assets/image.bin") == b"binary"
     assert storage.download_book("notes/note.txt") == b"hello"
     assert storage.get_presigned_url("assets/image.bin") is None
+    assert storage.list_object_keys("assets") == ["assets/image.bin"]
+    assert storage.list_object_keys("notes", limit=1) == ["notes/note.txt"]
+    assert storage.list_object_keys("missing") == []
 
     assert storage.move_object("assets/image.bin", "archive/image.bin") == "archive/image.bin"
     assert storage.download_book("archive/image.bin") == b"binary"
@@ -196,6 +331,19 @@ class FakeS3Client:
         self.calls.append(("presign", operation, kwargs))
         return "https://storage.example/signed"
 
+    def list_objects_v2(self, **kwargs):
+        self.calls.append(("list_objects_v2", kwargs))
+        if "ContinuationToken" not in kwargs:
+            return {
+                "Contents": [{"Key": "system/upload-intents/first.json"}],
+                "IsTruncated": True,
+                "NextContinuationToken": "next-page",
+            }
+        return {
+            "Contents": [{"Key": "system/upload-intents/second.json"}],
+            "IsTruncated": False,
+        }
+
 
 def test_remote_storage_exercises_s3_operations(monkeypatch):
     restore_storage_functions(monkeypatch)
@@ -214,6 +362,10 @@ def test_remote_storage_exercises_s3_operations(monkeypatch):
     assert storage.move_object("source", "destination") == "destination"
     assert storage.move_object("same", "same") == "same"
     assert storage.get_presigned_url("destination", expires=120) == "https://storage.example/signed"
+    assert storage.list_object_keys("system/upload-intents", limit=2) == [
+        "system/upload-intents/first.json",
+        "system/upload-intents/second.json",
+    ]
 
     call_names = [call[0] for call in client.calls]
     assert "upload_fileobj" in call_names
@@ -222,3 +374,4 @@ def test_remote_storage_exercises_s3_operations(monkeypatch):
     assert "copy_object" in call_names
     assert call_names.count("delete_object") == 2
     assert "presign" in call_names
+    assert call_names.count("list_objects_v2") == 2

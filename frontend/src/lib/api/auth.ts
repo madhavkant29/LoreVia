@@ -4,6 +4,8 @@ import type { User } from "@/types/user"
 import axios from "axios"
 import { supabase } from "@/lib/supabase"
 
+const LOGOUT_REQUEST_TIMEOUT_MS = 3_000
+
 export interface RegisterResponse {
   id: string
   email: string
@@ -70,9 +72,12 @@ export const authApi = {
     apiClient.post<User>("/auth/session").then(r => normalizeUser(r.data)),
   logout: async () => {
     try {
-      return await apiClient.post("/auth/logout").then(r => r.data)
+      return await apiClient
+        .post("/auth/logout", undefined, { timeout: LOGOUT_REQUEST_TIMEOUT_MS })
+        .then(r => r.data)
     } finally {
-      await supabase?.auth.signOut({ scope: "local" })
+      // Provider-local cleanup must not extend the bounded backend revocation path.
+      void supabase?.auth.signOut({ scope: "local" }).catch(() => undefined)
     }
   },
   me: async () => {

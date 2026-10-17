@@ -66,9 +66,9 @@ export default function CompareIndexPage() {
       <main className="min-h-screen bg-[#08110f] text-white">
         <MarketingHeader />
 
-        <section className="mx-auto max-w-7xl px-5 pb-14 pt-14 md:px-8 md:pt-20">
-          <p className="text-3xs font-semibold uppercase tracking-[0.32em] text-[#6fae9f]">Compare LoreVia</p>
-          <h1 className="mt-5 max-w-4xl font-display text-5xl font-semibold leading-[0.95] tracking-[-0.04em] text-white md:text-7xl">
+        <section className="mx-auto max-w-7xl px-5 pb-12 pt-14 md:px-8 md:pb-16 md:pt-20">
+          <p className="text-sm font-semibold text-[#79c8b8]">Independent workflow comparisons</p>
+          <h1 className="mt-4 max-w-4xl font-display text-5xl font-semibold leading-[0.98] tracking-[-0.04em] text-white md:text-7xl">
             Pick the writing workspace that matches your real bottleneck.
           </h1>
           <p className="mt-6 max-w-3xl text-lg leading-8 text-[#aeb9b3]">
@@ -76,19 +76,18 @@ export default function CompareIndexPage() {
           </p>
         </section>
 
-        <section className="mx-auto max-w-7xl px-5 pb-24 md:px-8">
-          <div className="grid gap-5 lg:grid-cols-2">
+        <section className="mx-auto max-w-7xl px-5 pb-20 md:px-8 md:pb-24">
+          <div data-testid="comparison-index-list" className="border-y border-white/10">
             {comparisonIndexCards.map((item) => (
               <Link
                 key={item.slug}
                 href={`/compare/${item.slug}`}
-                className="rounded-lg border border-white/10 bg-[#0d1715] p-6 transition hover:border-white/18 hover:bg-[#101a18]"
+                className="group grid gap-3 border-b border-white/[0.08] py-6 transition last:border-b-0 hover:bg-white/[0.025] md:grid-cols-[minmax(0,0.8fr)_minmax(0,1.25fr)_auto] md:items-center md:gap-8 md:px-4"
               >
-                <p className="text-3xs font-semibold uppercase tracking-[0.28em] text-[#6fae9f]">Comparison page</p>
-                <h2 className="mt-4 font-display text-4xl font-semibold text-white">LoreVia vs {item.name}</h2>
-                <p className="mt-4 text-base leading-8 text-[#aeb9b3]">{item.summary}</p>
-                <span className="mt-6 inline-flex items-center gap-2 text-sm font-semibold text-[#86decd]">
-                  Open comparison
+                <h2 className="font-display text-3xl font-semibold text-white">LoreVia vs {item.name}</h2>
+                <p className="text-base leading-7 text-[#aeb9b3]">{item.summary}</p>
+                <span className="inline-flex items-center gap-2 text-sm font-semibold text-[#86decd] md:justify-self-end">
+                  Read comparison
                   <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M5 12h14m-6-6 6 6-6 6" />
                   </svg>
@@ -96,11 +95,8 @@ export default function CompareIndexPage() {
               </Link>
             ))}
           </div>
-        </section>
-
-        <section className="mx-auto max-w-7xl px-5 pb-24 md:px-8">
-          <p className="text-xs leading-6 text-[#4a5a54]">
-            All product names, logos, and brands are property of their respective owners. Comparison is for informational purposes only and reflects LoreVia&apos;s perspective. Feature availability may change over time.
+          <p className="mt-8 max-w-4xl text-xs leading-6 text-[#66756f]">
+            Product names and brands belong to their respective owners. These comparisons reflect LoreVia&apos;s perspective and are provided for information only. Feature availability may change.
           </p>
         </section>
       </main>

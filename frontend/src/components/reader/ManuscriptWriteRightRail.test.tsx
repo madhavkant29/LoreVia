@@ -70,7 +70,6 @@ function renderRail(props: Partial<React.ComponentProps<typeof ManuscriptWriteRi
       <ManuscriptWriteRightRail
         isDark
         bookId="book-1"
-        totalChapters={4}
         activeRightPane="notes"
         onOpenRightPane={vi.fn()}
         selectedCharCard={null}

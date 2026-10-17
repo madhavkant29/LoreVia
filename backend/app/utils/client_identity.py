@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import hmac
 import ipaddress
 
 from fastapi import Request
 
+from app.core.config import settings
+
 EDGE_VERIFIED_HEADER = "x-lorevia-edge-verified"
 EDGE_VERIFIED_VALUE = "1"
+EDGE_TOKEN_HEADER = "x-lorevia-edge-token"
 
 _TRUSTED_PROXY_NETS = (
     ipaddress.ip_network("10.0.0.0/8"),
@@ -46,7 +50,21 @@ def direct_peer_is_trusted_proxy(request: Request) -> bool:
 
 
 def edge_verification_present(request: Request) -> bool:
-    return request.headers.get(EDGE_VERIFIED_HEADER) == EDGE_VERIFIED_VALUE
+    return edge_verification_values_match(
+        request.headers.get(EDGE_VERIFIED_HEADER),
+        request.headers.get(EDGE_TOKEN_HEADER),
+    )
+
+
+def edge_verification_values_match(marker: str | None, token: str | None) -> bool:
+    if marker != EDGE_VERIFIED_VALUE:
+        return False
+    expected_token = settings.resolved_edge_proxy_secret()
+    if not expected_token:
+        # Preserve local/test ergonomics, but never permit marker-only trust when
+        # production validation has been bypassed or settings were monkeypatched.
+        return settings.DEPLOYMENT_ENV != "production"
+    return bool(token) and hmac.compare_digest(str(token), expected_token)
 
 
 def _first_forwarded_ip(header_value: str | None) -> str | None:

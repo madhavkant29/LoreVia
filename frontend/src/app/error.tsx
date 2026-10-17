@@ -1,47 +1,30 @@
 "use client"
 
 export default function GlobalError({
-  error,
+  error: _error,
   reset,
 }: {
   error: Error & { digest?: string }
   reset: () => void
 }) {
   return (
-    <html>
-      <body className="bg-stone-50 text-slate-950">
-        <main className="mx-auto flex min-h-screen max-w-2xl flex-col items-center justify-center px-6 py-12 text-center">
-          <div className="w-full rounded-lg border border-slate-200 bg-white p-8">
-            <p className="text-xs font-semibold uppercase tracking-[0.28em] text-rose-600">Something went wrong</p>
-            <h1 className="mt-3 text-3xl font-semibold text-slate-950">This screen hit a problem.</h1>
-            <p className="mt-3 text-sm leading-7 text-slate-600">
-              Try again, refresh the page, or contact support if it keeps happening. We do not show internal error details here.
-            </p>
-            <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
-              <button
-                type="button"
-                onClick={reset}
-                className="rounded-full bg-slate-950 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-800"
-              >
-                Retry
-              </button>
-              <button
-                type="button"
-                onClick={() => window.location.reload()}
-                className="rounded-full border border-slate-300 px-5 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
-              >
-                Refresh
-              </button>
-              <a
-                href="mailto:support@getlorevia.com"
-                className="rounded-full border border-slate-300 px-5 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
-              >
-                Contact support
-              </a>
-            </div>
-          </div>
-        </main>
-      </body>
-    </html>
+    <main className="grid min-h-[100dvh] place-items-center bg-[#f8f4ee] px-6 py-12 text-stone-950">
+      <section className="w-full max-w-lg border-y border-stone-300 py-8">
+        <p className="text-sm font-semibold text-rose-700">Something went wrong</p>
+        <h1 className="mt-3 text-3xl font-semibold text-stone-950">This screen hit a problem.</h1>
+        <p className="mt-3 text-sm leading-7 text-stone-600">
+          Retry the last action. Contact support at <a className="font-semibold text-teal-800 hover:underline" href="mailto:support@getlorevia.com">support@getlorevia.com</a> if the problem continues, and include the page you were using.
+        </p>
+        <div className="mt-6">
+          <button
+            type="button"
+            onClick={reset}
+            className="rounded-md bg-stone-950 px-5 py-3 text-sm font-semibold text-white transition hover:bg-stone-800"
+          >
+            Retry
+          </button>
+        </div>
+      </section>
+    </main>
   )
 }

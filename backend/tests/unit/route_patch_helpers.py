@@ -48,7 +48,9 @@ ROUTE_PATCH_MODULES: dict[str, tuple[str, ...]] = {
         "app.services.character_relationship_service",
         "app.services.character_review_action_service",
         "app.services.character_share_service",
+        "app.services.manuscript_import_request_service",
         "app.services.manuscript_import_service",
+        "app.services.manuscript_export_service",
         "app.services.manuscript_reprocess_service",
     ),
     "app.api.v1.routes.public": (
@@ -84,6 +86,15 @@ def patch_route_dependency(
     endpoint functions use this helper while they are being moved to direct
     child-module imports.
     """
+
+    if route_package.__name__ == "app.api.v1.routes.advisor" and name == "AsyncOpenAI":
+        factory = value
+        name = "get_openai_client"
+
+        def get_test_openai_client():
+            return factory()
+
+        value = get_test_openai_client
 
     patched = False
     for module in _route_modules(route_package):

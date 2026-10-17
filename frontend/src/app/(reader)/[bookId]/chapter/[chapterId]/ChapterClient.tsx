@@ -7,5 +7,5 @@ interface Props {
 }
 
 export function ChapterClient({ bookId, chapterNum }: Props) {
-  return <ReaderView bookId={bookId} chapterNum={chapterNum} />
+  return <ReaderView key={`${bookId}:${chapterNum}`} bookId={bookId} chapterNum={chapterNum} />
 }

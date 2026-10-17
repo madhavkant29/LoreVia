@@ -1,6 +1,6 @@
 import type { Route } from "next"
 import type { QueryClient } from "@tanstack/react-query"
-import { startTransition, useEffect, type Dispatch, type MutableRefObject, type SetStateAction } from "react"
+import { startTransition, useCallback, useEffect, useRef, useState, type Dispatch, type MutableRefObject, type SetStateAction } from "react"
 
 import { booksApi } from "@/lib/api/books"
 import { MANUSCRIPT_CHAPTER_INCLUDE, readerApi } from "@/lib/api/reader"
@@ -26,9 +26,10 @@ import {
 } from "./manuscriptPage.helpers"
 
 type AutosaveState = Record<number, { status: "pending" | "saved" | "error"; updatedAt?: string }>
-type ManuscriptRouter = {
-  replace: (href: Route) => void
-}
+type ManuscriptRouter = Pick<
+  ReturnType<(typeof import("next/navigation"))["useRouter"]>,
+  "replace"
+>
 
 type UseManuscriptChapterLoadingArgs = {
   authHydrated: boolean
@@ -105,9 +106,13 @@ export function useManuscriptChapterLoading({
   setWriterWorkspace,
   userTier,
 }: UseManuscriptChapterLoadingArgs) {
-  const markDraftDirty = (chapterNumber: number) => {
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const selectedChapterRef = useRef(selectedChapter)
+  selectedChapterRef.current = selectedChapter
+
+  const markDraftDirty = useCallback((chapterNumber: number) => {
     setDirtyDrafts((current) => (current.includes(chapterNumber) ? current : [...current, chapterNumber]))
-  }
+  }, [setDirtyDrafts])
 
   const clearDraftDirty = (chapterNumber: number) => {
     setDirtyDrafts((current) => current.filter((value) => value !== chapterNumber))
@@ -121,7 +126,7 @@ export function useManuscriptChapterLoading({
     }
   }
 
-  const getRecoveredDraft = (chapterNumber: number, fallbackDraft: { title: string; text: string; html: string }) => {
+  const getRecoveredDraft = useCallback((chapterNumber: number, fallbackDraft: { title: string; text: string; html: string }) => {
     if (typeof window === "undefined") {
       return { draft: fallbackDraft, recovered: false as const }
     }
@@ -139,7 +144,7 @@ export function useManuscriptChapterLoading({
       },
       recovered,
     }
-  }
+  }, [bookId])
 
   const syncLocalChapterFromServer = async (chapterNumber: number) => {
     const chapterMeta = chapterList?.chapters.find((item) => item.number === chapterNumber)
@@ -196,9 +201,10 @@ export function useManuscriptChapterLoading({
     }
   }
 
-  const loadBase = async () => {
+  const loadBase = useCallback(async () => {
+    const requestedChapter = selectedChapterRef.current
     const [bootstrap, chapters] = await Promise.all([
-      booksApi.getManuscriptBootstrap(bookId, { activeChapterNumber: selectedChapter, profile: "critical" }),
+      booksApi.getManuscriptBootstrap(bookId, { activeChapterNumber: requestedChapter, profile: "critical" }),
       readerApi.getChapterList(bookId),
     ])
     const bookData = bootstrap.book
@@ -215,8 +221,8 @@ export function useManuscriptChapterLoading({
       queryClient.setQueryData([bookCacheKey(bookId, "emotional-arc")], bootstrap.emotional_arc)
       queryClient.setQueryData([`manuscript:${bookId}:notes`], bootstrap.notes)
       queryClient.setQueryData([bookCacheKey(bookId, "vault-notes")], bootstrap.vault_notes)
-      if (selectedChapter !== null) {
-        queryClient.setQueryData([`manuscript:${bookId}:chapter-versions:${selectedChapter}`], bootstrap.chapter_versions)
+      if (requestedChapter !== null) {
+        queryClient.setQueryData([`manuscript:${bookId}:chapter-versions:${requestedChapter}`], bootstrap.chapter_versions)
       }
       if (bootstrap.prewriting_check) {
         queryClient.setQueryData([`manuscript:${bookId}:prewriting:${bootstrap.prewriting_check.upcoming_chapter}`], bootstrap.prewriting_check)
@@ -227,14 +233,15 @@ export function useManuscriptChapterLoading({
     setWriterWorkspace(bootstrap.writer_workspace)
     setWorkspaceTree(bootstrap.workspace_tree)
     setChapterList(chapters)
-    const initialChapterNumber = chapters.chapters.some((item) => item.number === selectedChapter)
-      ? selectedChapter
+    setLoadError(null)
+    const initialChapterNumber = chapters.chapters.some((item) => item.number === requestedChapter)
+      ? requestedChapter
       : chapters.chapters[chapters.chapters.length - 1]?.number ?? null
     if (initialChapterNumber === null) {
       setSelectedChapter(null)
       return
     }
-    if (selectedChapter !== initialChapterNumber) setSelectedChapter(initialChapterNumber)
+    if (requestedChapter !== initialChapterNumber) setSelectedChapter(initialChapterNumber)
 
     const chapterMeta = chapters.chapters.find((item) => item.number === initialChapterNumber)
     try {
@@ -289,15 +296,50 @@ export function useManuscriptChapterLoading({
         setStatusMessage(`Recovered a local autosave for chapter ${initialChapterNumber}.`)
       }
     } catch {
-      setChapterTitle(chapterMeta?.title || `Chapter ${initialChapterNumber}`)
-      setText("")
-      setHtml(textToHtml(""))
+      setLoadError(`Chapter ${initialChapterNumber} could not be loaded. Check your connection and try again.`)
     }
-  }
+  }, [
+    authHydrated,
+    bookId,
+    deferredChecksSeedRef,
+    firstChapterLoadedCapturedRef,
+    getRecoveredDraft,
+    initialChapterLoadedRef,
+    manuscriptLoadStartedAtRef,
+    markDraftDirty,
+    queryClient,
+    router,
+    setAutosaveState,
+    setBook,
+    setBookDrafts,
+    setChapterList,
+    setChapterTitle,
+    setCharacters,
+    setContentVersionByChapter,
+    setDraftChapterNumber,
+    setHtml,
+    setSelectedChapter,
+    setStatusMessage,
+    setText,
+    setWorkspaceTree,
+    setWriterWorkspace,
+    userTier,
+  ])
+
+  const retryLoad = useCallback(async () => {
+    setLoading(true)
+    try {
+      await loadBase()
+    } catch {
+      setLoadError("Your manuscript could not be loaded. Check your connection and try again.")
+    } finally {
+      setLoading(false)
+    }
+  }, [loadBase, setLoading])
 
   useEffect(() => {
-    loadBase().finally(() => setLoading(false))
-  }, [authHydrated, bookId, queryClient, router, userTier])
+    void retryLoad()
+  }, [retryLoad])
 
   useEffect(() => {
     if (selectedChapter === null) {
@@ -315,6 +357,7 @@ export function useManuscriptChapterLoading({
     }
     const chapterMeta = chapterList?.chapters.find((item) => item.number === selectedChapter)
     readerApi.getChapter(bookId, selectedChapter, { include: MANUSCRIPT_CHAPTER_INCLUDE }).then((chapter) => {
+      setLoadError(null)
       const title = chapter.chapter_title || chapterMeta?.title || `Chapter ${selectedChapter}`
       const chapterText = chapter.text_content || ""
       const chapterHtml = hydrateChapterMediaHtml(chapter)
@@ -361,11 +404,28 @@ export function useManuscriptChapterLoading({
       setReview(null)
       setReviewPassages([])
     }).catch(() => {
-      setChapterTitle(chapterMeta?.title || `Chapter ${selectedChapter}`)
-      setText("")
-      setHtml(textToHtml(""))
+      setLoadError(`Chapter ${selectedChapter} could not be loaded. Check your connection and try again.`)
     })
-  }, [bookId, chapterList, nextChapterNumber, selectedChapter])
+  }, [
+    bookId,
+    chapterList,
+    deferredChecksSeedRef,
+    getRecoveredDraft,
+    initialChapterLoadedRef,
+    markDraftDirty,
+    nextChapterNumber,
+    selectedChapter,
+    setAutosaveState,
+    setBookDrafts,
+    setChapterTitle,
+    setContentVersionByChapter,
+    setDraftChapterNumber,
+    setHtml,
+    setReview,
+    setReviewPassages,
+    setStatusMessage,
+    setText,
+  ])
 
   useEffect(() => {
     if (editorMode !== "book" || !chapterList?.chapters.length) return
@@ -424,10 +484,24 @@ export function useManuscriptChapterLoading({
           }
         })
       })
+      .catch(() => setLoadError("Some chapters could not be loaded. Your drafts are still held in this workspace. Try again to open the full book."))
       .finally(() => setFullBookLoading(false))
-  }, [bookDrafts, bookId, chapterList, editorMode])
+  }, [
+    bookDrafts,
+    bookId,
+    chapterList,
+    editorMode,
+    getRecoveredDraft,
+    setAutosaveState,
+    setBookDrafts,
+    setContentVersionByChapter,
+    setDirtyDrafts,
+    setFullBookLoading,
+  ])
 
   return {
+    loadError,
+    retryLoad,
     clearDraftDirty,
     loadBase,
     loadWorkspaceTree,

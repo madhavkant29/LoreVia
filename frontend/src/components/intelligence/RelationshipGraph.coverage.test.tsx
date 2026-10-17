@@ -21,6 +21,57 @@ import { graphLabelKey, graphStorageKey } from "./relationshipGraphDisplay"
 
 describe("RelationshipGraph interactions", () => {
 
+  it("keeps an unsaved correction when selection or closing is cancelled", async () => {
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false)
+    await renderGraph(<RelationshipGraph bookId="book-1" upToChapter={7} authorMode inspectorPlacement="inline" />)
+    await waitForText("3 characters")
+    await act(async () => { graphHandle()?.selectEdge("rel-1"); await Promise.resolve() })
+    const note = container?.querySelector("textarea") as HTMLTextAreaElement
+    await act(async () => { setFieldValue(note, "Keep this draft"); await Promise.resolve() })
+    await act(async () => { graphHandle()?.selectNode("mira"); await Promise.resolve() })
+    clickButton("Close")
+    expect(container?.querySelector("textarea")?.value).toBe("Keep this draft")
+    const unload = new Event("beforeunload", { cancelable: true })
+    window.dispatchEvent(unload)
+    expect(unload.defaultPrevented).toBe(true)
+    confirm.mockReturnValue(true)
+    clickButton("Close")
+    expect(container?.querySelector("aside")).toBeNull()
+    confirm.mockRestore()
+  })
+
+  it("blocks malformed chapters before saving and requires confirmation before deleting", async () => {
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false)
+    await renderGraph(<RelationshipGraph bookId="book-1" upToChapter={7} authorMode inspectorPlacement="inline" />)
+    await waitForText("3 characters")
+    await act(async () => { graphHandle()?.selectEdge("rel-1"); await Promise.resolve() })
+    const input = Array.from(container?.querySelectorAll("label") ?? []).find((label) => label.textContent?.includes("From chapter"))?.querySelector("input") as HTMLInputElement
+    await act(async () => { setFieldValue(input, "1.5"); await Promise.resolve() })
+    clickButton("Save correction")
+    expect(text()).toContain("Chapter numbers must be positive whole numbers")
+    expect(booksApiMock.updateRelationship).not.toHaveBeenCalled()
+    clickButton("Delete relationship")
+    expect(booksApiMock.deleteRelationship).not.toHaveBeenCalled()
+    confirm.mockReturnValue(true)
+    await act(async () => { clickButton("Delete relationship"); await Promise.resolve(); await Promise.resolve() })
+    expect(booksApiMock.deleteRelationship).toHaveBeenCalledWith("book-1", "rel-1")
+    expect(text()).toContain("Relationship removed.")
+    confirm.mockRestore()
+  })
+
+  it("keeps an embedded inspector in the content without a screen overlay", async () => {
+    await renderGraph(<RelationshipGraph bookId="book-1" upToChapter={7} authorMode inspectorPlacement="inline" />)
+    await flush()
+    await waitForText("3 characters")
+    await act(async () => { graphHandle()?.selectNode("mira"); await Promise.resolve() })
+    await waitForText("Graph details")
+    expect(container?.querySelector('button[aria-label="Close graph inspector"]')).toBeNull()
+    expect(container?.querySelector("aside")?.className).not.toContain("fixed")
+    clickButton("Close")
+    await flush()
+    expect(container?.querySelector("aside")).toBeNull()
+  })
+
   it("loads relationship data and supports graph filtering, selection, labels, and corrections", async () => {
     const onSelectCharacterId = vi.fn()
     const onGraphDataChange = vi.fn()
@@ -59,10 +110,10 @@ describe("RelationshipGraph interactions", () => {
     })
     expect(onSelectCharacterId).toHaveBeenCalledWith("mira")
     expect(text()).toContain("Mira Vale")
-    expect(text()).toContain("forced visible")
+    expect(text()).toContain("Forced visible")
     expect(text()).toContain("A gate captain with a hidden oath.")
 
-    const labelInput = container?.querySelector("input") as HTMLInputElement
+    const labelInput = container?.querySelector("[data-graph-edit] input") as HTMLInputElement
     await act(async () => {
       setFieldValue(labelInput, "Captain Mira")
       await Promise.resolve()
@@ -76,7 +127,6 @@ describe("RelationshipGraph interactions", () => {
     clickButton("Grid")
     clickButton("Zoom in")
     clickButton("Zoom out")
-    clickButton("Reset zoom")
     clickButton("Fit")
     clickButton("Reset layout")
     expect(window.localStorage.getItem(graphStorageKey("book-1", 7))).toBeNull()
@@ -111,6 +161,6 @@ describe("RelationshipGraph interactions", () => {
       graphHandle()?.clearSelection()
       await Promise.resolve()
     })
-    expect(text()).toContain("Select a character or connection")
+    expect(text()).not.toContain("Graph details")
   })
 })

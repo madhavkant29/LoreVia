@@ -2,9 +2,9 @@ import type { NextRequest } from "next/server"
 import { NextResponse } from "next/server"
 
 const NONCE_HEADER = "x-nonce"
-const AUTHENTICATED_HOME_PATH = "/library"
 const LOGIN_PATH = "/login"
 const AUTH_COOKIE_NAMES = ["lorevia_access_token", "lorevia_refresh_token"]
+const PRIVATE_CACHE_CONTROL = "private, no-store, no-cache, max-age=0, must-revalidate"
 const SECURITY_HEADERS = {
   "X-Frame-Options": "DENY",
   "X-Content-Type-Options": "nosniff",
@@ -36,6 +36,7 @@ const PUBLIC_PAGE_ROUTES = new Set([
   "/demo",
   "/eula",
   "/pricing",
+  "/offline",
   "/privacy",
   "/public",
   "/refund",
@@ -50,6 +51,7 @@ const PUBLIC_PAGE_PREFIXES = [
   "/compare/",
   "/demo/",
   "/public/",
+  "/review/",
 ]
 
 const PRIVATE_PAGE_ROUTES = new Set([
@@ -95,6 +97,8 @@ const NON_BOOK_TOP_LEVEL_SEGMENTS = new Set([
   "pricing",
   "privacy",
   "public",
+  "review",
+  "offline",
   "quotes",
   "refund",
   "register",
@@ -283,15 +287,9 @@ function buildLoginRedirect(request: NextRequest) {
   url.search = ""
   url.searchParams.set("next", nextPath)
 
-  return NextResponse.redirect(url)
-}
-
-function buildAuthenticatedRedirect(request: NextRequest) {
-  const url = request.nextUrl.clone()
-  url.pathname = AUTHENTICATED_HOME_PATH
-  url.search = ""
-
-  return NextResponse.redirect(url)
+  const response = NextResponse.redirect(url)
+  response.headers.set("Cache-Control", PRIVATE_CACHE_CONTROL)
+  return response
 }
 
 function buildSecurityHeaders(request: NextRequest) {
@@ -349,12 +347,8 @@ export function middleware(request: NextRequest) {
     return applySecurityHeaders(request, buildLoginRedirect(request))
   }
 
-  // REMOVED: Automatic redirect from /login or /register to /library when auth cookies exist.
-  // This was causing redirect loops when users had stale/expired sessions.
-  // Instead, let the auth pages validate the session and redirect if truly authenticated.
-  // if (isAuthenticated && isAuthEntryRoute(request.nextUrl.pathname)) {
-  //   return applySecurityHeaders(request, buildAuthenticatedRedirect(request))
-  // }
+  // Auth pages validate the live session themselves instead of trusting stale cookie
+  // bytes here; this keeps expired sessions from creating login/library redirect loops.
 
   const security = buildSecurityHeaders(request)
   if (!security) {

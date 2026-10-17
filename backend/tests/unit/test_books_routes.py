@@ -4,7 +4,9 @@ import io
 import uuid
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
+import fitz
 import pytest
 from fastapi import HTTPException, UploadFile
 
@@ -45,9 +47,17 @@ from app.services import (
     manuscript_reprocess_service,
 )
 from app.utils.books import overview as books_overview
-from app.utils.llm_usage_utils import LlmUsageSummary
 from tests.unit.route_facades import books
 from tests.unit.route_patch_helpers import patch_route_dependency
+
+
+def _valid_pdf_bytes() -> bytes:
+    document = fitz.open()
+    page = document.new_page()
+    page.insert_text((72, 72), "Chapter 1\nA complete sample chapter for import preview.")
+    raw = document.tobytes()
+    document.close()
+    return raw
 
 
 @pytest.mark.asyncio
@@ -220,7 +230,11 @@ class _FakeDB:
     async def execute(self, *_args, **_kwargs):
         return self._execute_values.pop(0)
 
-    async def scalar(self, *_args, **_kwargs):
+    async def scalar(self, *args, **_kwargs):
+        statement = str(args[0]) if args else ""
+        if "admin_audit_events" in statement:
+            # Legacy-freeze cutoff lookup; these tests have no cutoff recorded.
+            return None
         return self._scalar_values.pop(0)
 
     def add(self, value):
@@ -272,13 +286,6 @@ def _isolate_allowance_and_library_queries(monkeypatch):
         allowances_enforced=False,
     )
     reservation = SimpleNamespace(id=uuid.uuid4())
-    library = SimpleNamespace(
-        total_books_read=0,
-        total_words_read=0,
-        total_chapters_tracked=0,
-        total_token_consumption=0,
-    )
-
     monkeypatch.setattr(imports, "ensure_active_word_capacity", _async_value(None))
     monkeypatch.setattr(imports, "ensure_source_storage_capacity", _async_value(None))
     monkeypatch.setattr(
@@ -289,14 +296,21 @@ def _isolate_allowance_and_library_queries(monkeypatch):
         "reserve_processing_words",
         _async_value((reservation, allowance)),
     )
+
+    async def _reserve_processing_word_batch(*_args, requests, **_kwargs):
+        return (
+            [SimpleNamespace(id=uuid.uuid4()) for _request in requests],
+            allowance,
+        )
+
     monkeypatch.setattr(
         manuscript_reprocess_service,
-        "consume_processing_reservation",
-        _async_value(None),
+        "reserve_processing_word_batch",
+        _reserve_processing_word_batch,
     )
     monkeypatch.setattr(
         manuscript_reprocess_service,
-        "release_processing_reservation",
+        "release_processing_reservations_for_source_prefix",
         _async_value(None),
     )
     monkeypatch.setattr(imports, "summarize_processing_allowances", _async_value(allowance))
@@ -304,8 +318,6 @@ def _isolate_allowance_and_library_queries(monkeypatch):
         manuscript_import_service, "add_daily_word_progress", lambda *_args, **_kwargs: None
     )
     monkeypatch.setattr(books_lifecycle, "ensure_active_word_capacity", _async_value(None))
-    monkeypatch.setattr(books_core, "load_library_aggregate_stats", _async_value(library))
-    monkeypatch.setattr(books_core, "summarize_processing_allowances", _async_value(allowance))
 
 
 def _user(*, user_id: uuid.UUID | None = None, tier: str = "author"):
@@ -487,19 +499,22 @@ async def test_upload_book_endpoint_validates_and_persists(monkeypatch):
     )
     patch_route_dependency(monkeypatch, books, "resolve_owned_series_ids", _fake_resolve_series)
     patch_route_dependency(monkeypatch, books, "check_upload_limit", _async_value(None))
+    patch_route_dependency(monkeypatch, books, "find_active_duplicate_upload", _async_value(None))
+    patch_route_dependency(monkeypatch, books, "acquire_upload_fingerprint_lock", AsyncMock())
+
+    def _upload_object(key, raw, content_type=None):
+        label = "book" if key.startswith("books/") else "cover"
+        uploaded[label] = (key, raw, content_type)
+        return key
+
+    monkeypatch.setattr(books.storage, "upload_binary", _upload_object)
     monkeypatch.setattr(
-        books.storage,
-        "upload_book_bytes",
-        lambda raw, owner, filename: (
-            uploaded.setdefault("book", (raw, owner, filename)) or "books/mock.txt"
-        ),
+        "app.services.book_upload_service.persist_upload_intent",
+        AsyncMock(),
     )
     monkeypatch.setattr(
-        books.storage,
-        "upload_binary",
-        lambda key, raw, content_type: (
-            uploaded.setdefault("cover", (key, raw, content_type)) or key
-        ),
+        "app.services.book_upload_service.clear_upload_intent",
+        AsyncMock(return_value=True),
     )
     monkeypatch.setattr(
         books,
@@ -557,7 +572,7 @@ async def test_upload_book_endpoint_validates_and_persists(monkeypatch):
     assert book.mode == "author"
     assert book.preserve_chapter_numbers is True
     assert book.preserve_source_chapters is True
-    assert uploaded["book"][0] == b"chapter text"
+    assert uploaded["book"][1] == b"chapter text"
     assert uploaded["cover"][2] == "image/png"
     assert queued["queue"] == "extraction"
     assert db.commits == 3
@@ -938,6 +953,97 @@ async def test_import_manuscript_content_text_flow_updates_progress_and_reports(
 
 
 @pytest.mark.asyncio
+async def test_persist_manuscript_import_queues_multi_chapter_extraction(monkeypatch):
+    user = _user()
+    book = _book(user_id=user.id, mode="reader", total_chapters=0)
+    queued_extraction: list[dict] = []
+    enqueued_analysis: list[dict] = []
+    persisted_numbers: list[int] = []
+
+    async def _fake_persist_chapter(_db, _book, **kwargs):
+        persisted_numbers.append(kwargs["chapter_number"])
+        return SimpleNamespace(id=uuid.uuid4())
+
+    async def _fake_enqueue_extraction(_db, **kwargs):
+        queued_extraction.append(kwargs)
+        return []
+
+    async def _fake_enqueue_analysis(_db, **kwargs):
+        enqueued_analysis.append(kwargs)
+        return SimpleNamespace(id="analysis-task")
+
+    async def _noop(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr(
+        manuscript_import_service,
+        "persist_editor_chapter_content",
+        _fake_persist_chapter,
+    )
+    monkeypatch.setattr(
+        manuscript_import_service,
+        "enqueue_extraction_execution_batch",
+        _fake_enqueue_extraction,
+    )
+    monkeypatch.setattr(
+        manuscript_import_service,
+        "enqueue_analysis_execution",
+        _fake_enqueue_analysis,
+    )
+    monkeypatch.setattr(
+        manuscript_import_service,
+        "extract_novel_scene_candidates",
+        lambda **_kwargs: [],
+    )
+    monkeypatch.setattr(manuscript_import_service, "replace_chapter_novel_scenes", _noop)
+    monkeypatch.setattr(manuscript_import_service, "ensure_active_word_capacity", _noop)
+    monkeypatch.setattr(
+        manuscript_import_service,
+        "add_daily_word_progress",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        manuscript_import_service,
+        "build_writing_activity_entry",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(manuscript_import_service, "invalidate_advisor_caches_for_book", _noop)
+    monkeypatch.setattr(manuscript_import_service, "mark_user_dashboard_cache_dirty", _noop)
+
+    db = _FakeDB(execute_values=[_Result(scalar=None)], scalar_values=[2])
+    payload = await manuscript_import_service.persist_manuscript_import(
+        db,
+        book=book,
+        current_user=user,
+        import_jobs=[
+            {"number": 1, "title": "One", "text": "First chapter"},
+            {"number": 2, "title": "Two", "text": "Second chapter"},
+        ],
+        screenplay_batches=[],
+        replace_existing=False,
+        chapter_number=None,
+        expected_content_version=None,
+        should_auto_reprocess=True,
+        resolved_book_work_type="novel",
+        resolved_import_format="txt",
+        first_pdf_raw_for_cover=None,
+        total_file_size=0,
+        files_were_uploaded=True,
+    )
+
+    assert persisted_numbers == [1, 2]
+    assert len(queued_extraction) == 1
+    assert [chapter_number for _chapter_id, chapter_number in queued_extraction[0]["chapters"]] == [
+        1,
+        2,
+    ]
+    assert queued_extraction[0]["run_kind"] == "manuscript_import"
+    assert enqueued_analysis == []
+    assert payload.imported_chapters == [1, 2]
+    assert payload.analysis_dispatched == 0
+
+
+@pytest.mark.asyncio
 async def test_import_manuscript_content_rejects_stale_content_version(monkeypatch):
     user = _user()
     book = _book(user_id=user.id, mode="author", total_chapters=1)
@@ -1140,6 +1246,9 @@ async def test_import_manuscript_content_preserves_source_chapter_count_for_long
 ):
     user = _user()
     book = _book(user_id=user.id, mode="reader", total_chapters=0, preserve_source_chapters=True)
+    patch_route_dependency(
+        monkeypatch, books, "should_queue_manuscript_import", lambda _files: False
+    )
     long_text = "\n\n".join(
         [
             " ".join(["opening"] * 1800),
@@ -1152,11 +1261,30 @@ async def test_import_manuscript_content_preserves_source_chapter_count_for_long
         {"number": 3, "title": "III", "text": "Third chapter text."},
     ]
     chapter_rows = [
-        SimpleNamespace(id=uuid.uuid4(), s3_key="chapters/1.json", title="I"),
-        SimpleNamespace(id=uuid.uuid4(), s3_key="chapters/2.json", title="II"),
-        SimpleNamespace(id=uuid.uuid4(), s3_key="chapters/3.json", title="III"),
+        SimpleNamespace(
+            id=uuid.uuid4(),
+            s3_key="chapters/1.json",
+            title="I",
+            description=None,
+            content_version=1,
+        ),
+        SimpleNamespace(
+            id=uuid.uuid4(),
+            s3_key="chapters/2.json",
+            title="II",
+            description=None,
+            content_version=1,
+        ),
+        SimpleNamespace(
+            id=uuid.uuid4(),
+            s3_key="chapters/3.json",
+            title="III",
+            description=None,
+            content_version=1,
+        ),
     ]
     processed_numbers: list[int] = []
+    queued_numbers: list[int] = []
 
     async def _fake_process(
         _db,
@@ -1173,6 +1301,10 @@ async def test_import_manuscript_content_preserves_source_chapter_count_for_long
 
     async def _fake_replace(*_args, **_kwargs):
         return None
+
+    async def _fake_enqueue_batch(_db, **kwargs):
+        queued_numbers.extend(number for _chapter_id, number in kwargs["chapters"])
+        return []
 
     patch_route_dependency(monkeypatch, books, "get_owned_book", _async_value(book))
     patch_route_dependency(
@@ -1211,12 +1343,21 @@ async def test_import_manuscript_content_preserves_source_chapter_count_for_long
         "app.services.manuscript_import_service.enqueue_analysis_execution",
         _async_value(SimpleNamespace(id=uuid.uuid4())),
     )
+    monkeypatch.setattr(
+        "app.services.manuscript_import_service.enqueue_extraction_execution_batch",
+        _fake_enqueue_batch,
+    )
+    monkeypatch.setattr(
+        "app.parsers.pdf_parser.extract_first_page_cover",
+        lambda _raw: None,
+    )
 
     db = _FakeDB(
         execute_values=[
             _Result(scalar=None),
             *(_Result(scalar=chapter) for chapter in chapter_rows),
             *(_Result(all_rows=[]) for _ in chapter_rows),
+            _Result(scalar=None),
         ],
         scalar_values=[3],
     )
@@ -1225,7 +1366,7 @@ async def test_import_manuscript_content_preserves_source_chapter_count_for_long
         text=None,
         html=None,
         title=None,
-        files=[_upload("story.pdf", b"%PDF-1.4\nmock body\n%%EOF")],
+        files=[_upload("story.pdf", _valid_pdf_bytes())],
         work_type=None,
         chapter_number=None,
         replace_existing="false",
@@ -1236,7 +1377,8 @@ async def test_import_manuscript_content_preserves_source_chapter_count_for_long
         _=None,
     )
 
-    assert processed_numbers == [1, 2, 3]
+    assert processed_numbers == []
+    assert queued_numbers == [1, 2, 3]
     assert payload.imported_chapters == [1, 2, 3]
     assert payload.total_chapters == 3
 
@@ -1245,6 +1387,9 @@ async def test_import_manuscript_content_preserves_source_chapter_count_for_long
 async def test_import_manuscript_content_preserves_images_and_extracts_pdf_cover(monkeypatch):
     user = _user()
     book = _book(user_id=user.id, mode="reader", total_chapters=0, cover_s3_key=None)
+    patch_route_dependency(
+        monkeypatch, books, "should_queue_manuscript_import", lambda _files: False
+    )
     chapter = SimpleNamespace(id=uuid.uuid4(), s3_key="chapters/1.json", title="Opening")
     processed_payloads: list[dict] = []
     uploaded_cover: dict[str, object] = {}
@@ -1344,7 +1489,7 @@ async def test_import_manuscript_content_preserves_images_and_extracts_pdf_cover
         text=None,
         html=None,
         title=None,
-        files=[_upload("story.pdf", b"%PDF-1.4\nmock body\n%%EOF")],
+        files=[_upload("story.pdf", _valid_pdf_bytes())],
         work_type=None,
         chapter_number=None,
         replace_existing="false",
@@ -1366,6 +1511,9 @@ async def test_import_manuscript_content_preserves_images_and_extracts_pdf_cover
 async def test_editor_project_import_persists_parsed_images(monkeypatch):
     user = _user()
     book = _book(user_id=user.id, mode="author", total_chapters=0, is_editor_project=True)
+    patch_route_dependency(
+        monkeypatch, books, "should_queue_manuscript_import", lambda _files: False
+    )
     persisted_payloads: list[dict[str, object]] = []
 
     async def _fake_persist(*_args, **kwargs):
@@ -1634,31 +1782,25 @@ async def test_series_routes_and_user_stats(monkeypatch):
     assert payload.marked_complete_in_series is True
     assert any(item.__class__.__name__ == "ReadingProgress" for item in db.added)
 
-    monkeypatch.setattr(
-        books,
-        "summarize_llm_usage_for_user",
-        _async_value(
-            LlmUsageSummary(
-                request_count=12,
-                prompt_tokens=3456,
-                completion_tokens=789,
-                total_tokens=4245,
-            )
+    expected_stats = SimpleNamespace(
+        public=SimpleNamespace(total_words_read=1200),
+        private=SimpleNamespace(
+            total_uploads=7,
+            worldbuilding_uploads=4,
+            uploads_remaining=8,
+            saved_quotes=2,
+            llm_request_count=12,
+            llm_prompt_tokens=3456,
+            llm_completion_tokens=789,
+            llm_total_tokens=4245,
+        ),
+        writing=SimpleNamespace(
+            today=SimpleNamespace(words=1202),
+            entries_today=[SimpleNamespace(title="Chapter XXXVI")],
         ),
     )
-    monkeypatch.setattr(
-        books_core,
-        "load_library_aggregate_stats",
-        _async_value(
-            SimpleNamespace(
-                total_books_read=0,
-                total_words_read=1200,
-                total_chapters_tracked=book.total_chapters,
-                total_token_consumption=book.total_tokens,
-            )
-        ),
-    )
-    db = _FakeDB(execute_values=[_Result(scalar=2)])
+    monkeypatch.setattr(books_core, "get_user_stats_cached", _async_value(expected_stats))
+    db = _FakeDB()
     stats = await books.get_user_stats(db=db, current_user=user)
     assert stats.public.total_words_read == 1200
     assert stats.private.total_uploads == 7
@@ -1869,6 +2011,13 @@ async def test_novel_export_routes_dispatch_formats_and_workspace_preface(monkey
     )
     chapter_id = uuid.uuid4()
     compiled_calls: list[dict[str, object]] = []
+
+    patch_route_dependency(
+        monkeypatch,
+        books,
+        "prepare_manuscript_export",
+        _async_value(SimpleNamespace(delivery="synchronous", job=None)),
+    )
 
     patch_route_dependency(
         monkeypatch, books, "get_book_with_collaboration_access", _async_value((book, None))
@@ -2203,7 +2352,15 @@ async def test_get_book_overview_and_writer_workspace_use_cache(monkeypatch):
 
     overview_first = await books.get_book_overview(
         book.id,
-        db=_FakeDB(execute_values=[_Result(scalar=None), _Result(all_rows=[])]),
+        db=_FakeDB(
+            execute_values=[
+                _Result(scalar=None),
+                _Result(all_rows=[]),
+                _Result(scalar=0),
+                _Result(scalar=0),
+                _Result(scalar=0),
+            ]
+        ),
         current_user=user,
     )
     overview_second = await books.get_book_overview(book.id, db=_FakeDB(), current_user=user)
@@ -2217,7 +2374,7 @@ async def test_get_book_overview_and_writer_workspace_use_cache(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_list_books_enqueues_stale_processing_repair_before_serializing(monkeypatch):
+async def test_list_books_does_not_enqueue_processing_repair_on_read(monkeypatch):
     user = SimpleNamespace(id=uuid.uuid4(), email="owner@getlorevia.com")
     book = _book(user_id=user.id, is_editor_project=True, status="processing")
     enqueued_book_ids: list[uuid.UUID] = []
@@ -2244,7 +2401,7 @@ async def test_list_books_enqueues_stale_processing_repair_before_serializing(mo
         current_user=user,
     )
 
-    assert enqueued_book_ids == [book.id]
+    assert enqueued_book_ids == []
     assert len(payload) == 1
     assert payload[0].id == book.id
 
@@ -2282,18 +2439,25 @@ async def test_export_cover_archive_hide_and_delete_routes(monkeypatch):
     compiled_calls: list[dict[str, object]] = []
     docx_calls: list[dict[str, object]] = []
 
+    patch_route_dependency(
+        monkeypatch,
+        books,
+        "prepare_manuscript_export",
+        _async_value(SimpleNamespace(delivery="synchronous", job=None)),
+    )
+
     patch_route_dependency(monkeypatch, books, "get_owned_book", _async_value(book))
     patch_route_dependency(
         monkeypatch, books, "require_author_access", lambda *_args, **_kwargs: None
     )
     monkeypatch.setattr(books.storage, "download_book", lambda _key: b"stored")
     monkeypatch.setattr(
-        books,
-        "deserialize_manuscript_content",
+        "app.services.manuscript_export_service.deserialize_manuscript_content",
         lambda _raw: {"text": "SCENE\nBody", "html": "<p>Body</p>"},
     )
     monkeypatch.setattr(
-        books, "strip_scene_metadata_from_manuscript_text", lambda text: text.replace("SCENE\n", "")
+        "app.services.manuscript_export_service.strip_scene_metadata_from_manuscript_text",
+        lambda text: text.replace("SCENE\n", ""),
     )
     monkeypatch.setattr(
         books,
@@ -2382,6 +2546,7 @@ async def test_export_cover_archive_hide_and_delete_routes(monkeypatch):
         cover_book.id, token="ok", db=_FakeDB(get_values=[cover_book])
     )
     assert response.media_type == "image/png"
+    assert response.headers["Cache-Control"] == "private, no-store"
 
     patch_route_dependency(monkeypatch, books, "book_out", _async_value({"id": str(book.id)}))
     archived = await books.archive_book(

@@ -133,7 +133,7 @@ def _detect_cross_source_candidate_conflicts(
     return items
 
 
-def _build_gap_groups(grouped_items: dict[str, list[dict]]) -> tuple[list[dict], dict]:
+def build_gap_groups(grouped_items: dict[str, list[dict]]) -> tuple[list[dict], dict]:
     gap_groups = []
     for key, items in grouped_items.items():
         label, description = GAP_GROUP_META.get(key, (key.replace("_", " ").title(), None))
@@ -308,7 +308,7 @@ async def build_world_gap_analysis_payload(
             }
         )
 
-    gap_groups, gap_categories = _build_gap_groups(grouped_items)
+    gap_groups, gap_categories = build_gap_groups(grouped_items)
     priority_gaps = [item for group in gap_groups for item in group["items"]]
     priority_gaps.sort(
         key=lambda item: (-int(item.get("priority") or 0), str(item.get("title") or ""))
@@ -335,7 +335,7 @@ async def build_world_gap_analysis_payload(
         )
         if supplemental_items:
             grouped_items["coverage_watchlist"].extend(supplemental_items)
-            gap_groups, gap_categories = _build_gap_groups(grouped_items)
+            gap_groups, gap_categories = build_gap_groups(grouped_items)
             priority_gaps = [item for group in gap_groups for item in group["items"]]
             priority_gaps.sort(
                 key=lambda item: (-int(item.get("priority") or 0), str(item.get("title") or ""))

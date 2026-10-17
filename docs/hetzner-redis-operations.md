@@ -45,6 +45,18 @@ Advisor async polling now stores job state in Postgres, so `CELERY_RESULT_BACKEN
 
 From the VPS checkout:
 
+Before the first release that runs Redis as uid/gid `999:1000`, stop Redis and
+normalize the existing named volume. This changes ownership only; it does not
+delete the AOF data:
+
+```bash
+docker compose -f docker-compose.yml stop redis
+docker compose -f docker-compose.yml run --rm --no-deps --user 0:0 --cap-add CHOWN --entrypoint chown redis -R 999:1000 /data
+```
+
+Fresh Redis volumes already inherit `999:1000` ownership from the pinned image.
+After the one-time ownership step, continue with the normal deployment:
+
 ```bash
 chmod 600 backend/.env
 vi backend/.env
@@ -54,7 +66,7 @@ vi backend/.env
 Manual Docker Compose deployment:
 
 ```bash
-docker compose -f docker-compose.yml up -d --build redis nginx backend worker-extraction worker-analysis worker-embedding worker-intelligence celery-beat
+docker compose -f docker-compose.yml up -d --build redis nginx backend worker-extraction worker-analysis worker-embedding worker-intelligence worker-maintenance celery-beat
 ```
 
 Only use the manual Compose command to restart an already-migrated release. Use `./deploy.sh` whenever application code or Alembic revisions change so the schema is upgraded before the containers restart.
@@ -64,7 +76,7 @@ Only use the manual Compose command to restart an already-migrated release. Use 
 Redis container health:
 
 ```bash
-docker compose -f docker-compose.yml exec redis redis-cli -a "$REDIS_PASSWORD" ping
+docker compose -f docker-compose.yml exec redis sh -c 'REDISCLI_AUTH="$REDIS_PASSWORD" redis-cli ping'
 docker compose -f docker-compose.yml logs redis
 ```
 
@@ -78,7 +90,7 @@ docker compose -f docker-compose.yml ps
 Restart async services after config changes:
 
 ```bash
-docker compose -f docker-compose.yml restart worker-extraction worker-analysis worker-embedding worker-intelligence celery-beat
+docker compose -f docker-compose.yml restart worker-extraction worker-analysis worker-embedding worker-intelligence worker-maintenance celery-beat
 ```
 
 Application checklist:
@@ -124,7 +136,7 @@ Redis should not be treated as the only copy of important application state. Bac
 4. Redeploy the application services:
 
 ```bash
-docker compose -f docker-compose.yml up -d backend worker-extraction worker-analysis worker-embedding worker-intelligence celery-beat
+docker compose -f docker-compose.yml up -d backend worker-extraction worker-analysis worker-embedding worker-intelligence worker-maintenance celery-beat
 ```
 
 5. After rollback is stable, optionally stop the internal Redis container:

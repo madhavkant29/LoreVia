@@ -18,10 +18,10 @@ describe("Worldbuilding workspace shell presentation", () => {
       <WorldbuildingStatusMessage isDark message="Saved Atlas Notes." />
     )
 
-    expect(metricsMarkup).toContain("Active Docs")
+    expect(metricsMarkup).toContain("Canon sources")
     expect(metricsMarkup).toContain("12,345")
-    expect(metricsMarkup).toContain("Extracted Lore")
-    expect(metricsMarkup).toContain("Open Notes")
+    expect(metricsMarkup).toContain("Lore facts")
+    expect(metricsMarkup).toContain("Open cleanup")
     expect(statusMarkup).toContain("Saved Atlas Notes.")
   })
 

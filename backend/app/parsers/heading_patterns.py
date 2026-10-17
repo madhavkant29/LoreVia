@@ -35,6 +35,7 @@ SectionType = Literal[
     "title_page",
     "glossary",
     "notes",
+    "chronology",
     "unknown",
 ]
 
@@ -67,7 +68,8 @@ HEADING_PATTERNS: dict[str, dict[str, list[str]]] = {
         "copyright": ["copyright"],
         "title_page": [],
         "glossary": ["glossary"],
-        "notes": ["notes", "author notes", "author's note", "authors note"],
+        "notes": ["notes", "author note", "author notes", "author's note", "authors note"],
+        "chronology": ["chronology", "timeline of events"],
     },
     "fr": {
         "chapter": [
@@ -808,6 +810,7 @@ _STANDALONE_TYPES = {
     "title_page",
     "glossary",
     "notes",
+    "chronology",
 }
 
 

@@ -29,11 +29,11 @@ export function ActionableEmptyState({
       aria-live={variant === "processing" || variant === "partial_ready" ? "polite" : undefined}
       data-state-variant={variant}
     >
-      <p className="app-eyebrow">{variantLabel(variant)}</p>
+      {variant !== "empty" ? <p className="app-eyebrow mb-2">{variantLabel(variant)}</p> : null}
       <p className="text-lg font-semibold text-[rgb(var(--foreground))]">{title}</p>
-      <p className="mx-auto mt-2 max-w-2xl text-sm leading-7 text-[rgb(var(--muted-foreground))]">{body}</p>
+      <p className="mt-2 max-w-2xl text-sm leading-6 text-[rgb(var(--muted-foreground))]">{body}</p>
       {primary || secondary ? (
-        <div className="mt-5 flex flex-col items-center justify-center gap-3 sm:flex-row">
+        <div className="mt-5 flex flex-col items-start gap-3 sm:flex-row sm:items-center">
           {primary ? <EmptyStateButton action={primary} variant="primary" /> : null}
           {secondary ? <EmptyStateButton action={secondary} variant="secondary" /> : null}
         </div>
@@ -50,7 +50,7 @@ function variantLabel(variant: NonNullable<Parameters<typeof ActionableEmptyStat
     case "gated": return "Access required"
     case "recoverable_failure": return "Action needed"
     case "support_required": return "Support required"
-    default: return "Empty"
+    default: return ""
   }
 }
 

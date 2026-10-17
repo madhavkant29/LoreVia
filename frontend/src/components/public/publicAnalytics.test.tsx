@@ -92,7 +92,7 @@ describe("public analytics surfaces", () => {
     }
     getBookMock.mockResolvedValue(initialBook)
 
-    const { container, unmount } = renderWithQuery(<PublicBookPageClient bookId="book-1" initialBook={initialBook as any} />)
+    const { container, unmount } = renderWithQuery(<PublicBookPageClient bookId="book-1" initialBook={initialBook as never} />)
     await act(async () => {
       await Promise.resolve()
     })
@@ -149,7 +149,7 @@ describe("public analytics surfaces", () => {
     }
     getUserProfileMock.mockResolvedValue(initialProfile)
 
-    const { container, unmount } = renderWithQuery(<PublicWriterProfilePageClient username="writer" initialProfile={initialProfile as any} />)
+    const { container, unmount } = renderWithQuery(<PublicWriterProfilePageClient username="writer" initialProfile={initialProfile as never} />)
     await act(async () => {
       await Promise.resolve()
     })

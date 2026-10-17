@@ -47,7 +47,7 @@ interface UiPreferencesStore {
   pendingGlobalOperations: UiPreferenceOperation[]
   pendingBookOperations: Record<string, UiPreferenceOperation[]>
   hydrateForUser: (userId: string) => Promise<void>
-  hydrateBook: (bookId: string) => Promise<void>
+  hydrateBook: (bookId: string) => Promise<boolean>
   clearActiveUser: () => void
   retrySync: () => Promise<void>
   patchGlobal: (operations: UiPreferenceOperation[]) => Promise<void>
@@ -68,7 +68,7 @@ let broadcastChannel: BroadcastChannel | null = null
 const syncPromises = new Map<string, Promise<boolean>>()
 const syncTimers = new Map<string, number>()
 
-export function defaultUserUiPreference(mode: ComplexityMode = "standard"): UserUiPreference {
+export function defaultUserUiPreference(mode: ComplexityMode = "focused"): UserUiPreference {
   return {
     schema_version: 1,
     revision: 1,
@@ -499,12 +499,25 @@ export const useUiPreferencesStore = create<UiPreferencesStore>()((set, get) => 
         }
       } catch {
         if (!accountIsCurrent(userId, generation)) return
-        set({
-          syncState: cached ? "sync_pending" : "api_unavailable",
-          syncMessage: cached
-            ? "Saved on this device; sync pending"
-            : "Using the standard layout until preferences load.",
-        })
+        if (cached) {
+          set({
+            syncState: "sync_pending",
+            syncMessage: "Saved on this device; sync pending",
+          })
+        } else {
+          const fallbackPreferences = defaultUserUiPreference("focused")
+          set((state) => ({
+            preferences: fallbackPreferences,
+            bookPreferences: Object.fromEntries(
+              Object.keys(state.bookPreferences).map((bookId) => [
+                bookId,
+                defaultBookUiPreference(bookId, fallbackPreferences.complexity_mode),
+              ]),
+            ),
+            syncState: "api_unavailable",
+            syncMessage: "Using the focused layout until preferences load.",
+          }))
+        }
       }
     },
 
@@ -512,7 +525,7 @@ export const useUiPreferencesStore = create<UiPreferencesStore>()((set, get) => 
       const bookId = normalizeBookRouteId(rawBookId)
       const userId = get().activeUserId
       const generation = accountGeneration
-      if (!userId) return
+      if (!userId) return false
       if (!get().bookPreferences[bookId]) {
         set((state) => ({
           bookPreferences: {
@@ -523,7 +536,7 @@ export const useUiPreferencesStore = create<UiPreferencesStore>()((set, get) => 
       }
       try {
         const serverPreference = await uiPreferencesApi.getBook(bookId)
-        if (!accountIsCurrent(userId, generation)) return
+        if (!accountIsCurrent(userId, generation)) return false
         set((state) => ({
           bookPreferences: {
             ...state.bookPreferences,
@@ -536,9 +549,11 @@ export const useUiPreferencesStore = create<UiPreferencesStore>()((set, get) => 
           syncMessage: null,
         }))
         persistForUser(userId, get)
+        return true
       } catch {
-        if (!accountIsCurrent(userId, generation)) return
+        if (!accountIsCurrent(userId, generation)) return false
         set({ syncState: "sync_pending", syncMessage: "Saved on this device; sync pending" })
+        return false
       }
     },
 

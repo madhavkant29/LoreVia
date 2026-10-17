@@ -25,9 +25,30 @@ class _FakeDB:
         self.flushes += 1
 
 
+@pytest.fixture(autouse=True)
+def _stub_world_analysis_staleness(monkeypatch):
+    async def no_op(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr(
+        world_building_document_workflow_utils,
+        "mark_book_world_analysis_stale",
+        no_op,
+    )
+    monkeypatch.setattr(
+        world_building_document_workflow_utils,
+        "mark_related_series_world_analysis_stale",
+        no_op,
+    )
+    monkeypatch.setattr(world_building_document_workflow_utils, "mark_book_cache_dirty", no_op)
+    monkeypatch.setattr(
+        world_building_document_workflow_utils, "mark_user_dashboard_cache_dirty", no_op
+    )
+
+
 @pytest.mark.asyncio
 async def test_create_world_building_documents_uploads_active_documents(monkeypatch):
-    async def sync_elements(_db, _book):
+    async def sync_elements(_db, _book, **_kwargs):
         return []
 
     monkeypatch.setattr(
@@ -39,7 +60,7 @@ async def test_create_world_building_documents_uploads_active_documents(monkeypa
         lambda key, _payload, _content_type: f"stored:{key}",
     )
     db = _FakeDB()
-    book = SimpleNamespace(id=uuid.uuid4())
+    book = SimpleNamespace(id=uuid.uuid4(), user_id=uuid.uuid4())
 
     created = await world_building_document_workflow_utils.create_world_building_documents(
         db,
@@ -62,7 +83,7 @@ async def test_create_world_building_documents_uploads_active_documents(monkeypa
 
 @pytest.mark.asyncio
 async def test_update_world_building_document_replaces_storage_and_requires_text(monkeypatch):
-    async def sync_elements(_db, _book):
+    async def sync_elements(_db, _book, **_kwargs):
         return []
 
     monkeypatch.setattr(
@@ -76,6 +97,7 @@ async def test_update_world_building_document_replaces_storage_and_requires_text
     db = _FakeDB()
     book = SimpleNamespace(id=uuid.uuid4(), user_id=uuid.uuid4())
     document = SimpleNamespace(
+        id=uuid.uuid4(),
         book_id=book.id,
         title="Old",
         word_count=0,
@@ -114,15 +136,15 @@ async def test_update_world_building_document_replaces_storage_and_requires_text
 
 @pytest.mark.asyncio
 async def test_delete_world_building_document_validates_book_ownership(monkeypatch):
-    async def sync_elements(_db, _book):
+    async def sync_elements(_db, _book, **_kwargs):
         return []
 
     monkeypatch.setattr(
         world_building_document_workflow_utils, "sync_world_document_elements", sync_elements
     )
     db = _FakeDB()
-    book = SimpleNamespace(id=uuid.uuid4())
-    document = SimpleNamespace(book_id=uuid.uuid4())
+    book = SimpleNamespace(id=uuid.uuid4(), user_id=uuid.uuid4())
+    document = SimpleNamespace(id=uuid.uuid4(), book_id=uuid.uuid4())
 
     with pytest.raises(world_building_document_workflow_utils.HTTPException):
         await world_building_document_workflow_utils.delete_world_building_document(

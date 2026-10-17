@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react"
 
 import { socialApi } from "@/lib/api/social"
 import { useAuthStore } from "@/lib/stores/authStore"
+import { useAdaptivePolling } from "./useAdaptivePolling"
 
 const CHATS_CHANGED_EVENT = "chats:changed"
 
@@ -21,68 +22,61 @@ export function emitChatsChanged() {
 export function useChatUnreadCount(options: UseChatUnreadCountOptions = {}) {
   const { user, hydrated } = useAuthStore()
   const [unreadCount, setUnreadCount] = useState(0)
-  const [isDocumentVisible, setIsDocumentVisible] = useState(
-    typeof document === "undefined" ? true : document.visibilityState === "visible"
-  )
   const enabled = options.enabled ?? true
   const pollMs = options.pollMs ?? 30_000
   const refreshOnFocus = options.refreshOnFocus ?? true
 
-  const refresh = useCallback(async () => {
+  const poll = useCallback(async ({ signal }: { signal: AbortSignal }) => {
     if (!user) {
       setUnreadCount(0)
-      return
+      return { unread_count: 0 }
     }
     try {
-      const payload = await socialApi.getConversationUnreadCount()
-      setUnreadCount(payload.unread_count)
-    } catch {
+      const payload = await socialApi.getConversationUnreadCount({ signal })
+      if (!signal.aborted) {
+        setUnreadCount(payload.unread_count)
+      }
+      return payload
+    } catch (error) {
       // Keep the last known count if refresh fails.
+      if (pollMs === false && !signal.aborted) {
+        return null
+      }
+      if (signal.aborted) throw error
+      throw new Error("Could not refresh chat unread count.")
     }
+  }, [pollMs, user])
+
+  const { refresh } = useAdaptivePolling({
+    enabled: Boolean(hydrated && enabled && user),
+    poll,
+    getProgress: (result) => result?.unread_count,
+    isTerminal: pollMs === false ? () => true : undefined,
+    initialDelayMs: typeof pollMs === "number" ? pollMs : 30_000,
+    maxDelayMs: typeof pollMs === "number" ? Math.max(pollMs * 4, pollMs) : 30_000,
+    resetKey: user?.id,
+  })
+
+  useEffect(() => {
+    if (user) return
+    setUnreadCount(0)
   }, [user])
-
-  useEffect(() => {
-    if (!hydrated || !enabled) return
-    void refresh()
-  }, [enabled, hydrated, refresh])
-
-  useEffect(() => {
-    if (!user || !enabled || !pollMs || !isDocumentVisible) return
-
-    const intervalId = window.setInterval(() => {
-      void refresh()
-    }, pollMs)
-
-    return () => window.clearInterval(intervalId)
-  }, [enabled, isDocumentVisible, pollMs, refresh, user])
 
   useEffect(() => {
     if (typeof window === "undefined") return
 
-    const handleChatsChanged = () => {
-      void refresh()
-    }
+    const handleChatsChanged = () => refresh()
 
     const handleFocus = () => {
       if (!refreshOnFocus) return
-      void refresh()
-    }
-
-    const handleVisibilityChange = () => {
-      const visible = document.visibilityState === "visible"
-      setIsDocumentVisible(visible)
-      if (visible) {
-        void refresh()
-      }
+      refresh()
     }
 
     window.addEventListener(CHATS_CHANGED_EVENT, handleChatsChanged)
     window.addEventListener("focus", handleFocus)
-    document.addEventListener("visibilitychange", handleVisibilityChange)
     return () => {
       window.removeEventListener(CHATS_CHANGED_EVENT, handleChatsChanged)
       window.removeEventListener("focus", handleFocus)
-      document.removeEventListener("visibilitychange", handleVisibilityChange)
     }
   }, [refresh, refreshOnFocus])
 

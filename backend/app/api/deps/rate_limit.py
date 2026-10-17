@@ -1,3 +1,4 @@
+import logging
 import time
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -8,10 +9,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps.auth import get_current_user
 from app.core.config import settings
 from app.core.database import get_db
-from app.core.redis import get_redis, key_ratelimit
+from app.core.redis import REDIS_OPERATION_EXCEPTIONS, get_redis, key_ratelimit
 from app.models.user import User
 from app.utils.billing_utils import (
     DAILY_LIMIT_MESSAGE,
+    advisor_daily_limit_message,
+    continuity_daily_limit_message,
     continuity_limit_per_day,
     free_advisor_limit_per_week,
     free_search_limit_per_day,
@@ -23,26 +26,37 @@ from app.utils.client_identity import trusted_client_identifier
 from app.utils.email_utils import track_usage_limit_friction_and_maybe_send
 from app.utils.rate_limit_utils import limit_for_user
 
+log = logging.getLogger("lorevia.rate_limit")
 
-async def _window(key: str, limit: int, window: int = 60) -> bool:
-    r = await get_redis()
-    now = time.time()
-    member = f"{int(now * 1000)}:{uuid.uuid4().hex}"
-    if hasattr(r, "pipeline"):
-        pipe = r.pipeline()
-        pipe.zremrangebyscore(key, 0, now - window)
-        pipe.zadd(key, {member: now})
-        pipe.zcard(key)
-        pipe.expire(key, window)
-        results = await pipe.execute()
-        return results[2] <= limit
 
-    # Some lightweight test doubles only implement simple counter primitives.
-    # Fall back to a coarse per-window counter so routes remain testable without
-    # requiring full sorted-set pipeline semantics.
-    await r.set(key, "0", ex=window, nx=True)
-    count = int(await r.incr(key))
-    return count <= limit
+async def _window(key: str, limit: int, window: int = 60, *, fail_open: bool = False) -> bool:
+    try:
+        r = await get_redis()
+        now = time.time()
+        member = f"{int(now * 1000)}:{uuid.uuid4().hex}"
+        if hasattr(r, "pipeline"):
+            pipe = r.pipeline()
+            pipe.zremrangebyscore(key, 0, now - window)
+            pipe.zadd(key, {member: now})
+            pipe.zcard(key)
+            pipe.expire(key, window)
+            results = await pipe.execute()
+            return results[2] <= limit
+
+        # Some lightweight test doubles only implement simple counter primitives.
+        # Fall back to a coarse per-window counter so routes remain testable without
+        # requiring full sorted-set pipeline semantics.
+        await r.set(key, "0", ex=window, nx=True)
+        count = int(await r.incr(key))
+        return count <= limit
+    except REDIS_OPERATION_EXCEPTIONS as exc:
+        if fail_open:
+            log.warning("rate_limit_redis_unavailable_fail_open", extra={"rate_limit_key": key})
+            return True
+        raise HTTPException(
+            503,
+            "This action is temporarily unavailable. Please try again shortly.",
+        ) from exc
 
 
 async def _require_window(key: str, limit: int, window: int, message: str) -> None:
@@ -77,6 +91,8 @@ async def _bump_daily_bucket(
     user: User | object,
     action: str,
     limit: int,
+    *,
+    message: str | None = None,
 ) -> None:
     if limit <= 0:
         raise HTTPException(403, DAILY_LIMIT_MESSAGE)
@@ -90,7 +106,7 @@ async def _bump_daily_bucket(
     if count > limit:
         if isinstance(user, User) or getattr(user, "email", None):
             await track_usage_limit_friction_and_maybe_send(user, action=action)
-        raise HTTPException(429, DAILY_LIMIT_MESSAGE)
+        raise HTTPException(429, message or DAILY_LIMIT_MESSAGE)
 
 
 async def _bump_weekly_bucket(
@@ -167,7 +183,13 @@ async def rate_limit_advisor(
             403, "Story Advisor requires an active trial, Author, or Architect plan."
         )
     daily_limit = await _limit_for_user(db, current_user.id, "advisor_per_day", daily_limit)
-    await _bump_daily_bucket(db, current_user, "high_cost_authoring", daily_limit)
+    await _bump_daily_bucket(
+        db,
+        current_user,
+        "high_cost_authoring",
+        daily_limit,
+        message=advisor_daily_limit_message(daily_limit),
+    )
 
 
 async def rate_limit_recall(
@@ -184,12 +206,22 @@ async def rate_limit_continuity_checker(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    daily_limit = continuity_limit_per_day(current_user)
+    await enforce_continuity_rate_limit(db, current_user)
+
+
+async def enforce_continuity_rate_limit(db: AsyncSession, billing_user: User) -> None:
+    daily_limit = continuity_limit_per_day(billing_user)
     if daily_limit <= 0:
         raise HTTPException(
             403, "Continuity checks are authoring features. Upgrade to Author for access."
         )
-    await _bump_daily_bucket(db, current_user, "continuity", daily_limit)
+    await _bump_daily_bucket(
+        db,
+        billing_user,
+        "continuity",
+        daily_limit,
+        message=continuity_daily_limit_message(daily_limit),
+    )
 
 
 async def rate_limit_api(
@@ -198,9 +230,26 @@ async def rate_limit_api(
     db: AsyncSession = Depends(get_db),
 ):
     limit = await _limit_for_user(db, current_user.id, "api_per_minute", 300)
-    ok = await _window(key_ratelimit(str(current_user.id), "api"), limit, 60)
+    ok = await _window(
+        key_ratelimit(str(current_user.id), "api"),
+        limit,
+        60,
+        fail_open=True,
+    )
     if not ok:
         raise HTTPException(429, "Rate limit exceeded")
+
+
+async def rate_limit_support(
+    current_user: User = Depends(get_current_user),
+):
+    """Short abuse throttle; AI support replies are still charged to LLM usage."""
+
+    ok = await _window(key_ratelimit(str(current_user.id), "support"), 30, 600)
+    if not ok:
+        raise HTTPException(
+            429, "Too many support requests. Please wait a few minutes and try again."
+        )
 
 
 def _client_identifier(request: Request) -> str:
@@ -232,14 +281,24 @@ async def rate_limit_auth_refresh(request: Request):
 
 async def rate_limit_public(request: Request):
     identifier = _client_identifier(request)
-    ok = await _window(key_ratelimit(f"public:{identifier}", "api"), 120, 60)
+    ok = await _window(
+        key_ratelimit(f"public:{identifier}", "api"),
+        120,
+        60,
+        fail_open=True,
+    )
     if not ok:
         raise HTTPException(429, "Public rate limit exceeded")
 
 
 async def rate_limit_public_asset(request: Request):
     identifier = _client_identifier(request)
-    ok = await _window(key_ratelimit(f"public:{identifier}", "asset"), 240, 60)
+    ok = await _window(
+        key_ratelimit(f"public:{identifier}", "asset"),
+        240,
+        60,
+        fail_open=True,
+    )
     if not ok:
         raise HTTPException(429, "Asset rate limit exceeded")
 

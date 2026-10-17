@@ -1,24 +1,20 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import "./settings.css"
 
 import {
   BarsIcon,
   BoltIcon,
-  CheckCircleIcon,
   COMPLEXITY_OPTIONS,
   FriendsIcon,
   GlobeIcon,
-  GoalRing,
   InfoItem,
   InlineMessage,
   MailIcon,
   MODES,
-  modeLabel,
   MoonIcon,
-  PlanIcon,
   ReadingIcon,
   SelectableCard,
   SETTINGS_NAV,
@@ -27,24 +23,22 @@ import {
   SettingsSearchContext,
   ShieldIcon,
   SunIcon,
-  SummaryCard,
-  ThemeIcon,
+  useActiveSettingsSection,
 } from "./settingsPage.components"
 
 import { authApi } from "@/lib/api/auth"
 import { clearAuthCookies } from "@/lib/api/client"
 import { billingApi } from "@/lib/api/billing"
-import { ANALYTICS_CONSENT_COOKIE, getAnalyticsConsentValue } from "@/lib/analytics/posthogConsent"
+import { getAnalyticsConsentValue, writeAnalyticsConsentCookie } from "@/lib/analytics/posthogConsent"
 import { emailApi } from "@/lib/api/email"
-import { tierLabel } from "@/lib/billing/plans"
+import { getTrialCountdown } from "@/lib/billing/trialCountdown"
 import { useAuthStore } from "@/lib/stores/authStore"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 import { useUiPreferencesStore } from "@/lib/stores/uiPreferencesStore"
-import { toolsForPlacement } from "@/lib/workspace/toolRegistry"
 import type { EmailPreferences } from "@/types/email"
-
-const DELETION_REQUEST_EMAIL = "support@mail.getlorevia.com"
-const DASHBOARD_VISIBILITY_TOOLS = toolsForPlacement("dashboard").filter((tool) => !tool.nonHideable)
+import { SUPPORT_HELP_EVENT } from "@/components/ui/ShortcutHelp"
+import { useSettingsDraftGuard, useSettingsResource } from "./settingsPage.state"
+import { DASHBOARD_VISIBILITY_TOOLS, DELETION_REQUEST_EMAIL, dailyGoalError, formatBillingDate, getBillingPresentation, usernameError } from "./settingsPage.helpers"
 
 export default function SettingsPage() {
   const { user, setUser, logout } = useAuthStore()
@@ -53,6 +47,7 @@ export default function SettingsPage() {
   const uiPreferences = useUiPreferencesStore((state) => state.preferences)
   const setComplexityMode = useUiPreferencesStore((state) => state.setComplexityMode)
   const setDashboardToolVisibility = useUiPreferencesStore((state) => state.setDashboardToolVisibility)
+  const restartGuidance = useUiPreferencesStore((state) => state.restartGuidance)
   const retryUiPreferenceSync = useUiPreferencesStore((state) => state.retrySync)
   const uiPreferenceSyncState = useUiPreferencesStore((state) => state.syncState)
   const uiPreferenceSyncMessage = useUiPreferencesStore((state) => state.syncMessage)
@@ -63,12 +58,12 @@ export default function SettingsPage() {
   const [goalSaving, setGoalSaving] = useState(false)
   const [goalMessage, setGoalMessage] = useState<string | null>(null)
   const [usernameDraft, setUsernameDraft] = useState("")
+  const [confirmedUsername, setConfirmedUsername] = useState("")
   const [usernameSaving, setUsernameSaving] = useState(false)
   const [usernameMessage, setUsernameMessage] = useState<string | null>(null)
   const [permissionSaving, setPermissionSaving] = useState(false)
   const [permissionMessage, setPermissionMessage] = useState<string | null>(null)
-  const [emailPreferences, setEmailPreferences] = useState<EmailPreferences | null>(null)
-  const [emailPreferencesLoading, setEmailPreferencesLoading] = useState(false)
+  const [workspaceMessage, setWorkspaceMessage] = useState<string | null>(null)
   const [emailPreferencesSaving, setEmailPreferencesSaving] = useState(false)
   const [emailPreferencesMessage, setEmailPreferencesMessage] = useState<string | null>(null)
   const [dataExportBusy, setDataExportBusy] = useState(false)
@@ -78,58 +73,69 @@ export default function SettingsPage() {
   const [accountDeleteBusy, setAccountDeleteBusy] = useState(false)
   const [accountDeleteMessage, setAccountDeleteMessage] = useState<string | null>(null)
   const [analyticsConsent, setAnalyticsConsent] = useState<string | undefined>(undefined)
+  const [trialCountdownNow, setTrialCountdownNow] = useState(() => Date.now())
   const [settingsQuery, setSettingsQuery] = useState("")
   const router = useRouter()
   const stableUser = authHydrated ? user : null
-  const displayTier = stableUser?.tier_label ?? tierLabel(stableUser?.tier)
-  const purchasedTier = tierLabel(stableUser?.plan_tier)
-  const paidUser = Boolean(stableUser && stableUser.tier !== "free" && !stableUser.trial_active)
+  const billing = useSettingsResource(stableUser?.email, billingApi.subscription)
+  const emails = useSettingsResource(stableUser?.email, emailApi.getPreferences)
+  const billingStatus = billing.data
+  const emailPreferences = emails.data
+  const setEmailPreferences = emails.setData
+  const [modeSaving, setModeSaving] = useState(false)
+  const [modeMessage, setModeMessage] = useState<string | null>(null)
+  const accountLock = useRef(false)
+  const accountSaving = modeSaving || goalSaving || usernameSaving || permissionSaving || accountDeleteBusy
+  const goalValidation = dailyGoalError(goalDraft)
+  const usernameValidation = usernameError(usernameDraft)
+  const goalDirty = goalDraft !== String(stableUser?.daily_word_goal ?? 1000)
+  const usernameDirty = usernameDraft.trim() !== confirmedUsername
+  const allowLeave = useSettingsDraftGuard(!!stableUser && (goalDirty || usernameDirty), accountSaving || emailPreferencesSaving || accountDeleteBusy)
+  const {
+    paidUser,
+    displayTier,
+    billingDisplayState,
+    billingPlanLabel,
+    billingPriceLabel,
+    nextRenewalLabel,
+    cancellationEndLabel,
+    refundRequestHref,
+  } = getBillingPresentation(billingStatus, stableUser)
   const trialEndsLabel = stableUser?.trial_ends_at
-    ? new Intl.DateTimeFormat("en-US", { dateStyle: "medium" }).format(new Date(stableUser.trial_ends_at))
+    ? formatBillingDate(stableUser.trial_ends_at)
     : null
+  const trialCountdown = getTrialCountdown(stableUser?.trial_ends_at, trialCountdownNow)
 
   useEffect(() => {
     setGoalDraft(String(stableUser?.daily_word_goal ?? 1000))
   }, [stableUser?.daily_word_goal])
 
   useEffect(() => {
-    setUsernameDraft(stableUser?.username ?? "")
+    const nextUsername = stableUser?.username ?? ""
+    setUsernameDraft(nextUsername)
+    setConfirmedUsername(nextUsername)
   }, [stableUser?.username])
+
+  useEffect(() => {
+    if (!stableUser?.trial_active) return
+    setTrialCountdownNow(Date.now())
+    const timer = window.setInterval(() => setTrialCountdownNow(Date.now()), 60_000)
+    return () => window.clearInterval(timer)
+  }, [stableUser?.trial_active])
 
   useEffect(() => {
     setAnalyticsConsent(getAnalyticsConsentValue(document.cookie))
   }, [])
 
-  useEffect(() => {
-    if (!stableUser?.email) return
-    let cancelled = false
-    setEmailPreferencesLoading(true)
-    setEmailPreferencesMessage(null)
-    void emailApi
-      .getPreferences()
-      .then((preferences) => {
-        if (!cancelled) {
-          setEmailPreferences(preferences)
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setEmailPreferencesMessage("We could not load your email preferences right now.")
-        }
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setEmailPreferencesLoading(false)
-        }
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [stableUser?.email])
-
   const changeMode = async (mode: string) => {
-    await authApi.setReadingMode(mode)
-    if (user) setUser({ ...user, reading_mode: mode as "casual" | "analyst" | "speed" })
+    if (accountLock.current || mode === stableUser?.reading_mode) return
+    accountLock.current = true; setModeSaving(true); setModeMessage(null)
+    try {
+      const updated = await authApi.setReadingMode(mode)
+      setUser(updated)
+      setModeMessage("Reading mode updated.")
+    } catch { setModeMessage("Reading mode could not be saved. Your previous mode is unchanged. Try again.") }
+    finally { accountLock.current = false; setModeSaving(false) }
   }
 
   const dashboardToolHidden = (toolId: string) => {
@@ -139,33 +145,46 @@ export default function SettingsPage() {
 
   const changeDashboardToolVisibility = (toolId: string, hidden: boolean) => {
     if (toolId === "dashboard.pricing" && !paidUser) return
+    setWorkspaceMessage(null)
     void setDashboardToolVisibility(toolId, hidden ? "user_hidden" : "visible")
   }
 
-  const handleLogout = async () => {
-    // Clear client state IMMEDIATELY before API call to prevent race conditions
-    logout()
-    document.cookie = "lorevia_session_dead=1; Max-Age=30; Path=/; Secure; SameSite=Lax"
-    clearAuthCookies()
-    
-    // Then make the API call in background (don't await)
-    authApi.logout().catch(() => {
-      // ignore logout errors - client state already cleared
-    })
-    
-    router.replace("/login")
+  const hiddenDashboardToolCount = DASHBOARD_VISIBILITY_TOOLS.filter((tool) => dashboardToolHidden(tool.id)).length
+
+  const showAllHiddenDashboardTools = async () => {
+    setWorkspaceMessage(null)
+    const hiddenTools = DASHBOARD_VISIBILITY_TOOLS.filter((tool) => dashboardToolHidden(tool.id))
+    await Promise.all(hiddenTools.map((tool) => setDashboardToolVisibility(tool.id, "visible")))
+    setWorkspaceMessage("All hidden workspace tools are visible again.")
   }
 
-  const setAnalyticsCookie = (value: "true" | "false") => {
-    document.cookie = `${ANALYTICS_CONSENT_COOKIE}=${value}; Max-Age=31536000; Path=/; SameSite=Lax`
-    setAnalyticsConsent(value)
-    if (value === "false") {
-      window.localStorage.removeItem("ph_phc_posthog")
-      window.localStorage.removeItem("ph_lorevia_posthog")
+  const handleRestartGuidance = async () => {
+    setWorkspaceMessage(null)
+    await restartGuidance()
+    setWorkspaceMessage("Onboarding tips and guidance will appear again where available.")
+  }
+
+  const handleLogout = async () => {
+    if (!allowLeave()) return
+    try {
+      await authApi.logout()
+    } catch {
+      // A failed remote logout must not leave authenticated client state behind.
+    } finally {
+      logout()
+      document.cookie = "lorevia_session_dead=1; Max-Age=30; Path=/; Secure; SameSite=Lax"
+      clearAuthCookies()
+      router.replace("/login")
     }
   }
 
+  const setAnalyticsCookie = (value: "true" | "false") => {
+    writeAnalyticsConsentCookie(value)
+    setAnalyticsConsent(value)
+  }
+
   const exportData = async () => {
+    if (dataExportBusy || accountDeleteBusy) return
     setDataExportBusy(true)
     setDataExportMessage(null)
     try {
@@ -187,7 +206,8 @@ export default function SettingsPage() {
   }
 
   const deleteAccount = async () => {
-    if (accountDeleteConfirmation !== "DELETE MY ACCOUNT") return
+    if (accountLock.current || accountDeleteBusy || emailPreferencesSaving || accountDeleteConfirmation !== "DELETE MY ACCOUNT") return
+    accountLock.current = true
     setAccountDeleteBusy(true)
     setAccountDeleteMessage(null)
     try {
@@ -202,11 +222,13 @@ export default function SettingsPage() {
     } catch {
       setAccountDeleteMessage("We could not delete your account. Check your confirmation and password, or contact support.")
     } finally {
+      accountLock.current = false
       setAccountDeleteBusy(false)
     }
   }
 
   const openBillingPortal = async () => {
+    if (billingBusy || accountDeleteBusy) return
     setBillingBusy(true)
     setBillingMessage(null)
     try {
@@ -215,7 +237,7 @@ export default function SettingsPage() {
         setBillingMessage(result.message ?? "Billing is not configured in this environment yet.")
         return
       }
-      window.location.href = result.portal_url
+      if (allowLeave()) window.location.href = result.portal_url
     } catch {
       setBillingMessage("We could not open the billing portal right now. Please try again in a moment.")
     } finally {
@@ -224,11 +246,9 @@ export default function SettingsPage() {
   }
 
   const saveDailyGoal = async () => {
-    const parsedGoal = Math.max(1, Number(goalDraft) || 0)
-    if (!parsedGoal) {
-      setGoalMessage("Enter a daily word goal above zero.")
-      return
-    }
+    if (accountLock.current || goalValidation) return
+    const parsedGoal = Number(goalDraft)
+    accountLock.current = true
 
     setGoalSaving(true)
     setGoalMessage(null)
@@ -240,32 +260,34 @@ export default function SettingsPage() {
     } catch {
       setGoalMessage("We could not save the daily goal right now.")
     } finally {
-      setGoalSaving(false)
+      accountLock.current = false; setGoalSaving(false)
     }
   }
 
   const saveUsername = async () => {
     const trimmedUsername = usernameDraft.trim()
-    if (!trimmedUsername) {
-      setUsernameMessage("Enter a username to keep your public LoreVia identity active.")
-      return
-    }
+    if (accountLock.current || usernameValidation) return
+    accountLock.current = true
 
     setUsernameSaving(true)
     setUsernameMessage(null)
     try {
       const updated = await authApi.setUsername(trimmedUsername)
       setUser(updated)
-      setUsernameDraft(updated.username ?? "")
-      setUsernameMessage(user?.username ? "Public username updated." : "Public username saved.")
+      const nextUsername = updated.username ?? trimmedUsername
+      setUsernameDraft(nextUsername)
+      setConfirmedUsername(nextUsername)
+      setUsernameMessage(confirmedUsername ? "Public username updated." : "Public username saved.")
     } catch {
       setUsernameMessage("We could not save that username. Try a different handle with letters, numbers, hyphens, or underscores.")
     } finally {
-      setUsernameSaving(false)
+      accountLock.current = false; setUsernameSaving(false)
     }
   }
 
   const changeMessagingPermission = async (messagingPermission: "anyone" | "friends_only") => {
+    if (accountLock.current || messagingPermission === stableUser?.messaging_permission) return
+    accountLock.current = true
     setPermissionSaving(true)
     setPermissionMessage(null)
     try {
@@ -275,7 +297,7 @@ export default function SettingsPage() {
     } catch {
       setPermissionMessage("We could not save your messaging privacy right now.")
     } finally {
-      setPermissionSaving(false)
+      accountLock.current = false; setPermissionSaving(false)
     }
   }
 
@@ -321,7 +343,7 @@ export default function SettingsPage() {
   const goalProgress = Math.max(0, Math.min(100, Math.round((todayWords / Math.max(dailyGoal, 1)) * 100)))
   const currentReadingMode = stableUser?.reading_mode ?? "casual"
   const currentPermission = stableUser?.messaging_permission ?? "anyone"
-  const [activeSectionId, setActiveSectionId] = useState(SETTINGS_NAV[0].id)
+  const { activeSectionId, setActiveSectionId } = useActiveSettingsSection(settingsQuery, authHydrated)
   const matchingSectionIds = useMemo(() => {
     const query = settingsQuery.trim().toLowerCase()
     if (!query) return new Set(SETTINGS_NAV.map((item) => item.id))
@@ -336,74 +358,14 @@ export default function SettingsPage() {
     )
   }, [settingsQuery])
 
-  const summaryCards = useMemo(
-    () => [
-      { label: "Plan", value: displayTier, icon: <PlanIcon /> },
-      { label: "Reading mode", value: modeLabel(currentReadingMode), icon: <ReadingIcon /> },
-      { label: "Theme", value: theme === "dark" ? "Dark" : "Light", icon: <ThemeIcon dark={isDark} /> },
-    ],
-    [currentReadingMode, displayTier, isDark, theme],
-  )
-
-  useEffect(() => {
-    let frameId: number | null = null
-
-    const updateActiveSection = () => {
-      const anchorY = Math.min(window.innerHeight * 0.34, 260)
-      const sections = SETTINGS_NAV
-        .map((item) => {
-          const element = document.getElementById(item.id)
-          return element ? { id: item.id, rect: element.getBoundingClientRect() } : null
-        })
-        .filter((item): item is { id: string; rect: DOMRect } => Boolean(item))
-
-      if (!sections.length) return
-
-      const documentHeight = document.documentElement.scrollHeight
-      const nearDocumentEnd =
-        documentHeight > window.innerHeight &&
-        window.innerHeight + window.scrollY >= documentHeight - 80
-      if (nearDocumentEnd) {
-        setActiveSectionId(sections.at(-1)?.id ?? SETTINGS_NAV[0].id)
-        return
-      }
-
-      const visibleSections = sections.filter((section) => section.rect.bottom > 0 && section.rect.top < window.innerHeight)
-      const candidates = visibleSections.length ? visibleSections : sections
-      const activeSection = candidates.sort(
-        (first, second) => Math.abs(first.rect.top - anchorY) - Math.abs(second.rect.top - anchorY),
-      )[0]
-
-      setActiveSectionId(activeSection.id)
-    }
-
-    const scheduleUpdate = () => {
-      if (frameId !== null) return
-      frameId = window.requestAnimationFrame(() => {
-        frameId = null
-        updateActiveSection()
-      })
-    }
-
-    updateActiveSection()
-    window.addEventListener("scroll", scheduleUpdate, { passive: true })
-    window.addEventListener("resize", scheduleUpdate)
-
-    return () => {
-      if (frameId !== null) {
-        window.cancelAnimationFrame(frameId)
-      }
-      window.removeEventListener("scroll", scheduleUpdate)
-      window.removeEventListener("resize", scheduleUpdate)
-    }
-  }, [])
+  if (!authHydrated) return <p role="status" className="py-6 text-sm">Loading account settings…</p>
+  if (!stableUser) return <p className="py-6 text-sm">Sign in to manage your settings.</p>
 
   return (
-    <div className={`settings-surface ${isDark ? "settings-surface--dark" : "settings-surface--light"}`}>
+    <div data-settings-workspace className={`settings-surface ${isDark ? "settings-surface--dark" : "settings-surface--light"}`}>
       <div className="mx-auto max-w-[1040px] pb-10">
         <header className="settings-hero">
           <div>
-            <p className="settings-kicker">Settings</p>
             <h1 className="settings-title">Settings</h1>
             <p className="settings-intro">Manage your account, workspace preferences, privacy, and writing goals.</p>
             <label className="mt-5 block max-w-lg">
@@ -417,15 +379,15 @@ export default function SettingsPage() {
               />
             </label>
           </div>
-          <div className="settings-summary-grid">
-            {summaryCards.map((card) => (
-              <SummaryCard key={card.label} icon={card.icon} label={card.label} value={card.value} />
-            ))}
-          </div>
+          <button type="button" className="settings-secondary-button" onClick={() => window.dispatchEvent(new CustomEvent(SUPPORT_HELP_EVENT))}>Help</button>
         </header>
+        {settingsQuery ? <div className="mb-5 flex flex-wrap items-center gap-4 text-sm"><p role="status">{matchingSectionIds.size} matching settings sections</p><button type="button" className="settings-secondary-button" onClick={() => setSettingsQuery("")}>Clear search</button></div> : null}
+        {usernameDirty || goalDirty ? <p role="status" className="settings-copy mb-5">Unsaved changes: {[usernameDirty ? "public username" : "", goalDirty ? "daily goal" : ""].filter(Boolean).join(" and ")}. Save each field below.</p> : null}
 
         <div className="settings-layout">
           <nav className="settings-section-nav" aria-label="Settings sections">
+            <label className="block text-sm font-medium lg:hidden">Jump to section<select aria-label="Jump to settings section" className="settings-input mt-2" value={matchingSectionIds.has(activeSectionId) ? activeSectionId : ""} onChange={(event) => { setActiveSectionId(event.target.value); document.getElementById(event.target.value)?.scrollIntoView({ behavior: "smooth", block: "start" }) }}><option value="" disabled>Choose a section</option>{SETTINGS_NAV.filter((item) => matchingSectionIds.has(item.id)).map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</select></label>
+            <div className="hidden lg:block">
             {SETTINGS_NAV.filter((item) => matchingSectionIds.has(item.id)).map((item) => {
               const active = activeSectionId === item.id
               return (
@@ -441,6 +403,7 @@ export default function SettingsPage() {
                 </a>
               )
             })}
+            </div>
           </nav>
 
           <SettingsSearchContext.Provider value={matchingSectionIds}>
@@ -452,23 +415,87 @@ export default function SettingsPage() {
               </div>
             ) : null}
             <SettingsPanel id="account" title="Billing and account details">
+              {billing.loading ? <InlineMessage message="Loading billing details…" tone="neutral" /> : null}
+              {billing.failed ? <div className="mb-4"><InlineMessage message="Billing details could not be loaded. Your account plan is shown below; renewal and payment status are unverified." tone="warning" /><button type="button" className="settings-secondary-button mt-3" onClick={billing.retry}>Retry billing details</button></div> : null}
               <div className="settings-info-grid">
                 {stableUser?.email ? <InfoItem label="Email" value={stableUser.email} /> : null}
                 <InfoItem label="Plan status" value={displayTier} />
+                {billingDisplayState === "active" && nextRenewalLabel ? (
+                  <InfoItem label="Next renewal" value={nextRenewalLabel} />
+                ) : null}
+                {billingDisplayState === "cancellation_scheduled" && cancellationEndLabel ? (
+                  <InfoItem label="Access until" value={cancellationEndLabel} />
+                ) : null}
+                {stableUser?.trial_active && trialCountdown ? (
+                  <InfoItem label="Free trial countdown" value={trialCountdown.label} />
+                ) : null}
               </div>
               {stableUser?.trial_active ? (
+                <div className="mt-5 rounded-md border border-[#2b7a73]/30 bg-[#2b7a73]/5 p-4">
+                  <p className="settings-copy font-semibold">Your free trial is already active.</p>
+                  <p className="settings-copy mt-2">
+                    You have Author trial access{trialCountdown ? ` with ${trialCountdown.label}` : ""}. It ends{trialEndsLabel ? ` on ${trialEndsLabel}` : ""}, then your account returns to Free.
+                  </p>
+                  <p className="settings-copy mt-2">No payment is required, and no charge is scheduled when the trial ends.</p>
+                </div>
+              ) : null}
+              {billingDisplayState === "cancellation_scheduled" ? (
+                <div className="mt-5 rounded-md border border-[#b7791f]/30 bg-[#b7791f]/5 p-4" role="status">
+                  <p className="settings-copy font-semibold">Cancellation scheduled</p>
+                  <p className="settings-copy mt-2">
+                    Your {billingPlanLabel} plan remains active until {cancellationEndLabel ?? "the end of the current billing period"}. You won&apos;t be charged again.
+                  </p>
+                  <p className="settings-copy mt-2">
+                    Paid access ends when the current billing period finishes, then the account moves to the Free plan.
+                  </p>
+                </div>
+              ) : null}
+              {billingDisplayState === "past_due" ? (
+                <div className="mt-5 rounded-md border border-[#c53030]/30 bg-[#c53030]/5 p-4" role="alert">
+                  <p className="settings-copy font-semibold">Payment issue</p>
+                  <p className="settings-copy mt-2">
+                    We couldn&apos;t process your latest subscription payment. Your paid access is still available while Paddle retries.
+                  </p>
+                  <p className="settings-copy mt-2">
+                    Update your payment method in the billing portal to keep your plan active.
+                  </p>
+                </div>
+              ) : null}
+              {billingDisplayState === "active" && billingStatus ? (
                 <p className="settings-copy mt-5">
-                  You are currently seeing Author free trial access. Your purchased plan is {purchasedTier}, so access will revert when the trial ends{trialEndsLabel ? ` on ${trialEndsLabel}` : ""} unless you upgrade.
+                  {billingPlanLabel} — {billingPriceLabel}
+                  {nextRenewalLabel ? `. Your subscription renews automatically. Next renewal on ${nextRenewalLabel}.` : ". Your subscription renews automatically until canceled."}
                 </p>
+              ) : null}
+              {paidUser ? (
+                <>
+                  <p className="settings-copy mt-3">Manage your payment details, invoices, and subscription access in the billing portal.</p>
+                  <button onClick={openBillingPortal} disabled={billingBusy} className="settings-primary-button mt-5">
+                    {billingBusy ? "Opening billing..." : "Manage subscription"}
+                  </button>
+                  <div className="mt-4 flex flex-wrap gap-x-5 gap-y-2 text-sm font-semibold text-[var(--settings-accent)]">
+                    <a href="/refund" className="underline underline-offset-4">Refund policy</a>
+                    <a href={refundRequestHref} className="underline underline-offset-4">Request a refund</a>
+                  </div>
+                </>
+              ) : billingStatus?.has_paddle_subscription ? (
+                <>
+                  <p className="settings-copy mt-3">
+                    This account no longer has an active paid subscription. Invoices and past billing details remain in the portal.
+                  </p>
+                  <button onClick={openBillingPortal} disabled={billingBusy} className="settings-primary-button mt-5">
+                    {billingBusy ? "Opening billing..." : "View billing history"}
+                  </button>
+                  <div className="mt-4 flex flex-wrap gap-x-5 gap-y-2 text-sm font-semibold text-[var(--settings-accent)]">
+                    <a href="/refund" className="underline underline-offset-4">Refund policy</a>
+                    <a href={refundRequestHref} className="underline underline-offset-4">Request a refund</a>
+                  </div>
+                </>
               ) : (
-                <p className="settings-copy mt-5">
-                  Purchased plan: {purchasedTier}. cancel renewal, payment method changes, and invoice access live in the billing portal.
-                </p>
+                <button onClick={() => { if (allowLeave()) router.push("/upgrade") }} className="settings-primary-button mt-5">
+                  View paid plans
+                </button>
               )}
-              <p className="settings-copy mt-3">Manage your payment details, invoices, and subscription access in the billing portal.</p>
-              <button onClick={openBillingPortal} disabled={billingBusy} className="settings-primary-button mt-5">
-                {billingBusy ? "Opening billing..." : "Manage billing / cancel subscription"}
-              </button>
               {billingMessage ? <InlineMessage message={billingMessage} tone="warning" className="mt-4" /> : null}
             </SettingsPanel>
 
@@ -482,6 +509,9 @@ export default function SettingsPage() {
                     <input
                       id="public-username"
                       type="text"
+                      disabled={usernameSaving}
+                      aria-invalid={!!usernameValidation}
+                      aria-describedby="username-rules"
                       minLength={3}
                       maxLength={32}
                       autoComplete="username"
@@ -490,10 +520,9 @@ export default function SettingsPage() {
                       onInput={(event) => setUsernameDraft((event.target as HTMLInputElement).value)}
                       className="settings-input"
                     />
-                    <span className={usernameDraft.trim().length >= 3 ? "settings-check settings-check--valid" : "settings-check"}>
-                      <CheckCircleIcon />
-                    </span>
+
                   </div>
+                  <p id="username-rules" className="settings-copy mt-3">Use 3–32 letters, numbers, hyphens, or underscores. Availability is checked when you save.</p>
                   <p className="settings-copy mt-3">
                     This is your public username people see on LoreVia. Your manuscript author or pen name can be changed per book.
                   </p>
@@ -502,13 +531,14 @@ export default function SettingsPage() {
 
                 <div>
                   <p className="settings-label">Current public handle</p>
-                  {stableUser?.username ? <p className="settings-handle">@{stableUser.username}</p> : null}
+                  {confirmedUsername ? <p className="settings-handle">@{confirmedUsername}</p> : null}
                   <p className="settings-copy mt-3">
                     New author uploads default to this username, but you can change the manuscript author or pen name for any individual book.
                   </p>
-                  <button onClick={saveUsername} disabled={usernameSaving || usernameDraft.trim().length < 3} className="settings-primary-button mt-5">
+                  <button onClick={saveUsername} disabled={accountSaving || !!usernameValidation || !usernameDirty} className="settings-primary-button mt-5">
                     {usernameSaving ? "Saving..." : stableUser?.username ? "Change username" : "Save username"}
                   </button>
+                  {usernameDirty ? <button type="button" disabled={accountSaving} className="settings-secondary-button mt-3" onClick={() => { setUsernameDraft(confirmedUsername); setUsernameMessage(null) }}>Discard username change</button> : null}
                 </div>
               </div>
             </SettingsPanel>
@@ -554,6 +584,30 @@ export default function SettingsPage() {
                   ) : null}
                 </div>
               ) : null}
+              {workspaceMessage ? (
+                <div className="mt-4">
+                  <InlineMessage message={workspaceMessage} tone="neutral" />
+                </div>
+              ) : null}
+              <div className="settings-session-row mt-4">
+                <div>
+                  <p className="settings-tool-title">Reset workspace help</p>
+                  <p className="settings-tool-state">Restart onboarding tips or restore tools you previously hid.</p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <button type="button" onClick={() => void handleRestartGuidance()} className="settings-secondary-button">
+                    Restart onboarding
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void showAllHiddenDashboardTools()}
+                    disabled={hiddenDashboardToolCount === 0}
+                    className="settings-secondary-button"
+                  >
+                    Show all hidden tools
+                  </button>
+                </div>
+              </div>
               <div className="settings-tool-list mt-5">
                 {DASHBOARD_VISIBILITY_TOOLS.map((tool) => {
                   const hidden = dashboardToolHidden(tool.id)
@@ -568,7 +622,7 @@ export default function SettingsPage() {
                         type="button"
                         disabled={lockedVisible}
                         onClick={() => changeDashboardToolVisibility(tool.id, !hidden)}
-                        className={hidden ? "settings-secondary-button" : "settings-danger-button"}
+                        className="settings-secondary-button"
                       >
                         {lockedVisible ? "Required" : hidden ? "Show" : "Hide from workspace"}
                       </button>
@@ -587,10 +641,13 @@ export default function SettingsPage() {
                     title={mode.label}
                     description={mode.desc}
                     icon={mode.value === "casual" ? <ReadingIcon /> : mode.value === "analyst" ? <BarsIcon /> : <BoltIcon />}
-                    onClick={() => changeMode(mode.value)}
+                    disabled={accountSaving}
+                    onClick={() => void changeMode(mode.value)}
                   />
                 ))}
               </div>
+              {modeSaving ? <InlineMessage message="Saving reading mode…" tone="neutral" className="mt-4" /> : null}
+              {modeMessage ? <InlineMessage message={modeMessage} tone="neutral" className="mt-4" /> : null}
             </SettingsPanel>
 
             <SettingsPanel id="privacy" title="Direct messages">
@@ -605,7 +662,7 @@ export default function SettingsPage() {
                     title={option.label}
                     description={option.desc}
                     icon={option.icon}
-                    disabled={permissionSaving}
+                    disabled={accountSaving}
                     onClick={() => void changeMessagingPermission(option.value)}
                   />
                 ))}
@@ -673,7 +730,8 @@ export default function SettingsPage() {
                   </button>
                 </div>
               ) : null}
-              {emailPreferencesLoading ? <InlineMessage message="Loading email preferences..." tone="neutral" className="mt-4" /> : null}
+              {emails.loading ? <InlineMessage message="Loading email preferences..." tone="neutral" className="mt-4" /> : null}
+              {emails.failed ? <div className="mt-4"><InlineMessage message="Email preferences could not be loaded. Your subscription choices have not changed." tone="warning" /><button type="button" className="settings-secondary-button mt-3" onClick={emails.retry}>Retry email preferences</button></div> : null}
               {emailPreferencesMessage ? <InlineMessage message={emailPreferencesMessage} tone="neutral" className="mt-4" /> : null}
               <p className="settings-security-note mt-4">
                 <ShieldIcon /> Security, password reset, verification, and billing emails will always be sent even when promotional emails are turned off.
@@ -682,19 +740,24 @@ export default function SettingsPage() {
 
             <SettingsPanel id="goals" title="Daily writing target">
               <div className="settings-goal-grid">
-                <label>
-                  <span className="settings-label">Words per day</span>
+                <div>
+                  <label htmlFor="daily-word-goal" className="settings-label">Words per day</label>
                   <input
-                    type="number"
-                    min={1}
+                    id="daily-word-goal"
+                    inputMode="numeric"
+                    aria-invalid={!!goalValidation}
+                    aria-describedby="daily-goal-validation"
+                    disabled={goalSaving}
                     value={goalDraft}
                     onChange={(event) => setGoalDraft(event.target.value)}
                     className="settings-number-input mt-2"
                   />
-                  <button onClick={saveDailyGoal} disabled={goalSaving} className="settings-primary-button mt-4">
+                  <p id="daily-goal-validation" className="settings-copy mt-2">{goalValidation || "1 to 1,000,000 words per day."}</p>
+                  <button onClick={saveDailyGoal} disabled={accountSaving || !!goalValidation || !goalDirty} className="settings-primary-button mt-4">
                     {goalSaving ? "Saving..." : "Save daily goal"}
                   </button>
-                </label>
+                  {goalDirty ? <button type="button" disabled={accountSaving} className="settings-secondary-button mt-3" onClick={() => { setGoalDraft(String(dailyGoal)); setGoalMessage(null) }}>Discard goal change</button> : null}
+                </div>
 
                 <div className="settings-goal-today">
                   <p className="settings-label">Today</p>
@@ -707,7 +770,10 @@ export default function SettingsPage() {
 
                 <div className="settings-progress-cell">
                   <p className="settings-label">Progress</p>
-                  <GoalRing progress={goalProgress} />
+                  <p className="settings-goal-count">{goalProgress}%</p>
+                  <div role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={goalProgress} className="settings-progress-track" aria-label={`${goalProgress}% of daily writing goal`}>
+                    <span style={{ width: `${goalProgress}%` }} />
+                  </div>
                 </div>
               </div>
             </SettingsPanel>
@@ -715,7 +781,7 @@ export default function SettingsPage() {
             <SettingsPanel id="session" title="Sign out" compact>
               <div className="settings-session-row">
                 <p className="settings-copy">You&apos;ll be signed out of this workspace on this device.</p>
-                <button onClick={handleLogout} className="settings-danger-button">
+                <button disabled={accountSaving || emailPreferencesSaving || accountDeleteBusy} onClick={handleLogout} className="settings-danger-button">
                   Sign out
                 </button>
               </div>
@@ -746,6 +812,7 @@ export default function SettingsPage() {
                     Type DELETE MY ACCOUNT
                   </label>
                   <input
+                    disabled={accountDeleteBusy}
                     id="account-delete-confirmation"
                     value={accountDeleteConfirmation}
                     onChange={(event) => setAccountDeleteConfirmation(event.target.value)}
@@ -756,6 +823,7 @@ export default function SettingsPage() {
                     Current password
                   </label>
                   <input
+                    disabled={accountDeleteBusy}
                     id="account-delete-password"
                     type="password"
                     value={accountDeletePassword}
@@ -765,7 +833,7 @@ export default function SettingsPage() {
                   />
                   <button
                     onClick={deleteAccount}
-                    disabled={accountDeleteBusy || accountDeleteConfirmation !== "DELETE MY ACCOUNT"}
+                    disabled={accountSaving || emailPreferencesSaving || accountDeleteBusy || accountDeleteConfirmation !== "DELETE MY ACCOUNT"}
                     className="settings-danger-button mt-5"
                   >
                     {accountDeleteBusy ? "Deleting account..." : "Delete account"}

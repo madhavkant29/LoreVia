@@ -16,6 +16,7 @@ vi.mock("next/navigation", () => ({
   notFound: () => {
     throw new Error("NEXT_NOT_FOUND")
   },
+  usePathname: () => "/demo/gregor-samsa-character-tracker",
 }))
 
 vi.mock("@/components/marketing/PublicContentHeader", () => ({
@@ -80,7 +81,7 @@ afterEach(() => {
 
 describe("public slug runtime pages", () => {
   it("renders blog, demo, and answer slug pages with generated metadata", async () => {
-    const article = blogArticles[0]
+    const article = blogArticles.find((entry) => entry.sources.length > 0) ?? blogArticles[0]
     const demo = demoPages[0]
     const answer = answerPages[0]
 
@@ -93,6 +94,10 @@ describe("public slug runtime pages", () => {
     expect(bodyText()).toContain(article.description)
     expect(container?.querySelector("main")?.getAttribute("data-active-section")).toBe("blog")
     expect(container?.querySelector(`[data-testid="blog-jsonld-${article.slug}"]`)).toBeTruthy()
+    expect(container?.querySelectorAll("#sources-and-further-reading")).toHaveLength(1)
+    expect(container?.querySelector('nav a[href="#sources-and-further-reading"]')).toBeTruthy()
+    expect(container?.querySelector('a[data-editorial-event="editorial_related_opened"]')).toBeTruthy()
+    expect(container?.querySelector(".editorial-hero img")).toBeTruthy()
 
     root?.unmount()
     container?.remove()
@@ -100,10 +105,13 @@ describe("public slug runtime pages", () => {
     container = null
 
     await renderElement(await DemoPage({ params: Promise.resolve({ slug: demo.slug }) }))
-    expect(bodyText()).toContain(demo.title)
+    expect(bodyText()).toContain(demo.title.replace(/^Demo:\s*/, ""))
     expect(bodyText()).toContain(demo.featuredInsight)
     expect((container as HTMLDivElement | null)?.querySelector("main")?.getAttribute("data-active-section")).toBe("demo")
     expect((container as HTMLDivElement | null)?.querySelector(`[data-testid="demo-jsonld-${demo.slug}"]`)).toBeTruthy()
+    expect((container as HTMLDivElement | null)?.querySelector("[data-testid='demo-case-study']")).toBeTruthy()
+    expect((container as HTMLDivElement | null)?.querySelectorAll("[data-testid='demo-case-study'] > section")).toHaveLength(demo.sections.length)
+    expect(bodyText()).not.toContain("Why this page exists")
 
     ;(root as Root | null)?.unmount()
     ;(container as HTMLDivElement | null)?.remove()
@@ -114,15 +122,32 @@ describe("public slug runtime pages", () => {
     expect(bodyText()).toContain(answer.question)
     expect(bodyText()).toContain(answer.shortAnswer)
     expect((container as HTMLDivElement | null)?.querySelector("main")?.getAttribute("data-active-section")).toBe("answers")
-    expect((container as HTMLDivElement | null)?.querySelector(`[data-testid="answers-jsonld-${answer.slug}"]`)).toBeTruthy()
+    expect((container as HTMLDivElement | null)?.querySelector(`[data-testid="answer-jsonld-${answer.slug}"]`)).toBeTruthy()
+    expect((container as HTMLDivElement | null)?.querySelector("article.editorial-article--answer")).toBeTruthy()
+    expect((container as HTMLDivElement | null)?.querySelector(".editorial-article--answer .editorial-hero")).toBeNull()
+    expect((container as HTMLDivElement | null)?.querySelectorAll(".editorial-related-grid--text img")).toHaveLength(0)
 
     const blogMetadata = await generateBlogMetadata({ params: Promise.resolve({ slug: article.slug }) })
     const demoMetadata = await generateDemoMetadata({ params: Promise.resolve({ slug: demo.slug }) })
     const answerMetadata = await generateAnswerMetadata({ params: Promise.resolve({ slug: answer.slug }) })
 
     expect(blogMetadata.title).toBe(article.title)
+    expect(blogMetadata.alternates).toMatchObject({ canonical: `/blog/${article.slug}` })
+    expect(blogMetadata.openGraph).toMatchObject({
+      type: "article",
+      publishedTime: article.publishedAt,
+      modifiedTime: article.updatedAt,
+      images: [expect.objectContaining({ url: article.hero.src })],
+    })
     expect(demoMetadata.title).toBe(demo.title)
-    expect(answerMetadata.title).toBe(answer.question)
+    expect(answerMetadata.title).toBe(answer.title)
+    expect(answerMetadata.alternates).toMatchObject({ canonical: `/answers/${answer.slug}` })
+    expect(answerMetadata.openGraph).toMatchObject({
+      type: "article",
+      publishedTime: answer.publishedAt,
+      modifiedTime: answer.updatedAt,
+      images: [expect.objectContaining({ url: `/answers/${answer.slug}/opengraph-image` })],
+    })
   })
 
   it("returns empty metadata and raises notFound for unknown slugs", async () => {

@@ -4,7 +4,7 @@ from typing import Any
 from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import load_only, selectinload
 
 from app.models.character import Character, CharacterState, CharacterVoiceProfile
 from app.models.intelligence import CharacterRelationship
@@ -18,9 +18,34 @@ from app.utils.characters.presentation import (
     append_unique_summary,
     relationship_summary_for_character,
 )
-from app.utils.characters.serialization import serialize_book_character
-from app.utils.sparse_utils import filter_character_fields, include_requested
+from app.utils.characters.serialization import (
+    serialize_book_character,
+    serialize_character_navigation,
+)
+from app.utils.sparse_utils import (
+    fields_requested,
+    filter_character_fields,
+    include_requested,
+    parse_csv_param,
+)
 from app.utils.tag_utils import ENTITY_TYPE_CHARACTER, list_custom_tags_for_entity_ids
+
+CHARACTER_NAVIGATION_FIELDS = {
+    "id",
+    "book_id",
+    "name",
+    "aliases",
+    "role",
+    "first_chapter",
+    "last_seen_chapter",
+    "mention_count",
+    "status",
+    "visibility_state",
+    "approval_state",
+    "approval_source",
+    "approval_reason_codes",
+    "is_manual",
+}
 
 
 async def list_book_characters_for_viewer(
@@ -37,12 +62,40 @@ async def list_book_characters_for_viewer(
     if collaborator is None:
         require_author_access(current_user)
 
-    result = await db.execute(
-        select(Character)
-        .where(Character.book_id == book_id)
-        .options(selectinload(Character.voice_profile), selectinload(Character.alias_records))
-        .order_by(Character.first_chapter, Character.name)
-    )
+    requested_fields = parse_csv_param(fields)
+    navigation_only = bool(requested_fields) and requested_fields <= CHARACTER_NAVIGATION_FIELDS
+    character_query = select(Character).where(Character.book_id == book_id)
+    if navigation_only:
+        projected_columns = [
+            Character.id,
+            Character.book_id,
+            Character.name,
+            Character.role,
+            Character.first_chapter,
+            Character.last_seen_chapter,
+            Character.mention_count,
+            Character.analysis_metadata,
+            Character.visibility_state,
+            Character.approval_state,
+            Character.approval_source,
+            Character.approval_reason_codes,
+            Character.merged_into_character_id,
+            Character.is_manual,
+        ]
+        if "aliases" in requested_fields:
+            projected_columns.append(Character.aliases)
+        if "status" in requested_fields:
+            projected_columns.extend((Character.arc_summary, Character.growth_events))
+        character_query = character_query.options(load_only(*projected_columns))
+    else:
+        eager_options = []
+        if fields_requested(fields, "alias_records"):
+            eager_options.append(selectinload(Character.alias_records))
+        if fields_requested(fields, "arc_tracker") and include_requested(include, "arc_tracker"):
+            eager_options.append(selectinload(Character.voice_profile))
+        if eager_options:
+            character_query = character_query.options(*eager_options)
+    result = await db.execute(character_query.order_by(Character.first_chapter, Character.name))
     all_characters = list(result.scalars().all())
     characters = (
         [char for char in all_characters if is_cast_visible_character(char)]
@@ -52,9 +105,20 @@ async def list_book_characters_for_viewer(
     char_by_id = {char.id: char for char in characters}
     character_ids = list(char_by_id.keys())
 
-    skip_arc_tracker = not include_requested(include, "arc_tracker")
-    skip_analysis_metadata = not include_requested(include, "analysis_metadata")
-    skip_tags = not include_requested(include, "tags")
+    skip_arc_tracker = not (
+        include_requested(include, "arc_tracker") and fields_requested(fields, "arc_tracker")
+    )
+    skip_analysis_metadata = not (
+        include_requested(include, "analysis_metadata")
+        and fields_requested(fields, "analysis_metadata")
+    )
+    skip_tags = not (include_requested(include, "tags") and fields_requested(fields, "tags"))
+    needs_relationships = fields_requested(
+        fields,
+        "description",
+        "relationship_summaries",
+        "arc_tracker",
+    )
 
     rel_summaries: dict[str, list[str]] = {}
     rel_keys: dict[str, set[str]] = {}
@@ -68,7 +132,7 @@ async def list_book_characters_for_viewer(
     }
     tags_by_character: dict[uuid.UUID, list[str]] = {}
 
-    if not skip_arc_tracker or not rel_summaries:
+    if needs_relationships:
         rel_result = await db.execute(
             select(CharacterRelationship).where(CharacterRelationship.book_id == book_id)
         )
@@ -117,7 +181,7 @@ async def list_book_characters_for_viewer(
             for state in state_rows:
                 states_by_character.setdefault(state.character_id, []).append(state)
 
-            for character in all_characters:
+            for character in characters:
                 profile = getattr(character, "voice_profile", None)
                 if profile is not None:
                     voice_profiles_by_character[character.id] = profile
@@ -135,6 +199,12 @@ async def list_book_characters_for_viewer(
             entity_ids=character_ids,
             book_id=book.id,
         )
+
+    if navigation_only and requested_fields is not None:
+        return [
+            serialize_character_navigation(char, requested_fields=requested_fields)
+            for char in characters
+        ]
 
     result_list = [
         serialize_book_character(

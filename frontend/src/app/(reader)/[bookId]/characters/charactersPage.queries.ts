@@ -18,6 +18,8 @@ import { formatChapterAppearanceText } from "./charactersPage.helpers"
 
 type WorkspaceMode = "profile" | "review" | "duplicates" | "repair"
 
+const EMPTY_CHARACTERS: Character[] = []
+
 type UseCharacterPageQueriesArgs = {
   book: Book | null
   bookId: string
@@ -41,7 +43,7 @@ export function useCharacterPageQueries({
   reviewDataEnabled,
   workspaceMode,
 }: UseCharacterPageQueriesArgs) {
-  const { data: bookData = null, isLoading: bookLoading } = useBookDetail(bookId)
+  const { data: bookData = null, isLoading: bookLoading, error: bookError, refetch: refetchBook, isFetching: bookFetching } = useBookDetail(bookId)
   const { data: progressData = null } = useQuery<ReadingProgress | null>({
     queryKey: asQueryKey(readerCacheKey(bookId, "progress")),
     queryFn: () => readerApi.getProgress(bookId).catch(() => null),
@@ -51,9 +53,10 @@ export function useCharacterPageQueries({
     queryFn: () => readerApi.getChapterList(bookId).catch(() => null),
   })
   const {
-    data: charactersData = [],
+    data: charactersData = EMPTY_CHARACTERS,
     refetch: refetchCharacters,
     isLoading: charactersLoading,
+    error: charactersError, isFetching: charactersFetching,
   } = useQuery<Character[]>({
     queryKey: asQueryKey(bookCacheKey(bookId, "characters")),
     queryFn: () => booksApi.getCharacters(bookId),
@@ -85,13 +88,14 @@ export function useCharacterPageQueries({
   const {
     data: reviewData = emptyReview,
     refetch: refetchCharacterReview,
+    error: reviewError, isFetching: reviewFetching,
   } = useQuery<CharacterReviewResponse>({
     queryKey: asQueryKey(bookCacheKey(bookId, "character-review")),
     queryFn: () => booksApi.getCharacterReview(bookId, {
       includeQuarantined: true,
       includePlaces: true,
       includeRejected: false,
-    }).catch(() => emptyReview),
+    }),
     enabled: reviewDataEnabled,
     staleTime: 60_000,
   })
@@ -108,9 +112,10 @@ export function useCharacterPageQueries({
   const {
     data: identityDiagnostics = emptyIdentityDiagnostics,
     refetch: refetchIdentityDiagnostics,
+    error: identityError, isFetching: identityFetching,
   } = useQuery<CharacterIdentityDiagnostics>({
     queryKey: asQueryKey(bookCacheKey(bookId, "character-identity-diagnostics")),
-    queryFn: () => booksApi.getCharacterIdentityDiagnostics(bookId).catch(() => emptyIdentityDiagnostics),
+    queryFn: () => booksApi.getCharacterIdentityDiagnostics(bookId),
     enabled: isAuthorMode && workspaceMode === "repair",
     staleTime: 60_000,
   })
@@ -149,12 +154,13 @@ export function useCharacterPageQueries({
     data: repairPreview = emptyRepairPreview,
     refetch: refetchRepairPreview,
     isFetching: repairPreviewFetching,
+    error: repairError,
   } = useQuery<CharacterRepairPreview>({
     queryKey: asQueryKey(bookCacheKey(bookId, `character-review:reprocess:${reprocessAllowMerge}:${reprocessAllowDemote}`)),
     queryFn: () => booksApi.previewCharacterReprocess(bookId, {
       allowMergeSafePairs: reprocessAllowMerge,
       allowDemoteObviousNoise: reprocessAllowDemote,
-    }).catch(() => emptyRepairPreview),
+    }),
     enabled: isAuthorMode && workspaceMode === "repair",
   })
 
@@ -168,17 +174,30 @@ export function useCharacterPageQueries({
   const {
     data: relationshipGraphData = null,
     refetch: refetchRelationshipGraph,
+    error: graphError, isFetching: graphFetching,
   } = useQuery<RelationshipGraphData | null>({
     queryKey: relationshipGraphQueryKey,
     queryFn: () => readerApi.getRelationships(bookId, relationshipChapter, {
       includeInactive: isAuthorMode,
       include: "nodes,edges,hidden_nodes",
-    }).catch(() => null),
+    }),
     enabled: Boolean(book && relationshipsEnabled),
     staleTime: 60_000,
   })
 
+  const queryIssues = [
+    { label: "Book details", error: bookError, retry: refetchBook, busy: bookFetching },
+    { label: "Character roster", error: charactersError, retry: refetchCharacters, busy: charactersFetching },
+    { label: "Review queue", error: reviewError, retry: refetchCharacterReview, busy: reviewFetching },
+    { label: "Identity history", error: identityError, retry: refetchIdentityDiagnostics, busy: identityFetching },
+    { label: "Repair preview", error: repairError, retry: refetchRepairPreview, busy: repairPreviewFetching },
+    { label: "Relationships", error: graphError, retry: refetchRelationshipGraph, busy: graphFetching },
+  ].filter((issue) => issue.error)
+
   return {
+    queryIssues,
+    error: (!bookData && bookError) || (!charactersData.length && charactersError) ? "Character workspace unavailable" : null,
+    repairUnavailable: Boolean(repairError || identityError || repairPreviewFetching || identityFetching),
     bookData,
     charactersData,
     charactersLoading,

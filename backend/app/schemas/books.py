@@ -116,11 +116,52 @@ class BookOut(BaseModel):
     collaboration_permissions: CollaborationPermissions | None = None
 
 
+class BookPageOut(BaseModel):
+    items: list[BookOut] = Field(default_factory=list)
+    next_cursor: str | None = None
+
+
+class BookSelectorOut(BaseModel):
+    """Small, access-aware project record for navigation and pickers."""
+
+    id: uuid.UUID
+    title: str
+    author: str | None = None
+    genre: str | None = None
+    cover_url: str | None = None
+    mode: str
+    status: str
+    work_type: str
+    total_chapters: int | None = None
+    hidden_at: datetime | None = None
+    archived_at: datetime | None = None
+    is_public: bool = False
+    source_kind: str | None = None
+    public_share_status: str | None = None
+    public_description: str | None = None
+    primary_series_id: uuid.UUID | None = None
+    series_name: str | None = None
+    series_order: int | None = None
+    workspace_shell: WorkspaceShellLiteral = "reader"
+    access_class: BookAccessClassLiteral = "owner"
+    can_switch_workspace_mode: bool = True
+    collaboration_role: str | None = None
+    collaboration_permissions: CollaborationPermissions | None = None
+
+
+class BookWorldStatsOut(BaseModel):
+    active_documents: int = 0
+    corpus_words: int = 0
+    extracted_elements: int = 0
+    total_items: int = 0
+
+
 class BookOverviewOut(BaseModel):
     book: BookOut
     progress: ReadingProgressOut | None = None
     chapter_list: ChapterListResponseOut | None = None
     summary_collection: SummaryCollectionResponseOut | None = None
+    world_stats: BookWorldStatsOut | None = None
 
 
 class VisibilitySummaryItemOut(BaseModel):
@@ -458,6 +499,17 @@ class ChapterReportCharacter(BaseModel):
     arc_summary: str | None = None
 
 
+class ChapterEditorialConcern(BaseModel):
+    issue: str
+    evidence: str
+    suggestion: str = ""
+
+
+class ChapterRevisionQuestion(BaseModel):
+    question: str
+    evidence: str
+
+
 class ChapterConsistencyReport(BaseModel):
     chapter_number: int
     chapter_title: str | None = None
@@ -467,12 +519,15 @@ class ChapterConsistencyReport(BaseModel):
     plot_threads_opened: list[str]
     plot_threads_resolved: list[str]
     continuity_flags: list[str]
+    editorial_concerns: list[ChapterEditorialConcern] | None = None
+    revision_question: ChapterRevisionQuestion | None = None
 
 
 class StoryHealthMetricOut(BaseModel):
     label: str
     score: int
     detail: str
+    available: bool = True
 
 
 class StoryHealthOut(BaseModel):
@@ -480,6 +535,7 @@ class StoryHealthOut(BaseModel):
     status: str
     summary: str
     metrics: list[StoryHealthMetricOut]
+    available: bool = True
 
 
 class ManuscriptImportResult(BaseModel):
@@ -494,6 +550,62 @@ class ManuscriptImportResult(BaseModel):
     mode: str
     source_kind: str
     chapter_reports: list[ChapterConsistencyReport] = Field(default_factory=list)
+
+
+class ManuscriptImportJobOut(BaseModel):
+    id: uuid.UUID
+    book_id: uuid.UUID
+    status: Literal[
+        "queued",
+        "running",
+        "completed",
+        "failed",
+        "cancel_requested",
+        "cancelled",
+    ]
+    progress_completed: int = 0
+    progress_total: int = 0
+    cancel_requested: bool = False
+    result: ManuscriptImportResult | None = None
+    error: str | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class ManuscriptExportRequest(BaseModel):
+    export_kind: Literal["manuscript", "novel"] = "manuscript"
+    format: Literal["pdf", "docx", "epub", "vault"] = "docx"
+    preset: str = Field(default="standard_manuscript", max_length=64)
+    include_scene_metadata: bool = True
+    include_toc: bool = False
+    font_family: Literal["serif", "sans", "mono", "italian-old-style", "eb-garamond"] = "serif"
+    include_images: bool = False
+    image_placement: Literal["end", "inline", "plates"] = "end"
+    include_image_captions: bool = False
+    preview_chapters: int | None = Field(default=None, ge=1, le=10)
+
+
+class ManuscriptExportJobOut(BaseModel):
+    id: uuid.UUID
+    book_id: uuid.UUID
+    status: Literal["queued", "running", "completed", "failed", "expired"]
+    export_kind: Literal["manuscript", "novel"]
+    format: Literal["pdf", "docx", "epub", "vault"]
+    progress_completed: int = 0
+    progress_total: int = 0
+    filename: str | None = None
+    media_type: str | None = None
+    size_bytes: int | None = None
+    download_url: str | None = None
+    error: str | None = None
+    expires_at: datetime | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class ManuscriptExportPreparationOut(BaseModel):
+    delivery: Literal["synchronous", "job"]
+    job: ManuscriptExportJobOut | None = None
 
 
 class EmptyProjectBody(BaseModel):
@@ -628,6 +740,24 @@ class ChapterVersionOut(BaseModel):
 class ChapterVersionDetailOut(ChapterVersionOut):
     text: str
     html: str | None = None
+
+
+class ChapterContentSaveBody(BaseModel):
+    title: str | None = Field(default=None, max_length=300)
+    text: str = Field(max_length=5_000_000)
+    sanitized_html: str | None = Field(default=None, max_length=7_500_000)
+    expected_content_version: int = Field(ge=0)
+    client_mutation_id: str = Field(min_length=8, max_length=100, pattern=r"^[A-Za-z0-9_.:-]+$")
+
+
+class ChapterContentSaveOut(BaseModel):
+    status: Literal["created", "updated", "unchanged"]
+    book_id: str
+    chapter_number: int
+    content_version: int
+    client_mutation_id: str
+    saved_at: datetime
+    story_memory_status: Literal["queued", "not_required"] = "queued"
 
 
 class ChapterVersionRestoreStatusOut(BaseModel):
@@ -810,6 +940,17 @@ class ActivationStateOut(BaseModel):
     completed_finding_id: str | None = None
 
 
+class FirstImpressionStateOut(BaseModel):
+    status: Literal["not_started", "queued", "running", "complete", "failed"] = "not_started"
+    job_id: str | None = None
+    report_id: str | None = None
+    request_hash: str | None = None
+    source_fingerprint: str | None = None
+    started_at: str | None = None
+    completed_at: str | None = None
+    error_code: str | None = None
+
+
 class ProcessingPipelineStageOut(BaseModel):
     status: str | None = None
     completed_chapters: int | None = None
@@ -846,10 +987,15 @@ class BookProcessingOut(BaseModel):
     retry_available: bool = False
     processing_run_id: str | None = None
     pause_reason: str | None = None
+    auto_resume: bool = False
     resume_available: bool = False
     resume_blockers: list[dict[str, Any]] = Field(default_factory=list)
     next_chapter_number: int | None = None
     next_resume_at: datetime | None = None
+    frozen: bool = False
+    freeze_reason: str | None = None
+    freeze_message: str | None = None
+    frozen_at: datetime | None = None
 
 
 class WriterWorkspaceOut(BaseModel):
@@ -864,14 +1010,17 @@ class WriterWorkspaceOut(BaseModel):
     novel_epub_metadata: NovelEpubMetadataOut = Field(default_factory=NovelEpubMetadataOut)
     revision_board: RevisionBoardOut
     activation: ActivationStateOut = Field(default_factory=ActivationStateOut)
+    first_impression: FirstImpressionStateOut = Field(default_factory=FirstImpressionStateOut)
     editor_preferences: EditorPreferencesOut = Field(default_factory=EditorPreferencesOut)
     reading_themes: ReadingThemesOut = Field(default_factory=ReadingThemesOut)
     typewriter_mode: TypewriterModeOut = Field(default_factory=TypewriterModeOut)
     manuscript_layout: ManuscriptLayoutOut = Field(default_factory=ManuscriptLayoutOut)
     structure_tree: list[WorkspaceStructureNodeOut] = Field(default_factory=list)
+    revision_rounds: list[dict[str, Any]] = Field(default_factory=list)
     reprocess: ReprocessMetadataOut = Field(default_factory=ReprocessMetadataOut)
     processing: BookProcessingOut | None = None
     index_format: str = "arabic"
+    source_fingerprint: str | None = None
 
 
 class WordCountGoalsBody(BaseModel):
@@ -1160,6 +1309,7 @@ class RevisionIntelligenceOut(BaseModel):
     scene_advice: list[RevisionActionItemOut] = Field(default_factory=list)
     confusion_map: list[RevisionActionItemOut] = Field(default_factory=list)
     voice_alerts: list[RevisionActionItemOut] = Field(default_factory=list)
+    external_signals: list[RevisionActionItemOut] = Field(default_factory=list)
     priority_findings: list[RevisionActionItemOut] = Field(default_factory=list)
     activation: RevisionActivationOut = Field(default_factory=RevisionActivationOut)
     analysis_complete: bool = False
@@ -1175,6 +1325,74 @@ class RevisionIntelligenceOut(BaseModel):
     coverage: dict[str, Any] = Field(default_factory=dict)
     stale_finding_count: int = 0
     analysis_limitations: list[str] = Field(default_factory=list)
+
+
+class RevisionRoundCreateBody(BaseModel):
+    label: str = Field(..., min_length=1, max_length=120)
+    note: str | None = Field(default=None, max_length=1000)
+
+
+class RevisionRoundChapterOut(BaseModel):
+    number: int
+    title: str
+    version_id: str | None = None
+    content_version: int
+    word_count: int
+
+
+class RevisionRoundSummaryOut(BaseModel):
+    chapter_count: int = 0
+    word_count: int = 0
+    scene_count: int = 0
+    open_finding_count: int = 0
+    high_severity_count: int = 0
+    open_beta_feedback_count: int = 0
+
+
+class RevisionRoundOut(BaseModel):
+    id: str
+    label: str
+    note: str | None = None
+    created_at: datetime
+    chapters: list[RevisionRoundChapterOut] = Field(default_factory=list)
+    summary: RevisionRoundSummaryOut = Field(default_factory=RevisionRoundSummaryOut)
+
+
+class RevisionRoundListOut(BaseModel):
+    items: list[RevisionRoundOut] = Field(default_factory=list)
+
+
+class RevisionRoundComparisonOut(BaseModel):
+    base_round_id: str
+    target_round_id: str | None = None
+    changed_chapters: list[int] = Field(default_factory=list)
+    added_chapters: list[int] = Field(default_factory=list)
+    removed_chapters: list[int] = Field(default_factory=list)
+    chapter_delta: int = 0
+    word_count_delta: int = 0
+    scene_count_delta: int = 0
+    open_finding_delta: int = 0
+    open_beta_feedback_delta: int = 0
+
+
+class WorkflowBridgeChapterPreviewOut(BaseModel):
+    incoming_number: int
+    incoming_title: str
+    matched_chapter_number: int | None = None
+    status: Literal["new", "changed", "unchanged"]
+    incoming_word_count: int = 0
+    current_word_count: int | None = None
+
+
+class WorkflowBridgePreviewOut(BaseModel):
+    format: str
+    preview_token: str
+    incoming_chapter_count: int
+    new_count: int = 0
+    changed_count: int = 0
+    unchanged_count: int = 0
+    chapters: list[WorkflowBridgeChapterPreviewOut] = Field(default_factory=list)
+    preserved_chapter_numbers: list[int] = Field(default_factory=list)
 
 
 class ContinuityScanRequest(BaseModel):
@@ -1334,6 +1552,45 @@ class BookNoteOut(BaseModel):
     updated_at: datetime
 
 
+class BookNotePageItemOut(BaseModel):
+    """Lightweight note card returned by the paged notes endpoint."""
+
+    id: str
+    book_id: str
+    book_title: str
+    chapter_number: int | None = None
+    chapter_title: str | None = None
+    title: str | None = None
+    body: str | None = None
+    tags: list[str] = Field(default_factory=list)
+    created_at: datetime
+    updated_at: datetime
+
+
+class BookNotePageOut(BaseModel):
+    items: list[BookNotePageItemOut] = Field(default_factory=list)
+    next_cursor: str | None = None
+    has_more: bool = False
+
+
+class SavedQuoteOut(BaseModel):
+    id: str
+    book_id: str
+    book_title: str
+    chapter_number: int | None = None
+    chapter_title: str | None = None
+    character_name: str | None = None
+    quote_text: str
+    note: str | None = None
+    created_at: datetime
+
+
+class SavedQuotePageOut(BaseModel):
+    items: list[SavedQuoteOut] = Field(default_factory=list)
+    next_cursor: str | None = None
+    has_more: bool = False
+
+
 class EntityTagUpdateBody(BaseModel):
     entity_type: TagTargetLiteral
     entity_id: str | None = None
@@ -1415,6 +1672,24 @@ class VaultNoteOut(BaseModel):
     content: str
     created_at: datetime
     updated_at: datetime
+
+
+class VaultNotePageItemOut(BaseModel):
+    """Vault metadata, with content supplied only when requested."""
+
+    id: str
+    book_id: str
+    path: str
+    source: str
+    content: str | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class VaultNotePageOut(BaseModel):
+    items: list[VaultNotePageItemOut] = Field(default_factory=list)
+    next_cursor: str | None = None
+    has_more: bool = False
 
 
 class VaultNoteSaveOut(BaseModel):
@@ -1523,6 +1798,34 @@ class NovelSceneOut(BaseModel):
     updated_at: datetime
 
 
+class NovelScenePageItemOut(BaseModel):
+    """Scene metadata for fast workspace browsing; bodies are detail-only."""
+
+    id: str
+    book_id: str
+    chapter_id: str | None = None
+    chapter_number: int | None = None
+    title: str
+    description: str | None = None
+    body: str | None = None
+    html_body: str | None = None
+    metadata: dict[str, Any] | SceneMetadataOut = Field(default_factory=dict)
+    path: str
+    status: str
+    sort_order: int
+    source: str
+    origin_chapter_number: int | None = None
+    tags: list[str] = Field(default_factory=list)
+    created_at: datetime
+    updated_at: datetime
+
+
+class NovelScenePageOut(BaseModel):
+    items: list[NovelScenePageItemOut] = Field(default_factory=list)
+    next_cursor: str | None = None
+    has_more: bool = False
+
+
 class NovelSceneInsertBody(BaseModel):
     chapter_number: int
     position: Literal["start", "end"] = "end"
@@ -1541,13 +1844,33 @@ class WorkspaceChapterNodeOut(BaseModel):
     tags: list[str] = Field(default_factory=list)
 
 
+class WorkspaceSceneOut(BaseModel):
+    id: str
+    book_id: str
+    chapter_id: str | None = None
+    chapter_number: int | None = None
+    title: str
+    description: str | None = None
+    body: str | None = None
+    html_body: str | None = None
+    metadata: dict[str, Any] | SceneMetadataOut = Field(default_factory=dict)
+    path: str
+    status: str
+    sort_order: int
+    source: str
+    origin_chapter_number: int | None = None
+    tags: list[str] = Field(default_factory=list)
+    created_at: datetime
+    updated_at: datetime
+
+
 class WorkspaceSceneGroupOut(BaseModel):
     id: str
     label: str
     chapter_number: int | None = None
     structure_version: int | None = None
     collapsed_by_default: bool = False
-    scenes: list[NovelSceneOut] = Field(default_factory=list)
+    scenes: list[WorkspaceSceneOut] = Field(default_factory=list)
 
 
 class ManuscriptWorkspaceTreeOut(BaseModel):
@@ -1604,6 +1927,8 @@ class WorkspaceSearchBody(BaseModel):
     whole_word: bool = False
     regex: bool = False
     filters: WorkspaceSearchFiltersBody = Field(default_factory=WorkspaceSearchFiltersBody)
+    limit: int = Field(default=50, ge=1, le=50)
+    cursor: str | None = Field(default=None, max_length=1024)
 
 
 class WorkspaceSearchResultOut(BaseModel):
@@ -1615,6 +1940,15 @@ class WorkspaceSearchResultOut(BaseModel):
     scene_id: str | None = None
     note_path: str | None = None
     rank: float = 0
+
+
+class WorkspaceSearchPageOut(BaseModel):
+    """Additive cursor response for persisted author-workspace search."""
+
+    items: list[WorkspaceSearchResultOut] = Field(default_factory=list)
+    next_cursor: str | None = None
+    has_more: bool = False
+    index_status: Literal["ready", "building", "not_requested"] = "building"
 
 
 class WritingPeriodStatOut(BaseModel):
@@ -1675,6 +2009,10 @@ class PrivateUserStats(BaseModel):
     llm_prompt_tokens: int = 0
     llm_completion_tokens: int = 0
     llm_total_tokens: int = 0
+    ai_interactive_available: bool = True
+    ai_processing_available: bool = True
+    ai_capacity_usage_percent: int = Field(default=0, ge=0, le=100)
+    ai_capacity_resets_at: datetime | None = None
     total_chapters_tracked: int
     saved_quotes: int
 

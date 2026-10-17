@@ -5,6 +5,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest"
 const replaceMock = vi.hoisted(() => vi.fn())
 const prefetchChatsSidebarDataMock = vi.hoisted(() => vi.fn())
 const prefetchNotificationsSidebarDataMock = vi.hoisted(() => vi.fn())
+let currentPathname = "/library"
 
 const authState = {
   hydrated: true,
@@ -26,7 +27,7 @@ vi.mock("next/link", () => ({
 }))
 
 vi.mock("next/navigation", () => ({
-  usePathname: () => "/library",
+  usePathname: () => currentPathname,
   useRouter: () => ({ replace: replaceMock }),
 }))
 
@@ -45,6 +46,7 @@ vi.mock("@/components/layout/NotificationBell", () => ({
 vi.mock("@/lib/api/books", () => ({
   booksApi: {
     list: vi.fn(),
+    listSelector: vi.fn(),
   },
 }))
 
@@ -56,7 +58,7 @@ vi.mock("@/lib/query/queryClient", () => ({
 
 vi.mock("@/lib/query/cacheKeys", () => ({
   asQueryKey: (key: string) => key,
-  booksListCacheKey: () => "books-list",
+  booksSelectorCacheKey: () => "books-selector",
 }))
 
 vi.mock("@/lib/query/sidebarPrefetch", () => ({
@@ -70,6 +72,25 @@ vi.mock("@/lib/stores/authStore", () => ({
 
 vi.mock("@/lib/stores/preferencesStore", () => ({
   usePreferencesStore: () => ({ theme: "dark", toggleTheme: vi.fn() }),
+}))
+
+vi.mock("@/lib/stores/uiPreferencesStore", () => ({
+  useUiPreferencesStore: (selector: (state: {
+    preferences: {
+      complexity_mode: "focused"
+      dashboard_visibility: Record<string, unknown>
+      dashboard_order: string[]
+      public_tool_visibility: Record<string, unknown>
+    }
+  }) => unknown) =>
+    selector({
+      preferences: {
+        complexity_mode: "focused",
+        dashboard_visibility: {},
+        dashboard_order: [],
+        public_tool_visibility: {},
+      },
+    }),
 }))
 
 import { DashboardSidebar } from "./DashboardSidebar"
@@ -92,6 +113,7 @@ describe("DashboardSidebar", () => {
     replaceMock.mockReset()
     prefetchChatsSidebarDataMock.mockReset()
     prefetchNotificationsSidebarDataMock.mockReset()
+    currentPathname = "/library"
     container = null
     root = null
   })
@@ -99,7 +121,9 @@ describe("DashboardSidebar", () => {
   it("renders dashboard navigation with one public uploads link and an active library item", () => {
     const view = renderSidebar()
     const uploadsLinks = Array.from(view.querySelectorAll("a")).filter((element) => element.textContent?.includes("Public Uploads"))
-    const libraryLink = Array.from(view.querySelectorAll("a")).find((element) => element.textContent?.includes("Library"))
+    const libraryLink = Array.from(view.querySelectorAll('a[href="/library"]')).find((element) =>
+      element.textContent?.includes("Home"),
+    )
 
     expect(uploadsLinks).toHaveLength(1)
     expect(uploadsLinks[0].getAttribute("href")).toBe("/public/uploads")
@@ -107,6 +131,16 @@ describe("DashboardSidebar", () => {
     expect(Boolean(libraryLink && uploadsLinks[0] && libraryLink.compareDocumentPosition(uploadsLinks[0]) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true)
     expect(libraryLink?.className).toContain("bg-stone-200")
     expect(view.textContent).toContain("Page content")
+    expect(prefetchChatsSidebarDataMock).not.toHaveBeenCalled()
+    expect(prefetchNotificationsSidebarDataMock).not.toHaveBeenCalled()
+  })
+
+  it("keeps standard dashboard tools visible when the workspace mode is focused", () => {
+    const view = renderSidebar()
+
+    for (const label of ["Notes", "Quotes", "Series", "Beta Reads", "Public Uploads", "Stats", "Pricing"]) {
+      expect(view.textContent).toContain(label)
+    }
   })
 
   it("links the bottom profile card to the public writer profile", () => {
@@ -117,6 +151,18 @@ describe("DashboardSidebar", () => {
     expect(view.textContent).toContain("@writer")
     expect(view.textContent).toContain("Author")
     expect(Array.from(view.querySelectorAll("button")).some((button) => button.getAttribute("aria-label") === "Open profile menu")).toBe(false)
+  })
+
+  it("uses a focused billing shell without workspace navigation on upgrade", () => {
+    currentPathname = "/upgrade"
+    const view = renderSidebar()
+
+    expect(view.querySelector('nav')).toBeNull()
+    expect(view.querySelector('[data-testid="chat-launcher"]')).toBeNull()
+    expect(view.querySelector('[data-testid="notification-bell"]')).toBeNull()
+    expect(view.querySelector('a[aria-label="Return to LoreVia workspace"]')?.getAttribute("href")).toBe("/library")
+    expect(view.textContent).toContain("Back to workspace")
+    expect(view.textContent).toContain("Page content")
   })
 })
 

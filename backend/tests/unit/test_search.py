@@ -18,7 +18,13 @@ async def test_semantic_search_spoiler_gate():
     with patch("app.engine.search.semantic.embed_text", AsyncMock(return_value=[0.1] * 1536)):
         from app.engine.search.semantic import semantic_search
 
-        results = await semantic_search(mock_db, uuid.uuid4(), "test query", max_chapter=5)
+        results = await semantic_search(
+            mock_db,
+            uuid.uuid4(),
+            "test query",
+            max_chapter=5,
+            usage_user_id=uuid.uuid4(),
+        )
         assert isinstance(results, list)
 
 
@@ -77,9 +83,13 @@ async def test_semantic_search_uses_candidate_limit_and_threshold():
             limit=1,
             candidate_limit=10,
             similarity_threshold=0.55,
+            usage_user_id=uuid.uuid4(),
         )
 
     assert len(results) == 1
+    query_text = str(mock_db.execute.await_args.args[0])
+    assert "ORDER BY bc.embedding <=> CAST(:emb AS vector) ASC" in query_text
+    assert "ORDER BY relevance DESC" not in query_text
     params = mock_db.execute.await_args.args[1]
     assert params["lim"] == 10
     assert params["thr"] == 0.55
@@ -101,6 +111,12 @@ async def test_semantic_search_returns_empty_results_when_pgvector_extension_is_
     )
 
     with patch("app.engine.search.semantic.embed_text", AsyncMock(return_value=[0.1] * 1536)):
-        results = await semantic_search(mock_db, uuid.uuid4(), "test query", max_chapter=5)
+        results = await semantic_search(
+            mock_db,
+            uuid.uuid4(),
+            "test query",
+            max_chapter=5,
+            usage_user_id=uuid.uuid4(),
+        )
 
     assert results == []

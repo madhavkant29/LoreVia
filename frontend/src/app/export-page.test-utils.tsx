@@ -16,6 +16,9 @@ const booksApiMock = vi.hoisted(() => ({
   listCharacterBibleVaultNotes: vi.fn(),
   previewCharacterBibleVault: vi.fn(),
   saveNovelSettings: vi.fn(),
+  previewWorkflowBridge: vi.fn(),
+  applyWorkflowBridge: vi.fn(),
+  exportScrivenerProject: vi.fn(),
 }))
 const worldBuildingApiMock = vi.hoisted(() => ({
   uploadDocuments: vi.fn(),
@@ -80,7 +83,7 @@ vi.mock("@/lib/stores/authStore", () => ({
   useAuthStore: (selector: (state: { user: { tier: string } }) => unknown) => selector({ user: { tier: "architect" } }),
 }))
 vi.mock("@/lib/stores/preferencesStore", () => ({
-  usePreferencesStore: () => ({ theme: "dark" }),
+  usePreferencesStore: (selector: (state: { theme: string }) => unknown) => selector({ theme: "dark" }),
 }))
 
 import ExportStudioPageComponent from "@/app/(reader)/[bookId]/export/page"
@@ -104,6 +107,7 @@ export const book = {
   cover_url: "https://example.test/cover.jpg",
   work_type: "novel",
   total_chapters: 12,
+  access_class: "owner",
 }
 
 export function fakeBlob(text: string) {

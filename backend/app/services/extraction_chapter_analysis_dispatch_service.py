@@ -1,6 +1,7 @@
 from sqlalchemy import select
 
 from app.models.operations import BookProcessingRun
+from app.services.book_freeze_service import is_book_frozen
 from app.services.task_execution_service import ensure_task_execution
 
 
@@ -13,6 +14,8 @@ async def dispatch_chapter_analysis_after_extraction(
     rebuild_run_id: str | None,
     manual_reprocess: bool,
 ) -> None:
+    if is_book_frozen(book):
+        return
     active_run = (
         (
             await db.execute(

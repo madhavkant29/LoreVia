@@ -1,7 +1,8 @@
 import { execFileSync } from "node:child_process"
 
 function findListeningPids(port) {
-  const output = execFileSync("netstat", ["-ano", "-p", "tcp"], {
+  // Next binds localhost on IPv6 on Windows; `-p tcp` omits that listener.
+  const output = execFileSync("netstat", ["-ano"], {
     encoding: "utf8",
     stdio: ["ignore", "pipe", "ignore"],
   })
@@ -24,25 +25,8 @@ function findListeningPids(port) {
 }
 
 class WindowsExitReporter {
-  failed = false
-  finished = 0
-  total = 0
-
-  onBegin(_, suite) {
-    this.total = suite.allTests().length
-  }
-
-  onTestEnd(_, result) {
-    this.finished += 1
-    if (result.status !== "passed" && result.status !== "skipped") {
-      this.failed = true
-    }
-
-    if (this.finished < this.total) {
-      return
-    }
-
-    const exitCode = this.failed ? 1 : 0
+  onEnd(result) {
+    const exitCode = result.status === "passed" ? 0 : 1
     const port = process.env.E2E_PORT ?? "3001"
 
     if (process.platform !== "win32") {
@@ -53,16 +37,16 @@ class WindowsExitReporter {
     setTimeout(() => {
       try {
         for (const pid of findListeningPids(port)) {
-          execFileSync("taskkill", ["/pid", pid, "/T", "/F"], {
-            stdio: "ignore",
-          })
+          // Stop the owned listener directly; taskkill /T requires process-tree
+          // enumeration that restricted Windows sessions may not permit.
+          process.kill(Number(pid))
         }
       } catch {
         process.exitCode = exitCode
       }
 
       process.exit(exitCode)
-    }, 5_000).unref()
+    }, 5_000)
   }
 }
 

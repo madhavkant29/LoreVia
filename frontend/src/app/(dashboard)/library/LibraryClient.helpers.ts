@@ -103,29 +103,14 @@ export function formatRelativeTime(dateString?: string | null) {
   return `Updated ${months}mo ago`
 }
 
-export function estimateWordCount(book: Book) {
-  if (typeof book.total_tokens === "number" && book.total_tokens > 0) {
-    return Math.round(book.total_tokens * 0.75)
-  }
-
-  const unitCount = Math.max(book.total_chapters ?? 0, book.chapters_read_count ?? 0, 1)
-  return unitCount * (book.work_type === "screenplay" ? 900 : 3200)
-}
-
-export function estimateTargetWordCount(book: Book, currentWords: number) {
-  if (book.work_type === "screenplay") {
-    return Math.max(18000, Math.ceil(currentWords / 3000) * 3000)
-  }
-
-  return Math.max(100000, Math.ceil(currentWords / 10000) * 10000)
+export function getBookWordCount(book: Book) {
+  return typeof book.total_words === "number" && book.total_words > 0
+    ? Math.round(book.total_words)
+    : 0
 }
 
 export function getActiveUnit(book: Book) {
-  if (book.processing?.last_chapter_number) return book.processing.last_chapter_number
-
-  const totalUnits = Math.max(book.total_chapters ?? 0, 1)
-  if (!book.progress_pct) return 1
-  return Math.min(totalUnits, Math.max(1, Math.round((book.progress_pct / 100) * totalUnits)))
+  return book.processing?.last_chapter_number ?? null
 }
 
 export function getProgressLine(book: Book) {
@@ -133,12 +118,12 @@ export function getProgressLine(book: Book) {
   const unit = getActiveUnit(book)
   const title = book.processing?.last_chapter_title?.trim()
 
-  if (title) return `${prefix} ${unit} - ${title}`
+  if (title && unit !== null) return `${prefix} ${unit} - ${title}`
 
-  if (book.status === "processing") return `${prefix} ${unit} - Processing`
-  if (book.mode === "author") return `${prefix} ${unit} - Draft in motion`
-  if (book.progress_pct && book.progress_pct > 0) return `${prefix} ${unit} - Continue reading`
-  return `${prefix} 1 - Starting point`
+  if (book.status === "processing") return unit !== null ? `${prefix} ${unit} - Processing` : "Processing manuscript"
+  if (book.progress_pct && book.progress_pct > 0) return `${Math.round(book.progress_pct)}% complete`
+  if (book.mode === "author") return "Draft ready"
+  return "Not started"
 }
 
 export function getGenreLabel(book: Book) {
@@ -195,21 +180,13 @@ export function deriveLibraryCollections({
     .sort((left, right) => compareBooks(left, right, sortBy))
 
   const explicitPinned = filteredBooks.filter((book) => pinnedIds[book.id] && !book.archived_at)
-  const fallbackPinned = [...filteredBooks]
-    .filter((book) => !book.archived_at)
-    .sort((left, right) => {
-      const leftScore = (left.mode === "author" ? 3 : 0) + (left.status === "ready" ? 2 : left.status === "processing" ? 1 : 0) + clampProgress(left.progress_pct)
-      const rightScore = (right.mode === "author" ? 3 : 0) + (right.status === "ready" ? 2 : right.status === "processing" ? 1 : 0) + clampProgress(right.progress_pct)
-      return rightScore - leftScore
-    })
-  const pinnedBooks = explicitPinned.length > 0 ? explicitPinned.slice(0, 3) : fallbackPinned.slice(0, 3)
+  const pinnedBooks = explicitPinned
   const pinnedBookIds = new Set(pinnedBooks.map((book) => book.id))
   const allProjectBooks = filteredBooks.filter((book) => !pinnedBookIds.has(book.id))
 
   return {
     filteredBooks,
     explicitPinned,
-    fallbackPinned,
     pinnedBooks,
     pinnedBookIds,
     allProjectBooks,

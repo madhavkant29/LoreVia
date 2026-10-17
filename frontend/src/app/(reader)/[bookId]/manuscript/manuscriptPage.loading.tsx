@@ -15,14 +15,14 @@ export function ManuscriptEditorSkeleton({ isDark }: { isDark: boolean }) {
   const canvasClass = isDark ? "border-white/10 bg-[#0b1114]" : "border-stone-200 bg-[#faf8f4]"
 
   return (
-    <div className={`min-h-screen ${shellClass}`}>
+    <div role="status" aria-label="Loading manuscript" aria-busy="true" className={`min-h-screen overflow-hidden ${shellClass}`}>
       <header className={`sticky top-0 z-40 border-b ${panelClass}`}>
         <div className="flex min-h-[4.25rem] items-center justify-between px-6">
-          <div className="flex items-center gap-3">
+          <div className="flex min-w-0 items-center gap-3">
             <Skeleton className="h-7 w-7 rounded-sm" />
             <Skeleton className="h-5 w-52" />
           </div>
-          <div className="flex items-center gap-3">
+          <div className="hidden items-center gap-3 sm:flex">
             <Skeleton className="h-4 w-24" />
             <Skeleton className="h-10 w-20 rounded-sm" />
             <Skeleton className="h-10 w-28 rounded-sm" />
@@ -36,7 +36,7 @@ export function ManuscriptEditorSkeleton({ isDark }: { isDark: boolean }) {
             <Skeleton className="h-8 w-16" />
             <Skeleton className="h-8 w-20" />
           </div>
-          <div className="flex gap-4">
+          <div className="hidden gap-4 lg:flex">
             <Skeleton className="h-10 w-44 rounded-sm" />
             <Skeleton className="h-10 w-44 rounded-sm" />
           </div>
@@ -62,7 +62,7 @@ export function ManuscriptEditorSkeleton({ isDark }: { isDark: boolean }) {
         <main className={`min-h-[calc(100vh-8.25rem)] border-r ${canvasClass}`}>
           <div className={`border-b px-7 py-6 ${isDark ? "border-white/10 bg-[#111721]" : "border-stone-200 bg-white"}`}>
             <Skeleton className="h-3 w-44" />
-            <Skeleton className="mt-4 h-11 w-96" />
+            <Skeleton className="mt-4 h-11 w-96 max-w-full" />
             <div className="mt-4 flex gap-4">
               <Skeleton className="h-4 w-24" />
               <Skeleton className="h-4 w-20" />

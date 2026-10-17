@@ -1,11 +1,11 @@
 "use client"
 
-import Image from "next/image"
 import Link from "next/link"
 import { Suspense, useEffect, useMemo, useState } from "react"
 import { useSearchParams } from "next/navigation"
 
 import { emailApi } from "@/lib/api/email"
+import { ThemeBrandImage } from "@/components/layout/ThemeBrandImage"
 import type { EmailUnsubscribeResponse } from "@/types/email"
 
 type UnsubscribeState = "missing-token" | "submitting" | "success" | "error"
@@ -80,33 +80,24 @@ function UnsubscribeInner() {
           : "This unsubscribe link may be expired or already used. You can still manage email preferences from Settings after signing in."
 
   return (
-    <main className="min-h-screen bg-[#f3f4f6] px-4 py-8 text-[#111827] sm:px-6 lg:px-8">
+    <main className="min-h-[100dvh] bg-[#f8f4ee] px-4 py-8 text-stone-950 sm:px-6 lg:px-8">
       <div className="mx-auto flex min-h-[calc(100vh-4rem)] max-w-2xl flex-col justify-center">
-        <div className="mb-8">
+        <div className="mb-8 border-b border-stone-300 pb-5">
           <Link href="/" aria-label="LoreVia home" className="inline-flex">
-            <Image src="/logoandtext.png" alt="LoreVia" width={152} height={43} priority />
+            <ThemeBrandImage variant="icon" mode="light" alt="LoreVia" className="h-9 w-9 object-contain" priority />
           </Link>
         </div>
 
-        <section className="rounded-lg border border-slate-200 bg-white/92 p-6 shadow-sm sm:p-8" aria-live="polite">
-          <p className="text-xs font-bold uppercase tracking-[0.22em] text-[#21615e]">Email preferences</p>
+        <section className="border-y border-stone-300 py-8" aria-live="polite">
+          <p className="text-sm font-semibold text-[#21615e]">Email preferences</p>
           <h1 className="mt-4 text-3xl font-semibold leading-tight text-[#111827] sm:text-4xl">{title}</h1>
           <p className="mt-4 text-sm leading-6 text-slate-600">{body}</p>
 
-          {state === "submitting" ? (
-            <div className="mt-6 h-2 overflow-hidden rounded-full bg-slate-100">
-              <div className="h-full w-1/2 rounded-full bg-[#21615e]" />
-            </div>
-          ) : null}
-
-          <div className="mt-8 flex flex-col gap-3 sm:flex-row">
-            <Link href="/settings#emails" className="app-button-primary">
-              Manage preferences
+          {state !== "submitting" ? (
+            <Link href={state === "success" ? "/" : "/settings#emails"} className="app-button-primary mt-8">
+              {state === "success" ? "Return to LoreVia" : "Manage preferences"}
             </Link>
-            <Link href="/" className="app-button-secondary">
-              Back to LoreVia
-            </Link>
-          </div>
+          ) : <p className="mt-6 text-sm text-stone-500">Please wait&hellip;</p>}
         </section>
       </div>
     </main>

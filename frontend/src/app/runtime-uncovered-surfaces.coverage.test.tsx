@@ -6,12 +6,14 @@ import { createRoot, type Root } from "react-dom/client"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 const pushMock = vi.hoisted(() => vi.fn())
+const replaceMock = vi.hoisted(() => vi.fn())
 const booksApiMock = vi.hoisted(() => ({
   get: vi.fn(),
   getChapterReports: vi.fn(),
 }))
 const readerApiMock = vi.hoisted(() => ({
   getForeshadowing: vi.fn(),
+  getChapterList: vi.fn(),
   getSummaryCollection: vi.fn(),
   getUpcomingBetaReads: vi.fn(),
   startBetaRead: vi.fn(),
@@ -41,7 +43,7 @@ vi.mock("next/link", () => ({
 
 vi.mock("next/navigation", () => ({
   useParams: () => ({ bookId: "book-1" }),
-  useRouter: () => ({ push: pushMock }),
+  useRouter: () => ({ push: pushMock, replace: replaceMock }),
 }))
 
 vi.mock("@/lib/api/books", () => ({ booksApi: booksApiMock }))
@@ -74,6 +76,7 @@ let queryClient: QueryClient | null = null
 
 beforeEach(() => {
   pushMock.mockReset()
+  replaceMock.mockReset()
   captureMock.mockReset()
   Object.values(booksApiMock).forEach((mock) => mock.mockReset())
   Object.values(readerApiMock).forEach((mock) => mock.mockReset())
@@ -85,50 +88,24 @@ afterEach(() => {
 })
 
 describe("previously uncovered runtime surfaces", () => {
-  it("renders chapter reports with populated and empty report groups", async () => {
-    booksApiMock.getChapterReports.mockResolvedValue([
-      {
-        chapter_number: 3,
-        chapter_title: "The Gate",
-        summary: "Mara opens the gate and changes her alliance.",
-        new_characters: [{ name: "Theo" }],
-        relationship_changes: ["Mara now trusts Theo"],
-        plot_threads_opened: ["The brass key"],
-        plot_threads_resolved: [],
-        continuity_flags: ["The key changed color"],
-      },
-    ])
-
+  it("redirects the legacy chapter reports route into the Findings chapter view", async () => {
     await renderElement(<ChapterReportsPage />)
     await flushAsync()
 
-    expect(container?.textContent).toContain("Chapter reports")
-    expect(container?.textContent).toContain("Mara now trusts Theo")
-    expect(container?.textContent).toContain("No threads resolved")
-    expect(container?.textContent).toContain("The key changed color")
-    expect(captureMock).toHaveBeenCalledWith("author_reports_opened", { book_id: "book-1" })
+    expect(container?.textContent).toContain("Opening chapter reports in Findings")
+    expect(replaceMock).toHaveBeenCalledWith("/book-1/analysis?view=chapters")
   })
 
-  it("renders author summaries with available and pending chapter states", async () => {
-    booksApiMock.get.mockResolvedValue({ id: "book-1", mode: "author" })
-    readerApiMock.getSummaryCollection.mockResolvedValue({
-      read_upto: 4,
-      summaries: [
-        { chapter_number: 3, chapter_title: "The Gate", available: true, content: "Mara opens the gate." },
-        { chapter_number: 4, chapter_title: null, available: false, content: null },
-      ],
-    })
-
+  it("redirects the legacy summaries route to the overview recap", async () => {
     await renderElement(<SummariesPage />)
     await flushAsync()
 
-    expect(container?.textContent).toContain("Chapter summaries")
-    expect(container?.textContent).toContain("Available")
-    expect(container?.textContent).toContain("Pending")
-    expect(container?.textContent).toContain("Summary not available yet for this processed chapter")
+    expect(container?.textContent).toContain("Opening the overview recap")
+    expect(replaceMock).toHaveBeenCalledWith("/book-1")
   })
 
   it("renders foreshadowing clues with described and sparse follow-through", async () => {
+    readerApiMock.getChapterList.mockResolvedValue({ chapters: [{ number: 1 }, { number: 2 }] })
     readerApiMock.getForeshadowing.mockResolvedValue({
       items: [
         { chapter_number: 1, chapter_title: "Ash", clue: "A brass key", foreshadows: "The locked gate." },
@@ -139,9 +116,37 @@ describe("previously uncovered runtime surfaces", () => {
     await renderElement(<ForeshadowingPage />)
     await flushAsync()
 
-    expect(container?.textContent).toContain("Foreshadowing signals")
+    expect(container?.textContent).toContain("Setup and payoff")
     expect(container?.textContent).toContain("The locked gate")
-    expect(container?.textContent).toContain("follow-through description is still sparse")
+    expect(container?.textContent).toContain("No linked payoff yet")
+  })
+
+  it("retries setup failures without showing an empty ledger", async () => {
+    readerApiMock.getForeshadowing.mockRejectedValueOnce(new Error("offline")).mockResolvedValue({ items: [] })
+    await renderElement(<ForeshadowingPage />)
+    await flushAsync()
+    expect(container?.textContent).toContain("signals could not be loaded")
+    expect(container?.textContent).not.toContain("No setup signals yet")
+    await clickButton("Retry signals")
+    await flushAsync()
+    expect(container?.textContent).toContain("No setup signals yet")
+    expect(container?.querySelector('a[href="/book-1/chapters"]')).not.toBeNull()
+  })
+
+  it("filters unlinked clues without confusing them with resolved outcomes", async () => {
+    readerApiMock.getForeshadowing.mockResolvedValue({ items: [
+      { chapter_number: 1, chapter_title: null, clue: "The key", foreshadows: "Gate" },
+      { chapter_number: 0, chapter_title: null, clue: "The bell", foreshadows: " " },
+    ] })
+    readerApiMock.getChapterList.mockResolvedValue({ chapters: [{ number: 1 }] })
+    await renderElement(<ForeshadowingPage />)
+    await flushAsync()
+    await clickButton("Unlinked")
+    expect(container?.textContent).toContain("The bell")
+    expect(container?.textContent).not.toContain("The key")
+    expect(container?.textContent).toContain("Chapter not located")
+    await clickButton("Clear filters")
+    expect(container?.textContent).toContain("The key")
   })
 
   it("starts an upcoming beta read and reports the loaded assignment count", async () => {
@@ -188,6 +193,21 @@ describe("previously uncovered runtime surfaces", () => {
       await Promise.resolve()
     })
     expect(container?.textContent).toContain("today's authoring cap")
+    await clickButton("Continue later")
+
+    await act(async () => {
+      window.dispatchEvent(
+        new CustomEvent(DAILY_CAP_EVENT, {
+          detail: {
+            action: "high_cost_authoring",
+            detail:
+              "You've reached your daily limit of 60 Story Advisor turns. It refreshes tomorrow.",
+          },
+        }),
+      )
+      await Promise.resolve()
+    })
+    expect(container?.textContent).toContain("daily limit of 60 Story Advisor turns")
     await clickButton("View pricing")
     expect(pushMock).toHaveBeenCalledWith("/upgrade")
   })

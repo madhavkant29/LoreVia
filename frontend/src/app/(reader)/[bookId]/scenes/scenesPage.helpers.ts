@@ -69,9 +69,13 @@ export function emptySceneMetadata(): SceneMetadata {
   }
 }
 
-export function metadataTextToList(value: string) {
-  return value
+export function metadataTextToList(value: string, preserveTrailingEntry = false) {
+  const values = value
     .split(",")
     .map((item) => item.trim())
-    .filter(Boolean)
+  return preserveTrailingEntry ? values : values.filter(Boolean)
+}
+
+export function normalizeSceneMetadata(metadata: SceneMetadata): SceneMetadata {
+  return { ...metadata, tags: metadataTextToList((metadata.tags ?? []).join(",")), mood: metadataTextToList((metadata.mood ?? []).join(",")) }
 }

@@ -53,10 +53,14 @@ type BuildManuscriptTopPropsParams = {
   setShowCompileDialog: ManuscriptHeaderProps["onCompileDialogOpenChange"]
   setShowEditorSettings: ManuscriptHeaderProps["onShowEditorSettingsChange"]
   setShowExportMenu: ManuscriptHeaderProps["onExportMenuOpenChange"]
+  setShowLeftRail: ManuscriptHeaderProps["onOutlineOpenChange"]
   setShowReprocessConfirm: ManuscriptHeaderProps["onShowReprocessConfirmChange"]
+  setShowRightRail: ManuscriptHeaderProps["onInspectorOpenChange"]
   setWorkspaceTab: ManuscriptHeaderProps["onWorkspaceTabChange"]
   setWriterWorkspace: Dispatch<SetStateAction<WriterWorkspace | null>>
   showExportMenu: boolean
+  showLeftRail: boolean
+  showRightRail: boolean
   tighteningSelection: boolean
   workspaceSaving: boolean
   workspaceTab: ManuscriptHeaderProps["workspaceTab"]
@@ -116,10 +120,14 @@ export function buildManuscriptTopProps({
   setShowCompileDialog,
   setShowEditorSettings,
   setShowExportMenu,
+  setShowLeftRail,
   setShowReprocessConfirm,
+  setShowRightRail,
   setWorkspaceTab,
   setWriterWorkspace,
   showExportMenu,
+  showLeftRail,
+  showRightRail,
   tighteningSelection,
   workspaceSaving,
   workspaceTab,
@@ -163,14 +171,17 @@ export function buildManuscriptTopProps({
     exporting,
     failedSaveByTarget,
     focusMode,
+    homeHref: `/${bookId}`,
     includeTableOfContentsOnExport,
     isDark,
     normalizedProcessingStatus,
+    outlineOpen: showLeftRail,
     processingRetrying,
     reprocessCta,
     reprocessing,
     saveStateByTarget,
     showExportMenu,
+    inspectorOpen: showRightRail,
     workspaceSaving,
     workspaceTab,
     onAutoReprocessChange: (enabled) => void onToggleAutoReprocess(enabled),
@@ -180,7 +191,9 @@ export function buildManuscriptTopProps({
     onExportMenuOpenChange: setShowExportMenu,
     onFocusModeChange: setFocusMode,
     onIncludeTableOfContentsChange: setIncludeTableOfContentsOnExport,
+    onInspectorOpenChange: setShowRightRail,
     onOpenProject,
+    onOutlineOpenChange: setShowLeftRail,
     onPresetChange: (nextPreset) => {
       void saveWorkspace({
         publishing: {

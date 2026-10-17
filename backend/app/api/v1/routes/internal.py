@@ -8,6 +8,8 @@ from app.api.deps.rate_limit import (
     rate_limit_verified_internal_scheduler,
 )
 from app.core.database import get_db
+from app.services.subscription_email_service import send_due_subscription_emails
+from app.services.subscription_reconciliation_service import reconcile_stale_subscriptions
 from app.services.trial_email_service import send_due_trial_emails
 from app.utils.beta_read_job_utils import run_beta_read_jobs
 from app.utils.internal_job_utils import verify_internal_job_secret
@@ -25,6 +27,34 @@ async def run_send_due_trial_emails(
     verify_internal_job_secret(x_internal_job_secret)
     await rate_limit_verified_internal_scheduler()
     result = await send_due_trial_emails(db, limit=limit)
+    await db.commit()
+    return result
+
+
+@router.post("/jobs/send-due-subscription-emails")
+async def run_send_due_subscription_emails(
+    limit: int = Query(100, ge=1, le=500),
+    x_internal_job_secret: str | None = Header(default=None),
+    db: AsyncSession = Depends(get_db),
+    _: None = Depends(rate_limit_internal_job),
+):
+    verify_internal_job_secret(x_internal_job_secret)
+    await rate_limit_verified_internal_scheduler()
+    result = await send_due_subscription_emails(db, limit=limit)
+    await db.commit()
+    return result
+
+
+@router.post("/jobs/reconcile-paddle-subscriptions")
+async def run_reconcile_paddle_subscriptions(
+    limit: int = Query(25, ge=1, le=100),
+    x_internal_job_secret: str | None = Header(default=None),
+    db: AsyncSession = Depends(get_db),
+    _: None = Depends(rate_limit_internal_job),
+):
+    verify_internal_job_secret(x_internal_job_secret)
+    await rate_limit_verified_internal_scheduler()
+    result = await reconcile_stale_subscriptions(db, limit=limit)
     await db.commit()
     return result
 

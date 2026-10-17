@@ -5,7 +5,7 @@ import { booksApi } from "@/lib/api/books"
 import { readerApi } from "@/lib/api/reader"
 import { buildManuscriptAutosaveKey } from "@/lib/utils/manuscriptEditor"
 import { moveSceneIdToIndex, reorderWorkspaceSceneTree } from "@/lib/utils/sceneWorkspace"
-import type { Book, ManuscriptWorkspaceTree, NovelScene } from "@/types/book"
+import type { Book, ManuscriptWorkspaceTree, WorkspaceScene } from "@/types/book"
 import type { EditorialReview, EditorialReviewPassage } from "@/types/intelligence"
 import type { ChapterListResponse } from "@/types/reader"
 import type { ConfirmDialogConfig } from "@/types/ux"
@@ -236,7 +236,7 @@ export function useManuscriptStructureActions({
     }
   }
 
-  async function insertSceneIntoDraft(scene: NovelScene) {
+  async function insertSceneIntoDraft(scene: WorkspaceScene) {
     const insertion = await booksApi.getSceneInsertion(bookId, scene.id, activeChapterNumber, "end", includeSceneMetadataOnImport)
     const separator = text.trim() ? "\n\n***\n\n" : ""
     const nextText = `${text}${separator}${insertion.body}`.trim()

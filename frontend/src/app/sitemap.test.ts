@@ -8,13 +8,13 @@ vi.mock("@/lib/api/public.server", () => ({
 import sitemap from "./sitemap"
 
 describe("sitemap", () => {
-  it("uses content publish dates for dynamic seo pages", async () => {
+  it("uses content modification dates for dynamic editorial pages", async () => {
     const entries = await sitemap()
 
     expect(entries).toContainEqual(
       expect.objectContaining({
         url: "https://getlorevia.com/blog/how-to-track-characters-in-a-novel",
-        lastModified: new Date("2026-05-14T00:00:00.000Z"),
+        lastModified: new Date("2026-08-09T00:00:00.000Z"),
         changeFrequency: "monthly",
         priority: 0.85,
       }),
@@ -22,7 +22,7 @@ describe("sitemap", () => {
     expect(entries).toContainEqual(
       expect.objectContaining({
         url: "https://getlorevia.com/answers/how-do-i-track-character-arcs",
-        lastModified: new Date("2026-05-14T00:00:00.000Z"),
+        lastModified: new Date("2026-08-09T00:00:00.000Z"),
         changeFrequency: "monthly",
         priority: 0.72,
       }),

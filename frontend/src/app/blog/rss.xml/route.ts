@@ -11,10 +11,13 @@ function escapeXml(value: string): string {
 }
 
 export async function GET() {
-  const latestPublishedAt = [...blogArticles]
-    .map((article) => article.publishedAt)
+  const publicationArticles = [...blogArticles].sort((left, right) => (
+    right.publishedAt.localeCompare(left.publishedAt) || left.order - right.order
+  ))
+  const latestUpdatedAt = [...blogArticles]
+    .map((article) => article.updatedAt)
     .sort((left, right) => right.localeCompare(left))[0] ?? "2026-05-14"
-  const items = blogArticles
+  const items = publicationArticles
     .map((article) => {
       const articleUrl = toAbsoluteUrl(`/blog/${article.slug}`)
       const description = escapeXml(article.description)
@@ -25,20 +28,24 @@ export async function GET() {
       <link>${articleUrl}</link>
       <guid>${articleUrl}</guid>
       <pubDate>${new Date(`${article.publishedAt}T00:00:00.000Z`).toUTCString()}</pubDate>
+      <dc:creator>LoreVia Editorial</dc:creator>
+      <category>${escapeXml(article.category)}</category>
+      <media:content url="${toAbsoluteUrl(article.hero.src)}" medium="image" width="${article.hero.width}" height="${article.hero.height}" />
       <description>${description}</description>
     </item>`
     })
     .join("\n")
 
   const xml = `<?xml version="1.0" encoding="UTF-8"?>
-<rss version="2.0">
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:media="http://search.yahoo.com/mrss/">
   <channel>
     <title>${SITE_NAME} Blog</title>
     <link>${toAbsoluteUrl("/blog")}</link>
-    <description>Long-form LoreVia guides for fiction authors on continuity, character tracking, story bibles, and manuscript intelligence.</description>
+    <atom:link href="${toAbsoluteUrl("/blog/rss.xml")}" rel="self" type="application/rss+xml" />
+    <description>Calm, practical craft and revision guides for fiction authors, published by LoreVia Editorial.</description>
     <language>en-us</language>
-    <lastBuildDate>${new Date(`${latestPublishedAt}T00:00:00.000Z`).toUTCString()}</lastBuildDate>
-    <generator>${SITE_NAME}</generator>
+    <lastBuildDate>${new Date(`${latestUpdatedAt}T00:00:00.000Z`).toUTCString()}</lastBuildDate>
+    <generator>${SITE_NAME} Editorial</generator>
 ${items}
   </channel>
 </rss>`

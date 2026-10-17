@@ -2,12 +2,19 @@
 
 import dynamic from "next/dynamic"
 import { usePathname } from "next/navigation"
+import { useReportWebVitals } from "next/web-vitals"
 import React from "react"
 import {
+  captureWebVital,
+  installBrowserErrorTelemetry,
+} from "@/lib/analytics/browserTelemetry"
+import {
   ANALYTICS_CONSENT_COOKIE,
+  ANALYTICS_CONSENT_EVENT,
   getAnalyticsConsentValue,
   hasAnalyticsConsent,
   shouldShowAnalyticsConsentBanner,
+  writeAnalyticsConsentCookie,
 } from "@/lib/analytics/posthogConsent"
 
 const CookieConsent = dynamic(
@@ -20,27 +27,31 @@ function isBrowserAnalyticsEnabled() {
 }
 
 let posthogInitPromise: Promise<void> | null = null
-
-function writeAnalyticsConsentCookie(value: "true" | "false") {
-  document.cookie = `${ANALYTICS_CONSENT_COOKIE}=${value}; Max-Age=31536000; Path=/; SameSite=Lax`
-}
+let posthogClient: typeof import("posthog-js").default | null = null
 
 async function initPostHog() {
-  if (!isBrowserAnalyticsEnabled()) return
+  if (!isBrowserAnalyticsEnabled() || !hasAnalyticsConsent(getAnalyticsConsentValue(document.cookie))) return
   if (!posthogInitPromise) {
     posthogInitPromise = import("posthog-js").then(({ default: posthog }) => {
+      // Consent may have been withdrawn while the SDK was loading.
+      if (!hasAnalyticsConsent(getAnalyticsConsentValue(document.cookie))) { posthogInitPromise = null; return }
       posthog.init(process.env.NEXT_PUBLIC_POSTHOG_KEY as string, {
         api_host: process.env.NEXT_PUBLIC_POSTHOG_HOST || "https://eu.posthog.com",
+        autocapture: false,
         ip: false,
         capture_pageview: true,
         capture_pageleave: true,
         persistence: "localStorage",
         disable_session_recording: true,
       })
-      window.__loreviaPosthog = posthog
-    })
+      posthogClient = posthog
+    }).catch(() => { posthogInitPromise = null })
   }
   await posthogInitPromise
+  if (posthogClient && hasAnalyticsConsent(getAnalyticsConsentValue(document.cookie))) {
+    posthogClient.opt_in_capturing({ captureEventName: false })
+    window.__loreviaPosthog = posthogClient
+  } else posthogClient?.opt_out_capturing()
 }
 
 export function PostHogClient() {
@@ -50,30 +61,38 @@ export function PostHogClient() {
   const analyticsKey = process.env.NEXT_PUBLIC_POSTHOG_KEY
   const useSquareCorners = pathname === "/blog" || pathname.startsWith("/blog/") || pathname === "/answers" || pathname.startsWith("/answers/")
 
+  useReportWebVitals((metric) => {
+    if (hasAnalyticsConsent(consentValue)) captureWebVital(metric)
+  })
+
   React.useEffect(() => {
-    if (!analyticsKey) {
-      setHydrated(true)
-      return
+    const updateConsent = () => {
+      const consent = getAnalyticsConsentValue(document.cookie)
+      setConsentValue(consent)
+      if (hasAnalyticsConsent(consent)) {
+        if (analyticsKey) void initPostHog()
+      } else {
+        window.__loreviaPosthog?.opt_out_capturing?.()
+        delete window.__loreviaPosthog
+      }
     }
-
-    const consent = getAnalyticsConsentValue(document.cookie)
-    setConsentValue(consent)
+    updateConsent()
     setHydrated(true)
-
-    if (hasAnalyticsConsent(consent)) {
-      void initPostHog()
-    }
+    window.addEventListener(ANALYTICS_CONSENT_EVENT, updateConsent)
+    return () => window.removeEventListener(ANALYTICS_CONSENT_EVENT, updateConsent)
   }, [analyticsKey])
+
+  React.useEffect(() => {
+    if (!analyticsKey || !hasAnalyticsConsent(consentValue)) return
+    return installBrowserErrorTelemetry()
+  }, [analyticsKey, consentValue])
 
   const enable = () => {
     writeAnalyticsConsentCookie("true")
-    void initPostHog()
-    setConsentValue("true")
   }
 
   const dismiss = () => {
     writeAnalyticsConsentCookie("false")
-    setConsentValue("false")
   }
 
   const showBanner = shouldShowAnalyticsConsentBanner({
@@ -89,6 +108,7 @@ export function PostHogClient() {
         <CookieConsent
           visible={showBanner ? "show" : "hidden"}
           cookieName={ANALYTICS_CONSENT_COOKIE}
+          containerClasses="lorevia-cookie-consent"
           enableDeclineButton
           setDeclineCookie
           declineButtonText="Not now"
@@ -97,10 +117,21 @@ export function PostHogClient() {
           onDecline={dismiss}
           style={{
             background: "rgba(0,0,0,0.92)",
+            border: "1px solid rgba(255,255,255,0.16)",
+            borderRadius: useSquareCorners ? "0" : "0.75rem",
+            bottom: "1rem",
+            boxShadow: "0 18px 55px rgba(0,0,0,0.35)",
             color: "white",
             fontSize: "13px",
+            left: "50%",
             lineHeight: "1.6",
+            maxWidth: "34rem",
+            right: "auto",
+            transform: "translateX(-50%)",
+            width: "calc(100% - 2rem)",
+            zIndex: "60",
           }}
+          contentStyle={{ flex: "1 1 18rem", margin: "12px 16px" }}
           buttonStyle={{
             background: "#6d28d9",
             color: "white",

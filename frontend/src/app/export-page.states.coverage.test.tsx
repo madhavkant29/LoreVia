@@ -18,7 +18,7 @@ describe("ExportStudioPage states", () => {
     booksApiMock.get.mockResolvedValueOnce(null)
 
     await renderPage(<ExportStudioPage />)
-    expect(text()).toContain("Loading export studio")
+    await waitForText("This project could not be loaded.")
 
     cleanupExportPage()
 
@@ -28,12 +28,13 @@ describe("ExportStudioPage states", () => {
     booksApiMock.previewCharacterBibleVault.mockRejectedValueOnce(new Error("fail"))
 
     await renderPage(<ExportStudioPage />)
-    await waitForText("Ship clean outputs")
+    await waitForText("Files & Export")
 
+    await click("Character bible")
     await click("Preview export files")
     expect(text()).toContain("Could not load the vault preview.")
 
     await click("Export character bible")
-    expect(text()).toContain("Could not export the character bible.")
+    expect(text()).toContain("The export could not be completed.")
   })
 })

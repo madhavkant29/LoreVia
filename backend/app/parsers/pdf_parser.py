@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import re
 import uuid
 from collections import Counter
@@ -94,6 +95,91 @@ def parse_pdf_with_diagnostics(
     )
 
 
+def parse_pdf_structure(
+    raw_bytes: bytes, *, language: str | None = None
+) -> tuple[list[dict], dict[str, Any]]:
+    """Extract ordered PDF text and media for the source-matched import outline."""
+    from app.parsers.text_parser import parse_text_structure
+
+    doc = cast(Any, fitz).open(stream=raw_bytes, filetype="pdf")
+    try:
+        repeated_noise = _detect_repeated_headers(doc)
+        parts: list[str] = []
+        pages: list[int] = []
+        images: list[dict] = []
+        multi_column_pages = 0
+        text_count = 0
+        for page_number, page in enumerate(doc, start=1):
+            page_height = float(cast(Any, page).rect.height or 0)
+            diagnostics_state: dict[str, Any] = {"multi_column_pages": 0}
+            for item in _page_blocks(page, diagnostics_state=diagnostics_state):
+                if item["type"] == "text":
+                    cleaned = _clean_text(item["text"])
+                    if not cleaned or _page_margin_noise_reason(
+                        cleaned,
+                        bbox=item["bbox"],
+                        page_height=page_height,
+                        repeated_noise=repeated_noise,
+                        total_pages=doc.page_count,
+                        page_number=page_number,
+                    ):
+                        continue
+                    parts.append(cleaned)
+                    pages.append(page_number)
+                    text_count += len(cleaned.split())
+                else:
+                    marker = (
+                        "[[IMAGE:"
+                        + hashlib.sha256(
+                            item["bytes"] + f":{page_number}:{len(images)}".encode()
+                        ).hexdigest()[:24]
+                        + "]]"
+                    )
+                    parts.append(marker)
+                    pages.append(page_number)
+                    images.append({**item, "marker": marker})
+            multi_column_pages += diagnostics_state["multi_column_pages"]
+
+        line_pages: list[int] = []
+        for index, (part, page_number) in enumerate(zip(parts, pages)):
+            if index:
+                line_pages.append(page_number)
+            line_pages.extend([page_number] * len(part.splitlines()))
+        text = "\n\n".join(parts)
+        sections = parse_text_structure(text, language=language, source_name="line")
+        for section in sections:
+            start = max(0, int(section.get("start_line") or 1) - 1)
+            end = max(start, int(section.get("end_line") or 1) - 1)
+            start_page = line_pages[min(start, len(line_pages) - 1)] if line_pages else None
+            end_page = line_pages[min(end, len(line_pages) - 1)] if line_pages else None
+            section["start_page"] = start_page
+            section["end_page"] = end_page
+            section["source_location"] = (
+                (
+                    f"page {start_page}"
+                    if start_page == end_page
+                    else f"pages {start_page}–{end_page}"
+                )
+                if start_page
+                else None
+            )
+            section["images"] = [image for image in images if image["marker"] in section["text"]]
+        return sections, {
+            "detected_language": language or detect_language(text[:5000])["detected"],
+            "chapter_count": sum(section.get("section_type") == "chapter" for section in sections),
+            "toc_detected": any(section.get("section_type") == "toc" for section in sections),
+            "front_matter_count": sum(
+                section.get("section_type") in {"notes", "chronology", "preface", "foreword"}
+                for section in sections
+            ),
+            "multi_column_pages": multi_column_pages,
+            "total_pages": doc.page_count,
+            "anomalies": ["no_extractable_text"] if text_count == 0 else [],
+        }
+    finally:
+        doc.close()
+
+
 def _parse_pdf_internal(
     raw_bytes: bytes, *, split_large_chapters: bool, language: str | None = None
 ) -> tuple[list[dict], dict[str, Any]]:
@@ -108,12 +194,13 @@ def _parse_pdf_internal(
             "noise_reason_counts": Counter(),
             "inline_artifacts_removed": 0,
             "toc_detected": False,
+            "multi_column_pages": 0,
         }
 
         for page_number, page in enumerate(doc, start=1):
             page_height = float(cast(Any, page).rect.height or 0)
             pending_lines: list[dict] = []
-            for item in _page_blocks(page):
+            for item in _page_blocks(page, diagnostics_state=diagnostics_state):
                 if item["type"] == "text":
                     cleaned = _clean_text(item["text"])
                     if not cleaned:
@@ -196,9 +283,7 @@ def _parse_pdf_internal(
                 chapters = permissive_chapters
                 fallback_strategy = "permissive_heading_retry"
 
-        effective_split = split_large_chapters or _needs_forced_large_chapter_split(
-            chapters, total_pages=total_pages
-        )
+        effective_split = split_large_chapters
         normalized_chapters = _normalize_chapters(
             chapters,
             split_large_chapters=effective_split,
@@ -208,13 +293,15 @@ def _parse_pdf_internal(
         final_anomalies = _collect_parse_anomalies(
             chapters, total_pages=total_pages, normalized_chapters=normalized_chapters
         )
+        if not any(_count_words(str(chapter.get("text") or "")) for chapter in normalized_chapters):
+            final_anomalies.append("no_extractable_text")
         diagnostics = _build_parser_diagnostics(
             chapters,
             normalized_chapters=normalized_chapters,
             total_pages=total_pages,
             repeated_noise=repeated_noise,
             fallback_strategy=fallback_strategy,
-            forced_large_chapter_split=effective_split and not split_large_chapters,
+            forced_large_chapter_split=False,
             anomalies=final_anomalies,
             diagnostics_state=diagnostics_state,
             detected_language=detected_language,
@@ -239,7 +326,7 @@ def extract_first_page_cover(raw_bytes: bytes) -> tuple[bytes, str] | None:
         doc.close()
 
 
-def _page_blocks(page: fitz.Page) -> list[dict]:
+def _page_blocks(page: fitz.Page, *, diagnostics_state: dict[str, Any] | None = None) -> list[dict]:
     page_any = cast(Any, page)
     items: list[dict] = []
 
@@ -276,7 +363,83 @@ def _page_blocks(page: fitz.Page) -> list[dict]:
                 }
             )
 
-    return sorted(items, key=lambda item: (item["bbox"][1], item["bbox"][0]))
+    ordered, two_columns = _order_two_column_page_items(items, float(page_any.rect.width or 0))
+    if two_columns and diagnostics_state is not None:
+        diagnostics_state["multi_column_pages"] = (
+            int(diagnostics_state.get("multi_column_pages") or 0) + 1
+        )
+    return ordered
+
+
+def _order_two_column_page_items(items: list[dict], page_width: float) -> tuple[list[dict], bool]:
+    """Read a clear two-column page down the left column before the right."""
+    by_position = sorted(items, key=lambda item: (item["bbox"][1], item["bbox"][0]))
+    text_items = [item for item in items if item["type"] == "text"]
+    if page_width <= 0 or len(text_items) < 12:
+        return by_position, False
+
+    middle = page_width / 2
+    gutter = page_width * 0.025
+
+    def side(item: dict) -> str:
+        x0, _, x1, _ = item["bbox"]
+        if x1 < middle - gutter:
+            return "left"
+        if x0 > middle + gutter:
+            return "right"
+        return "spanning"
+
+    left_text = [item for item in text_items if side(item) == "left"]
+    right_text = [item for item in text_items if side(item) == "right"]
+    if min(len(left_text), len(right_text)) < 6:
+        return by_position, False
+    if min(len(left_text), len(right_text)) < len(text_items) * 0.25:
+        return by_position, False
+    if (
+        min(
+            _median([item["bbox"][2] - item["bbox"][0] for item in left_text]),
+            _median([item["bbox"][2] - item["bbox"][0] for item in right_text]),
+        )
+        < page_width * 0.18
+    ):
+        return by_position, False
+
+    left_top, left_bottom = (
+        min(item["bbox"][1] for item in left_text),
+        max(item["bbox"][3] for item in left_text),
+    )
+    right_top, right_bottom = (
+        min(item["bbox"][1] for item in right_text),
+        max(item["bbox"][3] for item in right_text),
+    )
+    overlap = max(0.0, min(left_bottom, right_bottom) - max(left_top, right_top))
+    if overlap < min(left_bottom - left_top, right_bottom - right_top) * 0.4:
+        return by_position, False
+
+    column_top = min(left_top, right_top)
+    column_bottom = max(left_bottom, right_bottom)
+    headers: list[dict] = []
+    footers: list[dict] = []
+    for item in items:
+        if side(item) != "spanning":
+            continue
+        if item["bbox"][3] <= column_top + 5:
+            headers.append(item)
+        elif item["bbox"][1] >= column_bottom - 5:
+            footers.append(item)
+        else:
+            return by_position, False
+
+    def position_key(item: dict) -> tuple[float, float]:
+        return item["bbox"][1], item["bbox"][0]
+
+    return (
+        sorted(headers, key=position_key)
+        + sorted((item for item in items if side(item) == "left"), key=position_key)
+        + sorted((item for item in items if side(item) == "right"), key=position_key)
+        + sorted(footers, key=position_key),
+        True,
+    )
 
 
 def _extract_line_text(line: dict[str, Any]) -> str:
@@ -1311,6 +1474,7 @@ def _build_parser_diagnostics(
         "heading_samples": headings[:12],
         "repeated_noise_count": len(repeated_noise),
         "text_line_count": int(diagnostics_state.get("text_line_count") or 0),
+        "multi_column_pages": int(diagnostics_state.get("multi_column_pages") or 0),
         "noise_lines_removed": int(diagnostics_state.get("noise_lines_removed") or 0),
         "noise_reason_counts": dict(diagnostics_state.get("noise_reason_counts") or {}),
         "inline_artifacts_removed": int(diagnostics_state.get("inline_artifacts_removed") or 0),

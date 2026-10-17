@@ -134,10 +134,10 @@ class _AsyncCache:
         self.data = dict(data or {})
         self.set_calls = []
 
-    async def get(self, *key_parts):
+    async def get(self, *key_parts, **_kwargs):
         return self.data.get(tuple(str(part) for part in key_parts))
 
-    async def set(self, *key_parts_and_value):
+    async def set(self, *key_parts_and_value, **_kwargs):
         *key_parts, value = key_parts_and_value
         key = tuple(str(part) for part in key_parts)
         self.data[key] = value
@@ -145,6 +145,11 @@ class _AsyncCache:
 
 
 def _patch_route_caches(monkeypatch, cache: _AsyncCache) -> None:
+    async def cache_version(*_args, **_kwargs):
+        return 0
+
+    patch_route_dependency(monkeypatch, advisor, "get_book_cache_version", cache_version)
+    patch_route_dependency(monkeypatch, advisor, "get_series_cache_version", cache_version)
     patch_route_dependency(monkeypatch, advisor, "get_advisor_response_cache", cache.get)
     patch_route_dependency(monkeypatch, advisor, "set_advisor_response_cache", cache.set)
     patch_route_dependency(monkeypatch, advisor, "get_editorial_review_cache", cache.get)
@@ -355,7 +360,7 @@ async def test_advisor_message_marks_job_failed_when_enqueue_fails(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_advisor_message_async_enqueues_task(monkeypatch):
+async def test_advisor_message_async_uses_stored_book_chapter_count(monkeypatch):
     book_id = uuid.uuid4()
     user_id = uuid.uuid4()
     book = SimpleNamespace(id=book_id, user_id=user_id, title="Atlas {Saga}", total_chapters=12)
@@ -402,7 +407,7 @@ async def test_advisor_message_async_enqueues_task(monkeypatch):
             {"role": "assistant", "content": "Context"},
             {"role": "user", "content": "Check the storm lore"},
         ],
-        "total_chapters": 8,
+        "total_chapters": 12,
     }
 
 
@@ -464,6 +469,39 @@ async def test_advisor_message_stream_hides_internal_errors(monkeypatch):
 
     assert "Something went wrong. Please try again." in body
     assert "sk-secret" not in body
+
+
+@pytest.mark.asyncio
+async def test_advisor_message_stream_returns_llm_token_limit_as_sse_error(monkeypatch):
+    user_id = uuid.uuid4()
+    book = SimpleNamespace(id=uuid.uuid4(), user_id=user_id, title="Atlas", total_chapters=8)
+    db = _FakeDB(get_values=[book])
+
+    async def _fake_stream_advisor_reply_payload(**_kwargs):
+        raise HTTPException(
+            429,
+            {
+                "kind": "llm_tokens",
+                "message": "LLM usage token limit exceeded for the 5-hour window.",
+            },
+        )
+        yield
+
+    patch_route_dependency(
+        monkeypatch, advisor, "stream_advisor_reply_payload", _fake_stream_advisor_reply_payload
+    )
+
+    response = await advisor.advisor_message_stream(
+        book.id,
+        body=_message_body(("user", "Help")),
+        db=db,
+        current_user=SimpleNamespace(id=user_id),
+        _=None,
+    )
+    body = "".join([chunk async for chunk in response.body_iterator])
+
+    assert "event: error" in body
+    assert "LLM usage token limit exceeded for the 5-hour window." in body
 
 
 @pytest.mark.asyncio
@@ -655,7 +693,7 @@ async def test_advisor_suggestions_adds_sparse_proactive_audit(monkeypatch):
 
     _patch_route_caches(monkeypatch, cache)
     patch_route_dependency(monkeypatch, advisor, "AsyncOpenAI", lambda **_kwargs: client)
-    monkeypatch.setattr(advisor_scan_utils_module, "AsyncOpenAI", lambda **_kwargs: client)
+    monkeypatch.setattr(advisor_scan_utils_module, "get_openai_client", lambda: client)
     monkeypatch.setattr(advisor_scan_utils_module, "build_story_context", _fake_story_context)
     monkeypatch.setattr(
         advisor_scan_utils_module, "make_editorial_cache_key", lambda *_args: "scan-cache"

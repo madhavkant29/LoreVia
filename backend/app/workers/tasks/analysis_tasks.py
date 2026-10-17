@@ -10,6 +10,7 @@ from app.utils.ingestion_utils import (
     extract_queue_wait_ms,
     is_llm_coordination_retry_error,
     is_llm_usage_limit_error,
+    llm_usage_limit_blocker,
     load_analysis_chapter_payload,
 )
 from app.utils.llm_usage_utils import is_transient_llm_provider_error
@@ -74,8 +75,6 @@ def analyse_chapter_task(
     manual_reprocess: bool = False,
     execution_id: str | None = None,
 ):
-    analysis_work_started = False
-
     if execution_id:
 
         async def _claim_execution() -> bool:
@@ -91,8 +90,6 @@ def analyse_chapter_task(
         if is_reprocessing is not None:
 
             async def analyse_stored_chapter() -> dict:
-                nonlocal analysis_work_started
-
                 async with AsyncSessionLocal() as db:
                     payload = await load_analysis_chapter_payload(
                         db,
@@ -101,7 +98,6 @@ def analyse_chapter_task(
                     )
                 if payload is None:
                     raise ValueError(f"chapter content missing: {chapter_id}")
-                analysis_work_started = True
                 return await analyse_chapter(
                     str(payload["chapter_id"]),
                     str(payload["text"]),
@@ -113,7 +109,6 @@ def analyse_chapter_task(
 
             result = run_worker_coro(analyse_stored_chapter())
         else:
-            analysis_work_started = True
             result = run_worker_coro(
                 analyse_chapter(
                     chapter_id,
@@ -140,17 +135,44 @@ def analyse_chapter_task(
         return result
     except FATAL_TASK_BOUNDARY_EXCEPTIONS as exc:
         if is_llm_usage_limit_error(exc):
+            usage_blocker = llm_usage_limit_blocker(exc)
+            if usage_blocker.get("permanent"):
+                if execution_id:
+                    error_text = str(exc)
+
+                    async def _fail_unresumable_execution(
+                        detail: str = error_text,
+                    ) -> None:
+                        from app.services.task_execution_service import (
+                            fail_task_execution,
+                        )
+
+                        async with AsyncSessionLocal() as db:
+                            await fail_task_execution(
+                                db,
+                                execution_id,
+                                error=RuntimeError(detail),
+                                terminal=True,
+                                category="llm_token_limit",
+                            )
+
+                    run_worker_coro(_fail_unresumable_execution())
+                return {"failed": "llm_token_limit"}
             if execution_id:
 
-                async def _pause_execution(error_detail: str = str(exc)) -> None:
+                async def _pause_execution(blocker: dict = usage_blocker) -> None:
                     from app.services.task_execution_service import pause_task_execution
 
                     async with AsyncSessionLocal() as db:
                         await pause_task_execution(
                             db,
                             execution_id,
-                            reason="llm_token_limit",
-                            blocker={"kind": "llm_tokens", "detail": error_detail},
+                            reason=(
+                                "llm_budget"
+                                if blocker.get("kind") == "llm_budget"
+                                else "llm_token_limit"
+                            ),
+                            blocker=blocker,
                         )
 
                 run_worker_coro(_pause_execution())
@@ -158,7 +180,9 @@ def analyse_chapter_task(
         if is_llm_coordination_retry_error(exc):
             if execution_id:
 
-                async def _pause_capacity_execution(error_detail: str = str(exc)) -> None:
+                async def _pause_capacity_execution(
+                    error_detail: str = str(exc),
+                ) -> None:
                     from app.services.task_execution_service import pause_task_execution
 
                     async with AsyncSessionLocal() as db:
@@ -171,7 +195,11 @@ def analyse_chapter_task(
 
                 run_worker_coro(_pause_capacity_execution())
             return {"paused": "llm_capacity"}
-        retryable = _is_retryable_analysis_error(exc) and not analysis_work_started
+        # Provider calls own their short in-request retry budget. If those
+        # attempts are exhausted, Celery owns the bounded workflow retry. The
+        # consumer persists generated state only in its final guarded
+        # transaction, so retrying cannot expose partial analysis rows.
+        retryable = _is_retryable_analysis_error(exc)
         error_text = str(exc)
         retries = int(getattr(self.request, "retries", 0) or 0)
         max_retries = self.max_retries if isinstance(self.max_retries, int) else NON_LLM_MAX_RETRIES

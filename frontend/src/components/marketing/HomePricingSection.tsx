@@ -4,7 +4,6 @@ import Link from "next/link"
 import type { Route } from "next"
 import { useState } from "react"
 
-import { Reveal } from "@/components/marketing/Reveal"
 import {
   pricingTierAccessLabel,
   pricingTierAnnualSavings,
@@ -40,16 +39,16 @@ const marketingPricingContent = pricingTiers.map((tier) => ({
             "Everything in Free",
             "2M active words and 1M processed words monthly",
             "5 GB source storage",
-            "30 Story Advisor turns per day",
-            "30 continuity and editorial scans per day",
+            "Up to 30 Story Advisor turns per day",
+            "Up to 30 continuity and editorial scans per day; AI-intensive features share monthly capacity",
             "Manuscript editor, notes, summaries, and search",
           ]
         : [
             "Everything in Author",
             "8M active words and 4M processed words monthly",
             "25 GB source storage",
-            "60 Story Advisor turns per day",
-            "60 continuity and editorial scans per day",
+            "Up to 75 Story Advisor turns per day",
+            "Up to 75 continuity and editorial scans per day; AI-intensive features share monthly capacity",
             "Multi-book continuity",
           ],
   cta: "Analyze my manuscript",
@@ -96,76 +95,73 @@ export function HomePricingSection({ ctaHref }: HomePricingSectionProps) {
       </p>
 
       <div className="mt-10 grid gap-5 xl:grid-cols-3">
-        {marketingPricingContent.map((tier, index) => {
+        {marketingPricingContent.map((tier) => {
           const price = pricingTierPrice(tier, billingCycle)
           const suffix = pricingTierPriceSuffix(tier, billingCycle)
           const savings = billingCycle === "annual" ? pricingTierAnnualSavings(tier) : 0
 
           return (
-            <Reveal key={tier.name} delay={index * 70} className="h-full">
-              <article
-                className={`relative flex h-full flex-col rounded-lg border p-6 md:p-7 ${
+            <article
+              key={tier.name}
+              className={`relative flex h-full flex-col rounded-lg border p-6 md:p-7 ${
+                tier.highlight
+                  ? "border-[#205f58] bg-[#11312d]"
+                  : "border-white/10 bg-[#0d1715]"
+              }`}
+            >
+              {tier.highlight ? (
+                <div className="absolute right-6 top-6 rounded-full border border-[#2d756c] bg-[#143632] px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em] text-[#86decd]">
+                  Most popular
+                </div>
+              ) : null}
+
+              <div className="min-h-[9rem]">
+                <h3 className="text-2xl font-semibold text-white">{tier.name}</h3>
+                <p className="mt-3 text-xs font-semibold uppercase tracking-[0.18em] text-[#6fae9f]">
+                  {pricingTierAccessLabel(tier)}
+                </p>
+                <p className="mt-4 text-sm leading-7 text-[#aeb9b3]">{tier.subtitle}</p>
+              </div>
+
+              <div className="mt-8 min-h-[8rem]">
+                <div className="flex items-end gap-2">
+                  <span className="text-5xl font-semibold tracking-tight text-white">${price}</span>
+                  {suffix ? <span className="pb-1 text-sm text-[#8fa19a]">{suffix}</span> : null}
+                </div>
+                {savings > 0 ? (
+                  <p className="mt-3 text-sm font-medium text-[#86decd]">Save ${savings} with yearly billing</p>
+                ) : (
+                  <div className="mt-3 h-[1.5rem]" aria-hidden="true" />
+                )}
+                {tier.access === "paid" ? (
+                  <p className="mt-2 text-sm text-[#8fa19a]">
+                    {`Paid plan: $${price}${billingCycle === "annual" ? "/year" : "/mo"}. The free trial does not auto-convert.`}
+                  </p>
+                ) : (
+                  <div className="mt-2 h-5" aria-hidden="true" />
+                )}
+              </div>
+
+              <ul className="mt-8 flex-1 space-y-4 text-sm leading-7 text-[#d9e0db]">
+                {tier.bullets.map((bullet) => (
+                  <li key={bullet} className="flex items-start gap-3">
+                    <span className={tier.highlight ? "pt-0.5 text-[#86decd]" : "pt-0.5 text-[#6fae9f]"}>+</span>
+                    <span>{bullet}</span>
+                  </li>
+                ))}
+              </ul>
+
+              <Link
+                href={ctaHref}
+                className={`mt-10 inline-flex w-full items-center justify-center rounded-md px-4 py-3.5 text-sm font-semibold transition ${
                   tier.highlight
-                    ? "border-[#205f58] bg-[#11312d]"
-                    : "border-white/10 bg-[#0d1715]"
+                    ? "bg-[#1f615d] text-white hover:bg-[#25756f]"
+                    : "border border-white/[0.12] bg-white/5 text-white hover:bg-white/[0.08]"
                 }`}
               >
-                {tier.highlight ? (
-                  <div className="absolute right-6 top-6 rounded-full border border-[#2d756c] bg-[#143632] px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em] text-[#86decd]">
-                    Most popular
-                  </div>
-                ) : null}
-
-                <div className="min-h-[9rem]">
-                  <h3 className="text-2xl font-semibold text-white">{tier.name}</h3>
-                  <p className="mt-3 text-xs font-semibold uppercase tracking-[0.18em] text-[#6fae9f]">
-                    {pricingTierAccessLabel(tier)}
-                  </p>
-                  <p className="mt-4 text-sm leading-7 text-[#aeb9b3]">{tier.subtitle}</p>
-                </div>
-
-                <div className="mt-8 min-h-[8rem]">
-                  <div className="flex items-end gap-2">
-                    <span className="text-5xl font-semibold tracking-tight text-white">${price}</span>
-                    {suffix ? <span className="pb-1 text-sm text-[#8fa19a]">{suffix}</span> : null}
-                  </div>
-                  {savings > 0 ? (
-                    <p className="mt-3 text-sm font-medium text-[#86decd]">Save ${savings} with yearly billing</p>
-                  ) : (
-                    <div className="mt-3 h-[1.5rem]" aria-hidden="true" />
-                  )}
-                  {tier.access === "paid" ? (
-                    <p className="mt-2 text-sm text-[#8fa19a]">
-                      {billingCycle === "annual"
-                        ? `Billed yearly at $${price}/year`
-                        : `10 days free, then $${price}/mo`}
-                    </p>
-                  ) : (
-                    <div className="mt-2 h-5" aria-hidden="true" />
-                  )}
-                </div>
-
-                <ul className="mt-8 flex-1 space-y-4 text-sm leading-7 text-[#d9e0db]">
-                  {tier.bullets.map((bullet) => (
-                    <li key={bullet} className="flex items-start gap-3">
-                      <span className={tier.highlight ? "pt-0.5 text-[#86decd]" : "pt-0.5 text-[#6fae9f]"}>+</span>
-                      <span>{bullet}</span>
-                    </li>
-                  ))}
-                </ul>
-
-                <Link
-                  href={ctaHref}
-                  className={`mt-10 inline-flex w-full items-center justify-center rounded-md px-4 py-3.5 text-sm font-semibold transition ${
-                    tier.highlight
-                      ? "bg-[#2d8b81] text-white hover:bg-[#36a094]"
-                      : "border border-white/[0.12] bg-white/5 text-white hover:bg-white/[0.08]"
-                  }`}
-                >
-                  {tier.cta}
-                </Link>
-              </article>
-            </Reveal>
+                {tier.cta}
+              </Link>
+            </article>
           )
         })}
       </div>

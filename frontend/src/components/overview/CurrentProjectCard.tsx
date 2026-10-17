@@ -8,7 +8,6 @@ import type { ChapterListResponse } from "@/types/reader"
 import { Icon } from "./Icon"
 import { InfoRow } from "./InfoRow"
 import { PanelTitle } from "./PanelTitle"
-import type { IconName } from "./types"
 import { clamp, formatDate, formatNumber, panelClass } from "./utils"
 
 export const CurrentProjectCard = memo(function CurrentProjectCard({
@@ -70,7 +69,7 @@ export const CurrentProjectCard = memo(function CurrentProjectCard({
 
           <div className={`mt-6 grid gap-3 border-t pt-4 text-sm ${isDark ? "border-white/10" : "border-slate-100"}`}>
             <InfoRow label="Status" value={book.status === "ready" ? "Drafting" : book.status.replace(/_/g, " ")} isDark={isDark} dot />
-            <InfoRow label="Last Edited" value={formatDate(book.created_at)} isDark={isDark} />
+            <InfoRow label="Created" value={formatDate(book.created_at)} isDark={isDark} />
           </div>
         </div>
 
@@ -85,7 +84,7 @@ export const CurrentProjectCard = memo(function CurrentProjectCard({
                 <span className={isDark ? "text-slate-600" : "text-slate-400"}>{chapter.read ? "Read" : "Open"}</span>
               </div>
             )) : (
-              <p className={`text-sm leading-6 ${isDark ? "text-slate-500" : "text-slate-500"}`}>{unitTitle} indexing is still syncing.</p>
+              <p className={`text-sm leading-6 ${isDark ? "text-slate-500" : "text-slate-500"}`}>No {unitTitle.toLowerCase()}s are available yet.</p>
             )}
           </div>
 

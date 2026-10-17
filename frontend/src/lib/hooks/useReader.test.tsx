@@ -63,7 +63,9 @@ describe("useReader", () => {
   })
 
   function render(bookId: string, chapterNum: number, useQueryReturn: { data: ChapterData | undefined; isLoading: boolean; error: Error | null } = { data: undefined, isLoading: true, error: null }) {
-    useQueryMock.mockReturnValue(useQueryReturn)
+    useQueryMock.mockImplementation((options) => String(options.queryKey[0]).endsWith(":chapters")
+      ? { data: { chapters: Array.from({ length: useQueryReturn.data?.total_chapters ?? 0 }, (_, index) => ({ number: index + 1 })) }, error: null }
+      : useQueryReturn)
 
     function TestComponent() {
       hookResult = useReader(bookId, chapterNum)
@@ -82,7 +84,7 @@ describe("useReader", () => {
   it("passes the correct cache key to useQuery", () => {
     render("book-1", 3)
 
-    expect(useQueryMock).toHaveBeenCalledTimes(1)
+    expect(useQueryMock).toHaveBeenCalledTimes(2)
     const options = useQueryMock.mock.calls[0]?.[0]
     expect(options.queryKey).toEqual(["reader", "book-1", "3"])
     expect(options.staleTime).toBe(60_000)
@@ -147,5 +149,43 @@ describe("useReader", () => {
     render("book-1", 1, { data: chapter, isLoading: false, error: null })
 
     expect(prefetchQueryMock).not.toHaveBeenCalled()
+  })
+
+  it("ignores context that arrives after closing the panel", async () => {
+    render("book-1", 1)
+    let resolve: (value: { type: "search"; results: [] }) => void = () => {}
+    getContextMock.mockReturnValue(new Promise((done) => { resolve = done }))
+    let pending: Promise<void> | undefined
+    act(() => { pending = hookResult?.tap("Mara") })
+    act(() => { hookResult?.clearContext() })
+    await act(async () => { resolve({ type: "search", results: [] }); await pending })
+    expect(hookResult?.contextResult).toBeNull()
+    expect(hookResult?.contextLoading).toBe(false)
+  })
+
+  it("preserves the newest context when requests resolve out of order", async () => {
+    render("book-1", 1)
+    let resolve: (value: { type: "search"; results: [] }) => void = () => {}
+    getContextMock.mockReturnValueOnce(new Promise((done) => { resolve = done }))
+    getContextMock.mockResolvedValueOnce({ type: "character", character: { name: "Theo" } })
+    let first: Promise<void> | undefined
+    act(() => { first = hookResult?.tap("Mara") })
+    await act(async () => { await hookResult?.tap("Theo") })
+    await act(async () => { resolve({ type: "search", results: [] }); await first })
+    expect(hookResult?.contextResult?.character?.name).toBe("Theo")
+  })
+
+  it("shows context and progress failures and retries the submitted values", async () => {
+    render("book-1", 2)
+    getContextMock.mockRejectedValueOnce(new Error("Offline")).mockResolvedValueOnce({ type: "search", results: [] })
+    updateProgressMock.mockRejectedValueOnce(new Error("Offline")).mockResolvedValueOnce({})
+    await act(async () => { await hookResult?.tap("Mara"); await hookResult?.saveProgress(0.75) })
+    expect(hookResult?.contextError).toContain("Could not load")
+    expect(hookResult?.progressError).toBe(true)
+    await act(async () => { await hookResult?.retryContext(); await hookResult?.retryProgress() })
+    expect(getContextMock).toHaveBeenLastCalledWith("book-1", "Mara", 2)
+    expect(updateProgressMock).toHaveBeenLastCalledWith("book-1", 2, 0.75)
+    expect(hookResult?.contextError).toBeNull()
+    expect(hookResult?.progressError).toBe(false)
   })
 })

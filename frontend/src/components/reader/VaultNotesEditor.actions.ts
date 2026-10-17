@@ -1,4 +1,4 @@
-import { startTransition, type Dispatch, type MutableRefObject, type SetStateAction } from "react"
+import { startTransition, useCallback, type Dispatch, type MutableRefObject, type SetStateAction } from "react"
 
 import { booksApi } from "@/lib/api/books"
 import {
@@ -7,7 +7,7 @@ import {
   sanitizeWorkspaceTitle,
 } from "@/lib/utils/workspacePaths"
 import type { ConfirmDialogConfig, PromptDialogConfig } from "@/types/ux"
-import type { VaultGraph, VaultNote, VaultNoteRelations } from "@/types/book"
+import type { VaultGraph, VaultNote } from "@/types/book"
 
 import {
   buildUniqueNotePath,
@@ -20,6 +20,7 @@ type PromptDialog = (config: PromptDialogConfig) => Promise<string | null>
 type ConfirmDialog = (config: ConfirmDialogConfig) => Promise<boolean>
 
 interface UseVaultNotesEditorActionsArgs {
+  busy: boolean
   bookId: string
   bookTitle: string
   confirm: ConfirmDialog
@@ -43,7 +44,9 @@ interface UseVaultNotesEditorActionsArgs {
   setGraph: Dispatch<SetStateAction<VaultGraph>>
   setMode: (value: "edit") => void
   setNotes: Dispatch<SetStateAction<VaultNote[]>>
-  setRelations: Dispatch<SetStateAction<VaultNoteRelations | null>>
+  settlePath: (path: string) => Promise<void>
+  forgetPath: (path: string) => void
+  flushAll: () => Promise<boolean>
   setSelectedFolder: Dispatch<SetStateAction<string | null>>
   setSelectedPath: Dispatch<SetStateAction<string | null>>
   setStatus: Dispatch<SetStateAction<string | null>>
@@ -52,6 +55,7 @@ interface UseVaultNotesEditorActionsArgs {
 export function useVaultNotesEditorActions({
   bookId,
   bookTitle,
+  busy,
   confirm,
   drafts,
   editedFolder,
@@ -73,48 +77,29 @@ export function useVaultNotesEditorActions({
   setGraph,
   setMode,
   setNotes,
-  setRelations,
+  settlePath,
+  forgetPath,
+  flushAll,
   setSelectedFolder,
   setSelectedPath,
   setStatus,
 }: UseVaultNotesEditorActionsArgs) {
-  const refreshGraph = async () => {
-    const nextGraph = await booksApi.getVaultGraph(bookId)
-    setGraph(nextGraph)
-  }
-
-  const saveNote = async (path: string, content: string) => {
-    latestDraftRef.current[path] = content
+  const refreshGraph = useCallback(async () => {
     try {
-      const result = await booksApi.saveVaultNote(bookId, { path, content })
-      if (latestDraftRef.current[path] !== result.content) return
-      setNotes((current) =>
-        current
-          .map((note) =>
-            note.path === path ? { ...note, content: result.content, updated_at: result.updated_at ?? note.updated_at } : note
-          )
-          .sort((a, b) => a.path.localeCompare(b.path))
-      )
-      setDrafts((current) => ({ ...current, [path]: result.content }))
-      setStatus("Saved just now")
-      void refreshGraph()
-      if (selectedPath === path) {
-        void booksApi.getVaultNoteRelations(bookId, path).then((value) => setRelations(value))
-      }
+      const nextGraph = await booksApi.getVaultGraph(bookId)
+      setGraph(nextGraph)
     } catch {
-      setStatus(`Could not save ${path}`)
+      setStatus("The note action completed, but the graph could not refresh. Reopen the page to retry.")
     }
-  }
-
-  const updateDraft = (path: string, value: string) => {
-    latestDraftRef.current[path] = value
-    setDrafts((current) => ({ ...current, [path]: value }))
-    setStatus(null)
-  }
+  }, [bookId, setGraph, setStatus])
 
   const openNote = (reference: string) => {
+    if (busy) return
     const match = notes.find((note) => matchesReference(note.path, reference))
-    if (!match) return
+    if (!match) {
+      setStatus("Could not open this linked note. It may have been removed.")
+      return
+    }
     setSelectedFolder(noteFolder(match.path))
     startTransition(() => setSelectedPath(match.path))
   }
@@ -126,6 +111,7 @@ export function useVaultNotesEditorActions({
   }
 
   const createFolder = async (parentFolder?: string | null) => {
+    if (busy) return
     const base = normalizeWorkspaceFolderPath(parentFolder ?? selectedFolder) || "Custom"
     const requestedFolder = await prompt({
       title: "Create vault folder",
@@ -148,6 +134,7 @@ export function useVaultNotesEditorActions({
   }
 
   const createNote = async (folderOverride?: string | null) => {
+    if (busy) return
     const destinationFolder = folderOverride?.trim() || selectedFolder || noteFolder(selectedPath ?? "") || "Custom"
     const path = buildUniqueNotePath(notes, destinationFolder, "Untitled note")
     const title = noteTitle(path)
@@ -155,7 +142,7 @@ export function useVaultNotesEditorActions({
     try {
       const result = await booksApi.saveVaultNote(bookId, { path, content: `# ${title}\n\n` })
       setNotes((current) =>
-        [...current, {
+        [...current.filter((note) => note.path !== result.path), {
           id: `${result.path}:${Date.now()}`,
           book_id: bookId,
           source: result.source,
@@ -172,12 +159,15 @@ export function useVaultNotesEditorActions({
       setMode("edit")
       setStatus(`Created ${result.path}`)
       await refreshGraph()
+    } catch {
+      setStatus("Could not create this note. Please try again.")
     } finally {
       setBusy(false)
     }
   }
 
   const moveNoteToFolder = async (notePath: string, destinationFolder: string | null) => {
+    if (busy) return
     const note = noteMap.get(notePath)
     if (!note) return
     const cleanFolder = normalizeWorkspaceFolderPath(destinationFolder)
@@ -192,12 +182,15 @@ export function useVaultNotesEditorActions({
 
     setBusy(true)
     try {
+      await settlePath(note.path)
       const content = drafts[note.path] ?? note.content
       const result = await booksApi.saveVaultNote(bookId, { path: nextPath, content })
+      setNotes((current) => [...current.filter((item) => item.path !== result.path), { ...note, id: result.path, path: result.path, content: result.content, updated_at: result.updated_at ?? note.updated_at }])
       await booksApi.deleteVaultNote(bookId, note.path)
+      forgetPath(note.path)
       setNotes((current) =>
         current
-          .filter((item) => item.path !== note.path)
+          .filter((item) => item.path !== note.path && item.path !== result.path)
           .concat({
             ...note,
             path: result.path,
@@ -229,7 +222,7 @@ export function useVaultNotesEditorActions({
       setStatus(`Moved note to ${result.path}`)
       await refreshGraph()
     } catch {
-      setStatus("Could not move this note")
+      setStatus("Could not finish moving this note. Any created copy is shown alongside the original.")
     } finally {
       setBusy(false)
       setDropTargetFolder(null)
@@ -237,6 +230,7 @@ export function useVaultNotesEditorActions({
   }
 
   const deleteCurrent = async () => {
+    if (busy) return
     if (!selectedNote) return
     const proceed = await confirm({
       title: "Delete note?",
@@ -247,7 +241,9 @@ export function useVaultNotesEditorActions({
     if (!proceed) return
     setBusy(true)
     try {
+      await settlePath(selectedNote.path)
       await booksApi.deleteVaultNote(bookId, selectedNote.path)
+      forgetPath(selectedNote.path)
       const remaining = notes.filter((note) => note.path !== selectedNote.path)
       setNotes(remaining)
       setDrafts((current) => {
@@ -263,12 +259,15 @@ export function useVaultNotesEditorActions({
       setSelectedPath(remaining[0]?.path ?? null)
       setStatus(`Deleted ${selectedNote.path}`)
       await refreshGraph()
+    } catch {
+      setStatus("Could not delete this note. Please try again.")
     } finally {
       setBusy(false)
     }
   }
 
   const moveCurrent = async () => {
+    if (busy) return
     if (!selectedNote) return
     const cleanFolder = normalizeWorkspaceFolderPath(editedFolder)
     const cleanTitle = sanitizeWorkspaceTitle(editedTitle, "")
@@ -282,13 +281,20 @@ export function useVaultNotesEditorActions({
       return
     }
 
+    if (notes.some((note) => note.path.toLowerCase() === nextPath.toLowerCase())) {
+      setStatus("A note already uses that path. Choose a different title or folder.")
+      return
+    }
     setBusy(true)
     try {
+      await settlePath(selectedNote.path)
       const result = await booksApi.saveVaultNote(bookId, { path: nextPath, content: selectedContent })
+      setNotes((current) => [...current.filter((item) => item.path !== result.path), { ...selectedNote, id: result.path, path: result.path, content: result.content, updated_at: result.updated_at ?? selectedNote.updated_at }])
       await booksApi.deleteVaultNote(bookId, selectedNote.path)
+      forgetPath(selectedNote.path)
       setNotes((current) =>
         current
-          .filter((note) => note.path !== selectedNote.path)
+          .filter((note) => note.path !== selectedNote.path && note.path !== result.path)
           .concat({
             ...selectedNote,
             path: result.path,
@@ -318,13 +324,14 @@ export function useVaultNotesEditorActions({
       setStatus(`Moved note to ${result.path}`)
       await refreshGraph()
     } catch {
-      setStatus("Could not move this note")
+      setStatus("Could not finish moving this note. Any created copy is shown alongside the original.")
     } finally {
       setBusy(false)
     }
   }
 
   const duplicateCurrent = async () => {
+    if (busy) return
     if (!selectedNote) return
     const folder = noteFolder(selectedNote.path)
     const path = buildUniqueNotePath(notes, folder, `${noteTitle(selectedNote.path)} Copy`)
@@ -332,7 +339,7 @@ export function useVaultNotesEditorActions({
     try {
       const result = await booksApi.saveVaultNote(bookId, { path, content: selectedContent })
       setNotes((current) =>
-        [...current, {
+        [...current.filter((note) => note.path !== result.path), {
           id: `${result.path}:${Date.now()}`,
           book_id: bookId,
           source: result.source,
@@ -345,6 +352,8 @@ export function useVaultNotesEditorActions({
       setSelectedPath(result.path)
       setStatus(`Duplicated to ${result.path}`)
       await refreshGraph()
+    } catch {
+      setStatus("Could not duplicate this note. Please try again.")
     } finally {
       setBusy(false)
     }
@@ -361,6 +370,10 @@ export function useVaultNotesEditorActions({
   }
 
   const exportNotes = async () => {
+    if (busy) return
+    setBusy(true)
+    try {
+      if (!await flushAll()) return
     const blob = await booksApi.exportVaultNotes(bookId)
     const url = window.URL.createObjectURL(blob)
     const anchor = document.createElement("a")
@@ -371,19 +384,30 @@ export function useVaultNotesEditorActions({
     anchor.remove()
     window.URL.revokeObjectURL(url)
     setStatus("Downloaded notes ZIP")
+    } catch {
+      setStatus("Could not export notes. Please try again.")
+    } finally {
+      setBusy(false)
+    }
   }
 
   const importNotes = async (file: File) => {
+    if (busy) return
+    if (!await flushAll()) return
     setBusy(true)
     try {
       await booksApi.importVaultNotes(bookId, file)
-      const [nextNotes, nextGraph] = await Promise.all([booksApi.listVaultNotes(bookId), booksApi.getVaultGraph(bookId)])
+      const nextNotes = await booksApi.listVaultNotes(bookId)
       setNotes(nextNotes)
-      setGraph(nextGraph)
+      setDrafts({})
+      latestDraftRef.current = {}
       setSelectedPath(nextNotes[0]?.path ?? null)
       setSelectedFolder(noteFolder(nextNotes[0]?.path ?? ""))
       setCustomFolders((current) => [...new Set([...current, ...nextNotes.map((note) => noteFolder(note.path)).filter(Boolean)])].sort())
       setStatus(`Imported ${file.name}`)
+      await refreshGraph()
+    } catch {
+      setStatus("Could not import these notes. Please try again.")
     } finally {
       setBusy(false)
     }
@@ -401,7 +425,5 @@ export function useVaultNotesEditorActions({
     moveNoteToFolder,
     openNote,
     refreshGraph,
-    saveNote,
-    updateDraft,
   }
 }

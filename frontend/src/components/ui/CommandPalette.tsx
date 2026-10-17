@@ -6,7 +6,7 @@ import type { Route } from "next"
 import { useRouter } from "next/navigation"
 
 import { booksApi } from "@/lib/api/books"
-import { asQueryKey, booksListCacheKey } from "@/lib/query/cacheKeys"
+import { asQueryKey, booksSelectorCacheKey } from "@/lib/query/cacheKeys"
 import { useAuthStore } from "@/lib/stores/authStore"
 import { useUiPreferencesStore } from "@/lib/stores/uiPreferencesStore"
 import { getBookHref } from "@/lib/utils/bookRoutes"
@@ -15,12 +15,12 @@ import { resolveWorkspaceTools } from "@/lib/workspace/toolResolver"
 import { toolsForPlacement } from "@/lib/workspace/toolRegistry"
 import { COMMAND_PALETTE_EVENT } from "@/components/ui/ShortcutHelp"
 import { Dialog } from "@/components/ui/Dialog"
-import type { Book } from "@/types/book"
+import type { BookSelector } from "@/types/book"
 import type { UserBookUiPreference, UserUiPreference } from "@/types/uiPreferences"
 import type { CommandAction } from "@/types/ux"
 
 const EXTRA_BASE_ACTIONS: CommandAction[] = [
-  { id: "nav:forum", label: "Open Public Forum", href: "/public/forum", group: "Navigation", keywords: ["community", "discussion"] },
+  { id: "nav:forum", label: "Open Book Discussions", href: "/public/forum", group: "Navigation", keywords: ["book discussions", "forum", "community"] },
   { id: "nav:notifications", label: "Open Notifications", href: "/notifications", group: "Navigation", keywords: ["updates", "inbox"] },
 ]
 
@@ -71,7 +71,7 @@ function buildBaseActions(preferences: UserUiPreference): CommandAction[] {
 }
 
 function buildBookActions(
-  books: Book[],
+  books: BookSelector[],
   preferences: UserUiPreference,
   bookPreferences: Record<string, UserBookUiPreference>,
   hasAuthorAccess: boolean,
@@ -134,9 +134,9 @@ export function CommandPalette() {
   const [isPending, startTransition] = useTransition()
   const inputRef = useRef<HTMLInputElement | null>(null)
 
-  const booksQuery = useQuery<Book[]>({
-    queryKey: asQueryKey(booksListCacheKey(true)),
-    queryFn: () => booksApi.list(true),
+  const booksQuery = useQuery<BookSelector[]>({
+    queryKey: asQueryKey(booksSelectorCacheKey(true)),
+    queryFn: () => booksApi.listSelector(true),
     enabled: open && authHydrated && Boolean(user),
     staleTime: 30_000,
   })
@@ -146,7 +146,7 @@ export function CommandPalette() {
       ...buildBaseActions(preferences),
       ...buildBookActions(booksQuery.data ?? [], preferences, bookPreferences, Boolean(user && user.tier !== "free")),
     ],
-    [bookPreferences, booksQuery.data, preferences, user?.tier],
+    [bookPreferences, booksQuery.data, preferences, user],
   )
   const recentActions = useMemo(() => getRecentCommandActions(actions), [actions])
   const filteredActions = useMemo(() => filterCommandActions(actions, query), [actions, query])

@@ -93,8 +93,19 @@ HONORIFIC_SUFFIXES = ("san", "kun", "chan", "sama", "sensei", "senpai", "dono", 
 HONORIFIC_PREFIXES = ("mr", "mrs", "ms", "miss", "dr", "sir", "lady", "lord")
 
 
-async def embed_for_dedup(name: str, traits: dict) -> list[float]:
-    return await embed_character(name, traits)
+async def embed_for_dedup(
+    name: str,
+    traits: dict,
+    *,
+    user_id: uuid.UUID,
+    book_id: uuid.UUID | None = None,
+) -> list[float]:
+    return await embed_character(
+        name,
+        traits,
+        user_id=user_id,
+        book_id=book_id,
+    )
 
 
 def normalize_character_name(name: str | None) -> str:

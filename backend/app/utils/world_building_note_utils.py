@@ -9,6 +9,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.book import Book
 from app.models.intelligence import WorldCanonicalIdentity, WorldNote
+from app.services.world_analysis_state_service import (
+    mark_book_world_analysis_stale,
+    mark_related_series_world_analysis_stale,
+)
 from app.utils.world_building_candidate_utils import _dedupe_strings
 from app.utils.world_building_conflict_utils import _world_names_equivalent
 
@@ -105,6 +109,8 @@ async def save_canon_override(
             identity.metadata_json = metadata
             identity.updated_at = datetime.now(UTC)
             await db.flush()
+            await mark_book_world_analysis_stale(db, book_id=book.id)
+            await mark_related_series_world_analysis_stale(db, book_id=book.id)
             return identity
 
     identity = WorldCanonicalIdentity(
@@ -119,4 +125,6 @@ async def save_canon_override(
     )
     db.add(identity)
     await db.flush()
+    await mark_book_world_analysis_stale(db, book_id=book.id)
+    await mark_related_series_world_analysis_stale(db, book_id=book.id)
     return identity

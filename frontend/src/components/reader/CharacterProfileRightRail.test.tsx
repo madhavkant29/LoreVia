@@ -24,7 +24,7 @@ describe("CharacterProfileRightRail", () => {
     const view = renderRail({ onOpenRelationships })
 
     expect(view.textContent).toContain("Continuity alerts")
-    expect(view.textContent).toContain("Extraction confidence")
+    expect(view.textContent).toContain("Profile completeness")
     expect(view.textContent).toContain("Open questions")
     expect(view.textContent).toContain("Grounded profile")
     expect(view.textContent).toContain("1 connected ties")
@@ -106,7 +106,7 @@ function renderRail({
 }
 
 function clickButton(view: HTMLDivElement, label: string) {
-  const button = Array.from(view.querySelectorAll("button")).find((candidate) => candidate.textContent?.includes(label))
+  const button = Array.from(view.querySelectorAll("button")).find((candidate) => candidate.textContent?.trim() === label)
   if (!button) throw new Error(`Could not find ${label} button`)
   act(() => {
     button.click()

@@ -1,15 +1,21 @@
+import asyncio
+from typing import Annotated
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps.auth import get_optional_current_user
+from app.api.deps.feature_flags import require_cursor_page_apis_enabled
 from app.core.database import get_db
 from app.core.redis import (
     cache_get,
     cache_set,
+    get_public_catalog_cache_version,
     key_public_book_detail,
     key_public_books,
     key_public_chapter,
+    key_public_uploads_overview,
     mark_public_profile_cache_dirty,
 )
 from app.core.storage import download_book, get_presigned_url
@@ -20,17 +26,22 @@ from app.schemas.public import (
     PublicBookAnalyticsViewBody,
     PublicBookDetailOut,
     PublicBookOut,
+    PublicBookPageOut,
     PublicChapterOut,
     PublicForumPostListOut,
     PublicRankedBookListOut,
     PublicUploadsOverviewOut,
     PublicUserProfileOut,
 )
+from app.services.public_asset_service import public_chapter_content_url
+from app.services.public_catalog_service import (
+    get_public_book_display_analytics,
+    list_public_books_page,
+)
 from app.utils.books.manuscript import (
     deserialize_manuscript_content,
 )
 from app.utils.public.analytics import (
-    build_public_book_analytics,
     build_public_book_analytics_map,
     build_public_uploads_overview,
     list_visible_creator_public_book_outs,
@@ -164,6 +175,31 @@ async def list_public_books(
     return payload
 
 
+@router.get(
+    "/books/page",
+    response_model=PublicBookPageOut,
+    dependencies=[Depends(require_cursor_page_apis_enabled)],
+)
+async def list_public_books_page_endpoint(
+    content_source_type: str | None = None,
+    catalog: str | None = None,
+    search: str | None = None,
+    limit: int = Query(default=24, ge=1, le=100),
+    cursor: str | None = Query(default=None, max_length=1024),
+    db: AsyncSession = Depends(get_db),
+):
+    """Additive keyset page for public catalog cards."""
+    ensure_public_mode_enabled()
+    return await list_public_books_page(
+        db,
+        content_source_type=content_source_type,
+        catalog=catalog,
+        search=search,
+        limit=limit,
+        cursor=cursor,
+    )
+
+
 @router.get("/uploads", response_model=list[PublicBookOut])
 async def list_creator_public_uploads(
     search: str | None = None,
@@ -229,7 +265,15 @@ async def get_public_uploads_analytics(
     db: AsyncSession = Depends(get_db),
 ):
     ensure_public_mode_enabled()
-    return await build_public_uploads_overview(db)
+    version = await get_public_catalog_cache_version()
+    cache_key = key_public_uploads_overview(version)
+    cached = await cache_get(cache_key)
+    if isinstance(cached, dict):
+        return cached
+    payload = await build_public_uploads_overview(db)
+    cache_payload = payload.model_dump(mode="json") if hasattr(payload, "model_dump") else payload
+    await cache_set(cache_key, cache_payload, 300)
+    return payload
 
 
 @router.get("/books/{book_slug}", response_model=PublicBookDetailOut)
@@ -246,7 +290,7 @@ async def get_public_book(
     ):
         raise HTTPException(404, "Public book not found")
     should_cache = is_public_demo_book(book)
-    analytics = await build_public_book_analytics(db, book=book)
+    analytics = await get_public_book_display_analytics(db, book=book)
 
     if should_cache and can_view_public_book(book):
         cached = await cache_get(key_public_book_detail(str(book.id)))
@@ -311,6 +355,7 @@ async def record_public_book_view(
 async def get_public_chapter(
     book_slug: str,
     chapter_num: int,
+    include_content: Annotated[bool, Query()] = False,
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_optional_current_user),
 ):
@@ -323,7 +368,10 @@ async def get_public_chapter(
         raise HTTPException(404, "Public book not found")
     should_cache = is_public_demo_book(book)
 
-    if should_cache and can_view_public_book(book):
+    # Inline compatibility responses intentionally bypass the shared chapter
+    # cache.  Otherwise a default URL-only response could satisfy a later
+    # ``include_content=true`` request (or vice versa) with the wrong shape.
+    if should_cache and can_view_public_book(book) and not include_content:
         cached = await cache_get(key_public_chapter(str(book.id), chapter_num))
         if cached:
             return cached
@@ -336,11 +384,14 @@ async def get_public_chapter(
     if not chapter:
         raise HTTPException(404, "Chapter not found")
 
-    stored_payload = (
-        deserialize_manuscript_content(download_book(chapter.s3_key))
-        if chapter.s3_key
-        else {"text": None, "html": None}
-    )
+    content_url = public_chapter_content_url(book, chapter)
+    stored_payload = {"text": None, "html": None}
+    if include_content or content_url is None:
+        stored_payload = (
+            deserialize_manuscript_content(await asyncio.to_thread(download_book, chapter.s3_key))
+            if chapter.s3_key
+            else stored_payload
+        )
     payload = {
         "book_id": str(book.id),
         "book_title": book.title,
@@ -348,10 +399,11 @@ async def get_public_chapter(
         "chapter_title": chapter.title,
         "chapter_description": chapter.description,
         "total_chapters": book.total_chapters,
-        "text_url": get_presigned_url(chapter.s3_key) if chapter.s3_key else None,
+        "content_url": content_url,
+        "text_url": content_url or (get_presigned_url(chapter.s3_key) if chapter.s3_key else None),
         "text_content": stored_payload.get("text"),
         "html_content": stored_payload.get("html"),
     }
-    if should_cache and can_view_public_book(book):
+    if should_cache and can_view_public_book(book) and not include_content:
         await cache_set(key_public_chapter(str(book.id), chapter_num), payload, 3600)
     return payload

@@ -34,6 +34,7 @@ describe("next config", () => {
       },
     ])
     expect(nextConfig.headers).toBeUndefined()
+    expect(nextConfig.experimental.webpackBuildWorker).toBe(false)
   })
 
   it("routes api traffic to the configured server-side origin in production", async () => {

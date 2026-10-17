@@ -19,3 +19,5 @@ class NotificationOut(BaseModel):
 class NotificationListOut(BaseModel):
     items: list[NotificationOut]
     unread_count: int
+    next_cursor: str | None = None
+    has_more: bool = False

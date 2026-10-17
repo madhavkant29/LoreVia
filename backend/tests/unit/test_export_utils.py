@@ -64,6 +64,30 @@ def _build_characters(book: Book) -> list[Character]:
     ]
 
 
+@pytest.mark.parametrize(
+    ("renderer", "signature"),
+    [
+        (manuscript_docx, b"PK"),
+        (manuscript_pdf_compiled, b"%PDF"),
+        (manuscript_epub_compiled, b"PK"),
+        (novel_docx, b"PK"),
+        (novel_pdf_compiled, b"%PDF"),
+        (novel_epub_compiled, b"PK"),
+    ],
+)
+def test_large_export_renderers_can_write_to_a_caller_owned_stream(renderer, signature):
+    output = BytesIO()
+
+    result = renderer(
+        title="Streamed Draft",
+        chapters=[{"number": 1, "title": "Opening", "text": "A short chapter."}],
+        output=output,
+    )
+
+    assert result is None
+    assert output.getvalue().startswith(signature)
+
+
 def test_character_bible_markdown_appends_attribution_once():
     book = _build_book()
     characters = _build_characters(book)[:1]

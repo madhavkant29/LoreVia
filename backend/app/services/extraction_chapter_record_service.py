@@ -8,11 +8,13 @@ from sqlalchemy import delete, select
 from app.core.storage import upload_text
 from app.models.book import Book, Chapter
 from app.models.character import (
+    Character,
     CharacterCandidate,
     CharacterMention,
     CharacterRelationshipCandidate,
+    CharacterState,
 )
-from app.models.intelligence import BookChunk
+from app.models.intelligence import CharacterRelationship
 from app.services.extraction_chapter_content_service import _count_words, _sync_chapter_media
 from app.utils.books.manuscript import serialize_manuscript_content
 from app.utils.books.normalization import normalize_chapter_kind
@@ -112,16 +114,26 @@ async def stage_chapter_for_extraction(
     )
     await db.flush()
 
-    await db.execute(delete(BookChunk).where(BookChunk.chapter_id == chapter.id))
+    return chapter
+
+
+async def replace_chapter_extraction_records(
+    db,
+    *,
+    book_id,
+    chapter_number: int,
+    replace_generated_intelligence: bool = False,
+) -> None:
+    """Clear replaceable rows only after new provider output is available."""
     await db.execute(
         delete(CharacterMention).where(
-            CharacterMention.book_id == book.id,
+            CharacterMention.book_id == book_id,
             CharacterMention.chapter_number == chapter_number,
         )
     )
     await db.execute(
         delete(CharacterCandidate).where(
-            CharacterCandidate.book_id == book.id,
+            CharacterCandidate.book_id == book_id,
             CharacterCandidate.chapter_number == chapter_number,
             CharacterCandidate.status.in_(
                 (CHARACTER_CANDIDATE_PENDING, CHARACTER_CANDIDATE_SUPPRESSED)
@@ -130,7 +142,7 @@ async def stage_chapter_for_extraction(
     )
     await db.execute(
         delete(CharacterRelationshipCandidate).where(
-            CharacterRelationshipCandidate.book_id == book.id,
+            CharacterRelationshipCandidate.book_id == book_id,
             CharacterRelationshipCandidate.chapter_number == chapter_number,
             CharacterRelationshipCandidate.status.in_(
                 (
@@ -140,4 +152,20 @@ async def stage_chapter_for_extraction(
             ),
         )
     )
-    return chapter
+    if not replace_generated_intelligence:
+        return
+    await db.execute(
+        delete(CharacterRelationship).where(
+            CharacterRelationship.book_id == book_id,
+            CharacterRelationship.from_chapter == chapter_number,
+            CharacterRelationship.edited_by_author.is_(False),
+        )
+    )
+    await db.execute(
+        delete(CharacterState).where(
+            CharacterState.character_id.in_(
+                select(Character.id).where(Character.book_id == book_id)
+            ),
+            CharacterState.at_chapter == chapter_number,
+        )
+    )

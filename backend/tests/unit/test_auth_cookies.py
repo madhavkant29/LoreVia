@@ -130,6 +130,13 @@ def test_set_auth_cookies_disables_secure_for_local_http(monkeypatch):
     assert auth_cookie_secure() is False
 
 
+def test_auth_cookie_secure_cannot_be_downgraded_by_production_app_url(monkeypatch):
+    monkeypatch.setattr("app.core.config.settings.APP_URL", "http://getlorevia.com", raising=False)
+    monkeypatch.setattr("app.core.config.settings.DEBUG", False, raising=False)
+
+    assert auth_cookie_secure() is True
+
+
 def test_clear_auth_cookies_sets_expired_headers(monkeypatch):
     monkeypatch.setattr("app.core.config.settings.APP_URL", "https://getlorevia.com", raising=False)
     monkeypatch.setattr("app.core.config.settings.DEBUG", False, raising=False)
@@ -338,6 +345,45 @@ def test_validate_auth_csrf_token_accepts_matching_cookie_header_and_origin():
                 (b"cookie", f"{AUTH_CSRF_COOKIE_NAME}={token}".encode()),
                 (AUTH_CSRF_HEADER_NAME.encode("utf-8"), token.encode("utf-8")),
                 (b"origin", b"https://getlorevia.com"),
+            ],
+        }
+    )
+
+    validate_auth_csrf_token(request)
+
+
+def test_validate_auth_csrf_token_accepts_an_explicit_cors_origin(monkeypatch):
+    token = create_auth_csrf_token()
+    monkeypatch.setattr(
+        "app.core.config.settings.BACKEND_CORS_ORIGINS",
+        "https://app.example.com",
+    )
+    request = Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "headers": [
+                (b"cookie", f"{AUTH_CSRF_COOKIE_NAME}={token}".encode()),
+                (AUTH_CSRF_HEADER_NAME.encode("utf-8"), token.encode("utf-8")),
+                (b"origin", b"https://app.example.com"),
+            ],
+        }
+    )
+
+    validate_auth_csrf_token(request)
+
+
+def test_validate_auth_csrf_token_accepts_any_localhost_port_in_debug(monkeypatch):
+    monkeypatch.setattr("app.core.config.settings.DEBUG", True, raising=False)
+    token = create_auth_csrf_token()
+    request = Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "headers": [
+                (b"cookie", f"{AUTH_CSRF_COOKIE_NAME}={token}".encode()),
+                (AUTH_CSRF_HEADER_NAME.encode("utf-8"), token.encode("utf-8")),
+                (b"origin", b"http://localhost:3001"),
             ],
         }
     )

@@ -14,24 +14,23 @@ export function LibraryWorkspaceHeader({
 }) {
   return (
     <header className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
-      <div className="space-y-3">
-        <p className={`text-[0.68rem] font-semibold uppercase tracking-[0.22em] ${isDark ? "text-teal-200" : "text-teal-700"}`}>Author workspace</p>
-        <h1 className={`font-display text-[2.75rem] leading-none tracking-[-0.04em] sm:text-[3.25rem] ${isDark ? "text-[#f5f0e8]" : "text-stone-950"}`}>
+      <div className="space-y-2">
+        <h1 className={`font-display text-3xl leading-tight tracking-[-0.025em] sm:text-4xl ${isDark ? "text-[#f5f0e8]" : "text-stone-950"}`}>
           Library
         </h1>
         <p className={`max-w-2xl text-base leading-7 ${isDark ? "text-[#a6a39b]" : "text-stone-600"}`}>
-          Organize serious writing projects, track manuscript readiness, and return to the next editorial decision without losing context.
+          Return to a draft, review its status, or start a new project.
         </p>
       </div>
 
-      <div className="flex flex-col gap-3 sm:flex-row">
-        <Tooltip content="Open public beta reader discussions" className="w-full sm:w-auto">
-          <Button variant="secondary" size="md" onClick={onOpenForum} className="min-h-11 w-full rounded-sm px-4 sm:w-auto">
+      <div className="flex flex-wrap items-center gap-3">
+        <Tooltip content="Open public beta reader discussions" className="order-2">
+          <Button variant="ghost" size="md" onClick={onOpenForum} className="inline-flex min-h-11 items-center justify-center rounded-sm px-4">
             <ForumIcon className={isDark ? "text-[#d2cdc3]" : "text-stone-600"} />
-            Beta forum
+            Book discussions
           </Button>
         </Tooltip>
-        <Button variant="primary" size="md" disabled={createDisabled} onClick={onCreate} className="min-h-11 w-full rounded-sm px-4 sm:w-auto">
+        <Button variant="primary" size="md" disabled={createDisabled} onClick={onCreate} className="dark:bg-teal-700 dark:text-white inline-flex min-h-11 items-center justify-center rounded-sm px-4">
           <PlusIcon />
           New project
         </Button>

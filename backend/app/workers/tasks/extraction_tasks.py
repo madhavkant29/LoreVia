@@ -7,6 +7,7 @@ from app.utils.ingestion_utils import (
     is_llm_coordination_retry_error,
     is_llm_usage_limit_error,
     is_retryable_processing_error,
+    llm_usage_limit_blocker,
     load_processing_chapter_payload,
     update_book_processing_state,
 )
@@ -15,6 +16,26 @@ from app.utils.retry_utils import NON_LLM_MAX_RETRIES, exponential_backoff_secon
 from app.utils.worker_async_utils import run_worker_coro
 from app.workers.celery_app import celery_app
 from app.workers.consumers.extraction_consumer import _process_chapter, process_book
+
+
+@celery_app.task(
+    bind=True,
+    name="extraction_tasks.process_manuscript_import_job",
+    queue="extraction",
+    max_retries=0,
+    ignore_result=True,
+)
+def process_manuscript_import_job_task(self, *, job_id: str):
+    async def _run() -> dict:
+        import uuid
+
+        from app.core.database import AsyncSessionLocal
+        from app.services.manuscript_import_job_service import process_manuscript_import_job
+
+        async with AsyncSessionLocal() as db:
+            return await process_manuscript_import_job(db, uuid.UUID(job_id))
+
+    return run_worker_coro(_run())
 
 
 @celery_app.task(
@@ -41,6 +62,11 @@ def process_book_task(self, book_id: str, execution_id: str | None = None):
         result = run_worker_coro(
             process_book(book_id, queue_wait_ms=queue_wait_ms, task_id=self.request.id)
         )
+        budget_blocked_error = str(result.get("error") or "") if isinstance(result, dict) else ""
+        budget_blocked = budget_blocked_error in {
+            "budget_exhausted",
+            "insufficient_remaining_budget",
+        }
         if execution_id:
 
             async def _complete_execution() -> None:
@@ -48,10 +74,20 @@ def process_book_task(self, book_id: str, execution_id: str | None = None):
                 from app.services.task_execution_service import (
                     complete_task_execution,
                     dispatch_pending_extraction_tasks,
+                    fail_task_execution,
                 )
 
                 async with AsyncSessionLocal() as db:
-                    await complete_task_execution(db, execution_id)
+                    if budget_blocked:
+                        await fail_task_execution(
+                            db,
+                            execution_id,
+                            error=RuntimeError(budget_blocked_error),
+                            terminal=True,
+                            category="budget_limited",
+                        )
+                    else:
+                        await complete_task_execution(db, execution_id)
                     await dispatch_pending_extraction_tasks(db)
 
             run_worker_coro(_complete_execution())
@@ -124,7 +160,7 @@ def process_chapter_task(
         from app.models.book import Book, Chapter
 
         r = await get_redis()
-        if await r.exists(f"chapter_reprocess:{book_id}:{chapter_num}"):
+        if not execution_id and await r.exists(f"chapter_reprocess:{book_id}:{chapter_num}"):
             return
 
         try:
@@ -185,8 +221,8 @@ def process_chapter_task(
                 chapter_payload = await load_processing_chapter_payload(
                     book.id,
                     chapter_num,
-                    chapter_s3_key=chapter_row.s3_key if chapter_row is not None else None,
-                    chapter_title=chapter_row.title if chapter_row is not None else None,
+                    chapter_s3_key=(chapter_row.s3_key if chapter_row is not None else None),
+                    chapter_title=(chapter_row.title if chapter_row is not None else None),
                 )
                 if chapter_payload is None:
                     raise ValueError(f"missing_chapter_payload:{book.id}:{chapter_num}")
@@ -194,7 +230,7 @@ def process_chapter_task(
                 # Nothing below this point is safe to replay as a whole task:
                 # provider calls may succeed before a later provider/DB error.
                 chapter_work_started = True
-                await _process_chapter(
+                chapter_processed = await _process_chapter(
                     db,
                     book,
                     chapter_payload,
@@ -202,12 +238,20 @@ def process_chapter_task(
                     rebuild_run_id=rebuild_run_id,
                     manual_reprocess=manual_reprocess,
                 )
+                if chapter_processed is False:
+                    return {"skipped": "chapter_not_processed"}
                 await r.set(f"chapter_reprocess:{book_id}:{chapter_num}", "1", ex=30)
 
                 if version_uuid is not None and book.work_type != "screenplay":
-                    from app.utils.books.scene_metadata import extract_novel_scene_candidates
-                    from app.utils.books.scene_ordering import replace_chapter_novel_scenes
-                    from app.utils.books.scene_sync import sync_chapter_content_from_novel_scenes
+                    from app.utils.books.scene_metadata import (
+                        extract_novel_scene_candidates,
+                    )
+                    from app.utils.books.scene_ordering import (
+                        replace_chapter_novel_scenes,
+                    )
+                    from app.utils.books.scene_sync import (
+                        sync_chapter_content_from_novel_scenes,
+                    )
 
                     extracted_scenes = extract_novel_scene_candidates(
                         text=str(chapter_payload.get("text") or ""),
@@ -273,9 +317,11 @@ def process_chapter_task(
                         started_at=get_processing_started_at(book),
                         queue_wait_ms=queue_wait_ms,
                         chapter_number=chapter_num,
-                        chapter_title=chapter_payload.get("title")
-                        if isinstance(chapter_payload, dict)
-                        else None,
+                        chapter_title=(
+                            chapter_payload.get("title")
+                            if isinstance(chapter_payload, dict)
+                            else None
+                        ),
                         last_error=str(getattr(exc, "detail", None) or exc),
                     )
                     await db.commit()
@@ -310,7 +356,9 @@ def process_chapter_task(
         if is_llm_coordination_retry_error(exc):
             if execution_id:
 
-                async def _pause_capacity_execution(error_detail: str = str(exc)) -> None:
+                async def _pause_capacity_execution(
+                    error_detail: str = str(exc),
+                ) -> None:
                     from app.core.database import AsyncSessionLocal
                     from app.services.task_execution_service import pause_task_execution
 
@@ -325,9 +373,33 @@ def process_chapter_task(
                 run_worker_coro(_pause_capacity_execution())
             return {"paused": "llm_capacity"}
         if is_llm_usage_limit_error(exc):
+            usage_blocker = llm_usage_limit_blocker(exc)
+            if usage_blocker.get("permanent"):
+                if execution_id:
+                    error_text = str(exc)
+
+                    async def _fail_unresumable_execution(
+                        detail: str = error_text,
+                    ) -> None:
+                        from app.core.database import AsyncSessionLocal
+                        from app.services.task_execution_service import (
+                            fail_task_execution,
+                        )
+
+                        async with AsyncSessionLocal() as db:
+                            await fail_task_execution(
+                                db,
+                                execution_id,
+                                error=RuntimeError(detail),
+                                terminal=True,
+                                category="llm_token_limit",
+                            )
+
+                    run_worker_coro(_fail_unresumable_execution())
+                return {"failed": "llm_token_limit"}
             if execution_id:
 
-                async def _pause_execution(error_detail: str = str(exc)) -> None:
+                async def _pause_execution(blocker: dict = usage_blocker) -> None:
                     from app.core.database import AsyncSessionLocal
                     from app.services.task_execution_service import pause_task_execution
 
@@ -335,8 +407,12 @@ def process_chapter_task(
                         await pause_task_execution(
                             db,
                             execution_id,
-                            reason="llm_token_limit",
-                            blocker={"kind": "llm_tokens", "detail": error_detail},
+                            reason=(
+                                "llm_budget"
+                                if blocker.get("kind") == "llm_budget"
+                                else "llm_token_limit"
+                            ),
+                            blocker=blocker,
                         )
 
                 run_worker_coro(_pause_execution())

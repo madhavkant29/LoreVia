@@ -17,7 +17,7 @@ export function ProjectSkeletons({ isDark, viewMode, label }: { isDark: boolean;
   }
 
   return (
-    <div className="grid gap-4 xl:grid-cols-3" role="status" aria-label={label} aria-busy="true">
+    <div className="grid gap-4 md:grid-cols-2 2xl:grid-cols-3" role="status" aria-label={label} aria-busy="true">
       <span className="sr-only">{label}</span>
       {items.map((item) => (
         <ProjectCardSkeleton key={item} isDark={isDark} />

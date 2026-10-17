@@ -4,7 +4,7 @@ Paid provider calls are intentionally capped more tightly than infrastructure
 retries so a transient failure cannot multiply LLM or embedding spend.
 """
 
-LLM_MAX_RETRIES = 2
+LLM_MAX_RETRIES = 1
 LLM_MAX_ATTEMPTS = LLM_MAX_RETRIES + 1
 NON_LLM_MAX_RETRIES = 6
 RETRY_BACKOFF_BASE_SECONDS = 2

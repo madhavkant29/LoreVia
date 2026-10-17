@@ -163,8 +163,9 @@ describe("zero-coverage client runtime components", () => {
     await clickButton("Dismiss")
     expect(onContinue).toHaveBeenCalled()
     expect(onDismiss).toHaveBeenCalled()
-    const fill = Array.from(container?.querySelectorAll<HTMLElement>("div") ?? []).find((node) => node.style.height === "100%")
-    expect(fill).toBeTruthy()
+    // The redesigned rail reports position as text instead of a fill bar.
+    expect(container?.querySelector('[aria-label="Reading position"]')).not.toBeNull()
+    expect(container?.textContent).toContain("1,200 of 2,400 words")
   })
 
   it("shows first-time help once and persists its dismissal", async () => {
@@ -179,7 +180,6 @@ describe("zero-coverage client runtime components", () => {
   })
 
   it("renders the character workspace header and shell navigation", async () => {
-    const onBack = vi.fn()
     await renderElement(
       <>
         <CharacterWorkspaceHeader
@@ -187,7 +187,6 @@ describe("zero-coverage client runtime components", () => {
           description="Review the cast."
           stats={<span>12 profiles</span>}
           actions={<button type="button">Add character</button>}
-          onBack={onBack}
           isDark
         />
         <NotificationBellShell />
@@ -198,8 +197,7 @@ describe("zero-coverage client runtime components", () => {
     expect(container?.textContent).toContain("12 profiles")
     expect(container?.textContent).toContain("Go to library")
     expect(container?.querySelector('a[aria-label="Open notifications"]')?.getAttribute("href")).toBe("/notifications")
-    await clickButton("Projects")
-    expect(onBack).toHaveBeenCalled()
+    expect(container?.textContent).not.toContain("Search (Ctrl K)")
 
     cleanupRenderedTree()
     authState.user = null
@@ -213,11 +211,12 @@ describe("zero-coverage client runtime components", () => {
       window.dispatchEvent(new KeyboardEvent("keydown", { key: "?" }))
       await Promise.resolve()
     })
-    expect(document.body.textContent).toContain("Keyboard shortcuts")
-    expect(document.body.textContent).toContain("Open command palette")
+    const shortcutsDialog = Array.from(document.body.querySelectorAll('[role="dialog"]'))
+      .find((dialog) => dialog.textContent?.includes("Open command palette"))
+    expect(shortcutsDialog?.textContent).toContain("Open command palette")
 
     await act(async () => {
-      document.querySelector('[role="dialog"]')?.dispatchEvent(
+      shortcutsDialog?.dispatchEvent(
         new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
       )
       await Promise.resolve()
@@ -234,6 +233,7 @@ describe("zero-coverage client runtime components", () => {
   })
 
   it("unregisters service workers in local development", async () => {
+    vi.stubEnv("NODE_ENV", "development")
     const unregister = vi.fn().mockResolvedValue(true)
     const getRegistrations = vi.fn().mockResolvedValue([{ unregister }])
     Object.defineProperty(navigator, "serviceWorker", {
@@ -248,12 +248,14 @@ describe("zero-coverage client runtime components", () => {
     expect(unregister).toHaveBeenCalled()
   })
 
-  it("keeps the production service worker network-only", () => {
+  it("caches only the offline shell and public static assets", () => {
     const source = readFileSync("public/sw.js", "utf8")
 
-    expect(source).not.toContain('addEventListener("fetch"')
-    expect(source).not.toContain("caches.open")
-    expect(source).toContain('caches.delete("lorevia-offline-v1")')
+    expect(source).toContain('addEventListener("fetch"')
+    expect(source).toContain('url.pathname.startsWith("/api/")')
+    expect(source).toContain('request.mode === "navigate"')
+    expect(source).toContain('"/offline"')
+    expect(source).toContain('url.pathname.startsWith("/_next/static/")')
   })
 })
 

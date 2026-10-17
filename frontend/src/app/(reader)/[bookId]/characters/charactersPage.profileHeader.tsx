@@ -25,6 +25,8 @@ type CharacterProfileHeaderProps = {
   onShareCharacter: () => void
   onTabSelect: (tab: CharacterProfileTab) => void
   onToggleCharacterMenu: () => void
+  onEdit?: () => void
+  editing?: boolean
 }
 
 export function CharacterProfileHeader({
@@ -39,34 +41,34 @@ export function CharacterProfileHeader({
   onShareCharacter,
   onTabSelect,
   onToggleCharacterMenu,
+  onEdit, editing = false,
 }: CharacterProfileHeaderProps) {
   return (
     <>
       <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-3">
-            <h2 className={`text-[2.4rem] font-semibold tracking-tight ${isDark ? "text-white" : "text-stone-950"}`}>{character.name}</h2>
-            <span className={`rounded-full px-2.5 py-1 text-3xs font-semibold uppercase tracking-[0.16em] ${character.status === "deceased"
+            <h2 className={`break-words text-2xl font-semibold tracking-tight ${isDark ? "text-white" : "text-stone-950"}`}>{character.name}</h2>
+            <span className={`rounded-sm px-2.5 py-1 text-xs font-medium ${character.status === "deceased"
               ? isDark ? "bg-amber-500/15 text-amber-100" : "bg-amber-50 text-amber-700"
               : isDark ? "bg-teal-500/15 text-teal-100" : "bg-teal-50 text-teal-700"
             }`}>
               {formatStatus(character.status)}
             </span>
             {character.is_manual ? (
-              <span className={`rounded-full px-2.5 py-1 text-3xs font-semibold uppercase tracking-[0.16em] ${isDark ? "bg-violet-500/15 text-violet-100" : "bg-violet-100 text-violet-700"}`}>
-                Manual profile
-              </span>
+              <span className={`text-xs ${isDark ? "text-slate-400" : "text-stone-600"}`}>Manual profile</span>
             ) : null}
           </div>
-          <div className="mt-3 flex flex-wrap gap-2">
+          <div className={`mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm ${isDark ? "text-slate-400" : "text-stone-600"}`}>
             {[
               formatRole(character.role),
               `Chapter ${character.first_chapter}`,
               `Last seen: Chapter ${character.last_seen_chapter ?? character.first_chapter}`,
               `${character.mention_count ?? 0} mentions`,
               `${relationshipCount} relationships`,
-            ].map((item) => (
-              <span key={item} className={`rounded-full px-3 py-1 text-xs ${isDark ? "border border-[#202a38] bg-white/[0.03] text-slate-300" : "border border-stone-200 bg-white text-stone-600"}`}>
+            ].map((item, index) => (
+              <span key={item} className="inline-flex items-center gap-3">
+                {index > 0 ? <span aria-hidden="true" className={isDark ? "text-slate-600" : "text-stone-300"}>·</span> : null}
                 {item}
               </span>
             ))}
@@ -74,7 +76,7 @@ export function CharacterProfileHeader({
           {flags.length > 0 ? (
             <div className="mt-3 flex flex-wrap gap-2">
               {flags.map((flag) => (
-                <span key={flag} className={`rounded-full px-2.5 py-1 text-xs font-medium ${flagClasses(isDark, flag)}`}>
+                <span key={flag} className={`rounded-sm px-2.5 py-1 text-xs font-medium ${flagClasses(isDark, flag)}`}>
                   {flag}
                 </span>
               ))}
@@ -90,6 +92,7 @@ export function CharacterProfileHeader({
         </div>
 
         <div className="flex flex-wrap gap-2">
+          {onEdit ? <button type="button" onClick={onEdit} disabled={editing} className={actionButtonClasses(isDark)}>{editing ? "Editing profile" : "Edit profile"}</button> : null}
           <button type="button" onClick={onShareCharacter} className={actionButtonClasses(isDark)}>
             <span className="mr-2 inline-flex h-4 w-4 items-center justify-center">
               <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
@@ -98,7 +101,7 @@ export function CharacterProfileHeader({
             </span>
             {shareState === "copied" ? "Link copied" : shareState === "error" ? "Share failed" : "Share"}
           </button>
-          <OverflowMenu isDark={isDark} open={characterMenuOpen} onToggle={onToggleCharacterMenu} actions={characterMenuActions} />
+          <OverflowMenu label="Character actions" isDark={isDark} open={characterMenuOpen} onToggle={onToggleCharacterMenu} actions={characterMenuActions} />
         </div>
       </div>
 

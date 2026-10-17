@@ -13,6 +13,7 @@ from app.core.database import engine
 from app.core.redis import close_all_redis_clients
 from app.utils.exception_boundaries import BEST_EFFORT_CLEANUP_EXCEPTIONS
 from app.utils.logging.errors import scrub_sentry_event
+from app.utils.release_utils import normalize_release_sha
 from app.utils.request_context import get_request_id, set_request_id, set_request_user_id
 from app.utils.retry_utils import NON_LLM_MAX_RETRIES
 from app.utils.worker_async_utils import close_worker_loop, get_worker_loop, has_worker_loop
@@ -71,8 +72,10 @@ if settings.SENTRY_DSN and not settings.DEBUG:
         dsn=settings.SENTRY_DSN,
         integrations=[CeleryIntegration()],
         before_send=scrub_sentry_event,
-        traces_sample_rate=0.1,
-        profiles_sample_rate=0.1,
+        release=normalize_release_sha(settings.RELEASE_SHA),
+        environment=settings.DEPLOYMENT_ENV,
+        traces_sample_rate=settings.SENTRY_WORKER_TRACES_SAMPLE_RATE,
+        profiles_sample_rate=settings.SENTRY_WORKER_PROFILES_SAMPLE_RATE,
     )
 
 
@@ -114,6 +117,7 @@ celery_app = Celery(
         "app.workers.tasks.extraction_tasks",
         "app.workers.tasks.analysis_tasks",
         "app.workers.tasks.embedding_tasks",
+        "app.workers.tasks.export_tasks",
         "app.workers.tasks.intelligence_tasks",
         "app.workers.tasks.maintenance_tasks",
     ],
@@ -140,13 +144,15 @@ celery_app.conf.update(
         "extraction_tasks.*": {"queue": "extraction"},
         "analysis_tasks.*": {"queue": "analysis"},
         "embedding_tasks.*": {"queue": "embedding"},
+        "export_tasks.*": {"queue": "maintenance"},
         "intelligence_tasks.*": {"queue": "intelligence"},
-        "maintenance_tasks.*": {"queue": "intelligence"},
+        "maintenance_tasks.*": {"queue": "maintenance"},
     },
     task_annotations={
         # Queue-specific guardrails:
         # - extraction is heavy/long-running; use generous timeouts
         # - intelligence is user-facing; keep tighter limits
+        # - maintenance is isolated so scheduled work cannot starve interactive jobs
         "extraction_tasks.process_book": {
             "soft_time_limit": 20 * 60,
             "time_limit": 25 * 60,
@@ -191,6 +197,16 @@ celery_app.conf.update(
             "schedule": crontab(minute=0),
             "kwargs": {"limit": 100},
         },
+        "maintenance-send-due-subscription-emails-hourly": {
+            "task": "maintenance_tasks.send_due_subscription_emails",
+            "schedule": crontab(minute=15),
+            "kwargs": {"limit": 100},
+        },
+        "maintenance-reconcile-paddle-subscriptions-daily": {
+            "task": "maintenance_tasks.reconcile_paddle_subscriptions",
+            "schedule": crontab(minute=50, hour=4),
+            "kwargs": {"limit": 25},
+        },
         "maintenance-process-beta-reads-every-15-minutes": {
             "task": "maintenance_tasks.process_beta_reads",
             "schedule": crontab(minute="*/15"),
@@ -201,6 +217,16 @@ celery_app.conf.update(
             "schedule": crontab(minute="*/5"),
             "kwargs": {"limit": 50},
         },
+        "maintenance-reconcile-upload-intents-hourly": {
+            "task": "maintenance_tasks.reconcile_upload_intents",
+            "schedule": crontab(minute=40),
+            "kwargs": {"limit": 250},
+        },
+        "maintenance-cleanup-inactive-generations-nightly": {
+            "task": "maintenance_tasks.cleanup_inactive_generations",
+            "schedule": crontab(minute=25, hour=2),
+            "kwargs": {"limit": 100},
+        },
         "maintenance-process-data-deletion-requests-hourly": {
             "task": "maintenance_tasks.process_data_deletion_requests",
             "schedule": crontab(minute=20),
@@ -210,6 +236,11 @@ celery_app.conf.update(
             "task": "maintenance_tasks.cleanup_expired_advisor_jobs",
             "schedule": crontab(minute=30),
             "kwargs": {"limit": 1000},
+        },
+        "maintenance-cleanup-expired-manuscript-exports-hourly": {
+            "task": "maintenance_tasks.cleanup_expired_manuscript_exports",
+            "schedule": crontab(minute=35),
+            "kwargs": {"limit": 250},
         },
         "maintenance-cleanup-expired-webhook-events-weekly": {
             "task": "maintenance_tasks.cleanup_expired_webhook_events",
@@ -223,6 +254,11 @@ celery_app.conf.update(
             "task": "maintenance_tasks.refresh_public_rankings",
             "schedule": crontab(minute=10, hour=2),
         },
+        "maintenance-backfill-public-assets-hourly": {
+            "task": "maintenance_tasks.backfill_public_assets",
+            "schedule": crontab(minute=45),
+            "kwargs": {"limit": 10},
+        },
     },
     task_default_retry_delay=30,
     task_max_retries=NON_LLM_MAX_RETRIES,
@@ -234,11 +270,28 @@ if result_backend_ssl_options:
     celery_app.conf.redis_backend_use_ssl = result_backend_ssl_options
 
 
-@signals.before_task_publish.connect
-def _task_prerun_set_request_id(sender=None, headers=None, body=None, **kwargs):
+@signals.task_prerun.connect
+def _task_prerun_set_request_id(sender=None, task=None, **kwargs):
     try:
+        active_task = task or sender
+        request = getattr(active_task, "request", None)
+        headers = getattr(request, "headers", None) or {}
         request_id = (headers or {}).get("request_id")
+        enqueued_at = (headers or {}).get("enqueued_at")
         set_request_id(request_id)
+        try:
+            queue_delay_ms = max((time.time() - float(enqueued_at)) * 1_000, 0.0)
+        except (TypeError, ValueError):
+            queue_delay_ms = None
+        if queue_delay_ms is not None:
+            logger.info(
+                "celery_task_started",
+                extra={
+                    "task_name": getattr(active_task, "name", None),
+                    "queue_delay_ms": round(queue_delay_ms, 2),
+                    "request_id": request_id,
+                },
+            )
         if request_id and settings.SENTRY_DSN:
             sentry_sdk.set_tag("request_id", request_id)
     except BEST_EFFORT_CLEANUP_EXCEPTIONS:
@@ -246,11 +299,13 @@ def _task_prerun_set_request_id(sender=None, headers=None, body=None, **kwargs):
         return
 
 
-@signals.after_task_publish.connect
-def _task_postrun_clear_request_id(sender=None, headers=None, body=None, **kwargs):
+@signals.task_postrun.connect
+def _task_postrun_clear_request_id(sender=None, **kwargs):
     try:
         set_request_id(None)
         set_request_user_id(None)
+        if settings.SENTRY_DSN:
+            sentry_sdk.set_tag("request_id", None)
     except BEST_EFFORT_CLEANUP_EXCEPTIONS:
         return
 
@@ -307,7 +362,16 @@ def _worker_ready_health_log(sender=None, **kwargs):
 
 
 async def _shutdown_worker_async_resources() -> None:
+    from app.core.llm import close_openai_clients
+    from app.engine.embeddings.embedder import close_embedding_client
+
     try:
-        await close_all_redis_clients()
+        await close_openai_clients()
     finally:
-        await engine.dispose()
+        try:
+            await close_embedding_client()
+        finally:
+            try:
+                await close_all_redis_clients()
+            finally:
+                await engine.dispose()

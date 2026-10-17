@@ -6,11 +6,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 const serverMock = vi.hoisted(() => ({
   listBooks: vi.fn(),
+  listBooksPage: vi.fn(),
   getBook: vi.fn(),
   getProfile: vi.fn(),
   listNovels: vi.fn(),
   getPost: vi.fn(),
   listComments: vi.fn(),
+  listCommentsPage: vi.fn(),
   listUploads: vi.fn(),
   getAnalytics: vi.fn(),
 }))
@@ -25,11 +27,13 @@ vi.mock("@/components/public/PublicBookPageClient", () => ({ PublicBookPageClien
 vi.mock("@/components/public/PublicUploadsAnalyticsPageClient", () => ({ PublicUploadsAnalyticsPageClient: ({ overview }: { overview: { total_public_books: number } }) => <div>Analytics books {overview.total_public_books}</div> }))
 vi.mock("@/lib/api/public.server", () => ({
   listPublicBooksServer: serverMock.listBooks,
+  listPublicBooksPageServer: serverMock.listBooksPage,
   getPublicBookServer: serverMock.getBook,
   getPublicUserProfileServer: serverMock.getProfile,
   listRankedBetaNovelsServer: serverMock.listNovels,
   getPublicForumPostServer: serverMock.getPost,
   listPublicForumCommentsServer: serverMock.listComments,
+  listPublicForumCommentsPageServer: serverMock.listCommentsPage,
   listRankedCreatorPublicUploadsServer: serverMock.listUploads,
   getPublicUploadsAnalyticsServer: serverMock.getAnalytics,
 }))
@@ -48,11 +52,17 @@ let container: HTMLDivElement | null = null
 beforeEach(() => {
   vi.stubEnv("NODE_ENV", "production")
   serverMock.listBooks.mockReset().mockResolvedValue([{ id: "book-1", public_slug: "gate", title: "Gate Draft" }])
+  serverMock.listBooksPage.mockReset().mockResolvedValue({ items: [{ id: "book-1", public_slug: "gate", title: "Gate Draft" }], next_cursor: null, has_more: false })
   serverMock.getBook.mockReset().mockResolvedValue({ id: "book-1", public_slug: "gate", title: "Gate Draft", author: "Mara", creator_display_name: "Mara", description: null, genre: "Fantasy", total_chapters: 8 })
   serverMock.getProfile.mockReset().mockResolvedValue({ username: "mara" })
   serverMock.listNovels.mockReset().mockResolvedValue({ items: [{ id: "post-1", headline: "Read my gate draft" }] })
   serverMock.getPost.mockReset().mockResolvedValue({ id: "post-1", headline: "Read my gate draft", body: "A".repeat(220), created_at: "2026-01-01", updated_at: "2026-01-02", author_username: "mara" })
   serverMock.listComments.mockReset().mockResolvedValue([{ id: "comment-1" }])
+  serverMock.listCommentsPage.mockReset().mockResolvedValue({
+    items: [{ id: "comment-1" }],
+    next_cursor: null,
+    has_more: false,
+  })
   serverMock.listUploads.mockReset().mockResolvedValue({ items: [{ id: "book-1" }], total: 1, page: 1, limit: 24, has_more: false, ranking_key: "most_popular", time_window: "monthly", surface: "creator_uploads" })
   serverMock.getAnalytics.mockReset().mockResolvedValue({ total_public_books: 1, total_authors: 1, total_visible_chapters: 8, total_visible_words: 1000, uploads_last_30_days: 1, genre_breakdown: [], work_type_breakdown: [], recent_uploads: [] })
 })
@@ -108,6 +118,7 @@ describe("public server page wrappers", () => {
     serverMock.getProfile.mockRejectedValue(new Error("missing"))
     serverMock.getPost.mockRejectedValue(new Error("missing"))
     serverMock.listComments.mockRejectedValue(new Error("missing"))
+    serverMock.listCommentsPage.mockRejectedValue(new Error("missing"))
     serverMock.listUploads.mockRejectedValue(new Error("offline"))
     serverMock.getAnalytics.mockRejectedValue(new Error("offline"))
 

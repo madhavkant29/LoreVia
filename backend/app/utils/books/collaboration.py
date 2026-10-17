@@ -1,5 +1,5 @@
 """
-Book utility helpers ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â DB query wrappers, cover management, progress
+Book utility helpers — DB query wrappers, cover management, progress
 computation, manuscript parsing, and chapter number utilities extracted
 from the books route.
 """
@@ -164,7 +164,9 @@ def build_book_access_context(
     collaborator: BookCollaborator | None = None,
 ) -> BookAccessContext:
     if collaborator is None:
-        workspace_shell = "author" if (book.mode or "reader") == "author" else "reader"
+        workspace_shell = (
+            "author" if (getattr(book, "mode", None) or "reader") == "author" else "reader"
+        )
         return BookAccessContext(
             access_class="owner",
             workspace_shell=workspace_shell,

@@ -2,7 +2,7 @@ import type { Metadata } from "next"
 import dynamic from "next/dynamic"
 
 import { JsonLdScript } from "@/components/seo/JsonLdScript"
-import { listPublicBooksServer } from "@/lib/api/public.server"
+import { listPublicBooksPageServer } from "@/lib/api/public.server"
 import {
   DEFAULT_OG_IMAGE,
   SITE_NAME,
@@ -46,9 +46,12 @@ export const metadata: Metadata = {
 }
 
 export default async function PublicLibraryPage() {
-  const books = process.env.NODE_ENV === "production"
-    ? await listPublicBooksServer().catch(() => [])
-    : []
+  const publicBookPage = process.env.NEXT_PUBLIC_E2E_MOCK_API === "1"
+    ? null
+    : process.env.NODE_ENV === "production"
+    ? await listPublicBooksPageServer({ limit: 24 }).catch(() => ({ items: [], next_cursor: null, has_more: false }))
+    : null
+  const books = publicBookPage?.items ?? []
   const collectionJsonLd = buildCollectionPageJsonLd({
     name: "LoreVia Public Library",
     description:
@@ -72,7 +75,7 @@ export default async function PublicLibraryPage() {
       <div className="sr-only">
         LoreVia public library for fiction authors, beta readers, and readers exploring public-domain manuscript demos, author profiles, and surfaced public samples.
       </div>
-      <PublicLibraryPageClient initialBooks={books} />
+      <PublicLibraryPageClient initialPage={publicBookPage ?? undefined} />
     </>
   )
 }

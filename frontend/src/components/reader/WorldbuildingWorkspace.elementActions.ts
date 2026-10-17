@@ -1,4 +1,6 @@
+import { useRef, useState } from "react"
 import { worldBuildingApi } from "@/lib/api/worldBuilding"
+import { getApiErrorDetail } from "@/lib/utils/apiErrors"
 import type { WorldElement, WorldGapResult, WorldIntegrationResult } from "@/types/world-building"
 
 interface UseWorldbuildingElementActionsArgs {
@@ -12,10 +14,14 @@ export function useWorldbuildingElementActions({
   setIntegration,
   setStatusMessage,
 }: UseWorldbuildingElementActionsArgs) {
+  const lock = useRef(false)
+  const [accepting, setAccepting] = useState(false)
   const acceptElementSuggestion = async (element: WorldElement, suggestion: Record<string, unknown> | string) => {
     const suggestionId = typeof suggestion === "string" ? suggestion : String(suggestion.id ?? suggestion.title ?? suggestion.name ?? "")
-    if (!suggestionId) return
-    await worldBuildingApi.acceptSuggestion(element.id, { suggestion_id: suggestionId, mark_implemented: true })
+    if (!suggestionId || lock.current) return
+    lock.current = true; setAccepting(true)
+    try {
+      await worldBuildingApi.acceptSuggestion(element.id, { suggestion_id: suggestionId, mark_implemented: true })
     const removeSuggestion = (item: WorldElement) => item.id === element.id
       ? {
           ...item,
@@ -27,8 +33,10 @@ export function useWorldbuildingElementActions({
       : item
     setIntegration((current) => current ? { ...current, world_elements: current.world_elements.map(removeSuggestion) } : current)
     setAnalysis((current) => current ? { ...current, world_elements: current.world_elements.map(removeSuggestion) } : current)
-    setStatusMessage("Marked that world suggestion as implemented.")
+      setStatusMessage("Marked that world suggestion as implemented. This records your decision; it does not edit the manuscript.")
+    } catch (error) { setStatusMessage(`${getApiErrorDetail(error) ?? "Could not mark that suggestion as implemented."} The suggestion is retained. Try again.`) }
+    finally { lock.current = false; setAccepting(false) }
   }
 
-  return { acceptElementSuggestion }
+  return { acceptElementSuggestion, accepting }
 }

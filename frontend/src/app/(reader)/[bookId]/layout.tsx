@@ -22,12 +22,6 @@ function getCachedCanonicalRouteSegment(bookId: string) {
   return fromSession
 }
 
-function setCachedCanonicalRouteSegment(bookId: string, segment: string) {
-  canonicalBookRouteCache.set(bookId, segment)
-  if (typeof window === "undefined") return
-  window.sessionStorage.setItem(getCanonicalRouteCacheKey(bookId), segment)
-}
-
 export default function BookLayout({ children }: { children: React.ReactNode }) {
   return (
     <Suspense fallback={children}>

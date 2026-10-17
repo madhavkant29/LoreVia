@@ -26,6 +26,9 @@ export interface WorkspaceToolEntry {
   planGate?: "author"
   mobilePriority?: number
   description?: string
+  purpose?: string
+  whenToUse?: string
+  helpArticleId?: string
 }
 
 export const complexityRank: Record<ComplexityMode, number> = {
@@ -43,10 +46,10 @@ export const toolComplexityRank: Record<WorkspaceToolComplexity, number> = {
 export const workspaceToolRegistry: WorkspaceToolEntry[] = [
   {
     id: "dashboard.library",
-    label: "Library",
+    label: "Home",
     route: "/library",
     group: "Library",
-    keywords: ["projects", "books", "workspace"],
+    keywords: ["home", "library", "projects", "books", "workspace"],
     icon: "library",
     placements: ["dashboard", "command"],
     complexity: "core",
@@ -267,10 +270,10 @@ export const workspaceToolRegistry: WorkspaceToolEntry[] = [
   },
   {
     id: "book.foreshadowing",
-    label: "Foreshadowing",
+    label: "Setup & Payoff",
     route: "/:bookId/foreshadowing",
     group: "Story Bible",
-    keywords: ["foreshadowing", "signals"],
+    keywords: ["foreshadowing", "setup", "payoff", "structure", "signals"],
     icon: "spark",
     placements: ["book", "command"],
     complexity: "advanced",
@@ -344,13 +347,28 @@ export const workspaceToolRegistry: WorkspaceToolEntry[] = [
     requiresProcessing: true,
   },
   {
+    id: "book.ai_beta_reader",
+    label: "AI Beta Reader",
+    route: "/:bookId/ai-beta-reader",
+    group: "Analyze",
+    keywords: ["ai beta reader", "repetition", "overused phrases", "character voices"],
+    icon: "analysis",
+    placements: ["book", "command"],
+    complexity: "standard",
+    presets: ["review", "all"],
+    permission: "run_ai_scans",
+    requiresProcessing: true,
+    planGate: "author",
+    description: "Find overused language, compare character voices, and get manuscript-grounded reader feedback.",
+  },
+  {
     id: "book.ask",
     label: "Ask LoreVia",
     route: "/:bookId/ask",
     group: "Analyze",
     keywords: ["ask", "questions"],
     icon: "chat",
-    placements: ["book", "reader", "command"],
+    placements: ["reader", "command"],
     complexity: "standard",
     presets: ["draft", "review", "story_bible", "all"],
     permission: "run_ai_scans",
@@ -376,7 +394,7 @@ export const workspaceToolRegistry: WorkspaceToolEntry[] = [
     group: "Analyze",
     keywords: ["search", "passages"],
     icon: "search",
-    placements: ["book", "reader", "command"],
+    placements: ["command"],
     complexity: "advanced",
     presets: ["draft", "review", "story_bible", "all"],
     requiresProcessing: true,
@@ -388,20 +406,20 @@ export const workspaceToolRegistry: WorkspaceToolEntry[] = [
     group: "Analyze",
     keywords: ["summary", "recap"],
     icon: "summary",
-    placements: ["book", "reader", "command"],
+    placements: ["command"],
     complexity: "advanced",
     presets: ["review", "share", "all"],
     requiresProcessing: true,
   },
   {
     id: "book.analysis",
-    label: "Analysis",
+    label: "Findings",
     route: "/:bookId/analysis",
     group: "Analyze",
-    keywords: ["analysis", "advanced"],
+    keywords: ["findings", "analysis", "review"],
     icon: "analysis",
     placements: ["book", "command"],
-    complexity: "advanced",
+    complexity: "standard",
     presets: ["review", "all"],
     permission: "run_ai_scans",
     requiresProcessing: true,
@@ -432,7 +450,7 @@ export const workspaceToolRegistry: WorkspaceToolEntry[] = [
   },
   {
     id: "book.export",
-    label: "Import & Export",
+    label: "Files & Export",
     route: "/:bookId/export",
     group: "Share & Export",
     keywords: ["export", "import", "files"],
@@ -444,7 +462,7 @@ export const workspaceToolRegistry: WorkspaceToolEntry[] = [
   },
   {
     id: "book.visibility",
-    label: "Visibility Center",
+    label: "Access & Visibility",
     route: "/:bookId/visibility",
     group: "Share & Export",
     keywords: ["visibility", "public", "private", "sharing"],
@@ -456,12 +474,12 @@ export const workspaceToolRegistry: WorkspaceToolEntry[] = [
   },
   {
     id: "book.author_lens",
-    label: "Author Lens",
+    label: "Revision Workflow",
     route: "/:bookId/author-loop",
     group: "Share & Export",
     keywords: ["author", "workflow", "lens"],
     icon: "spark",
-    placements: ["book", "command"],
+    placements: ["command"],
     complexity: "advanced",
     presets: ["review", "all"],
     permission: "comment",
@@ -476,4 +494,21 @@ export function routeForTool(tool: WorkspaceToolEntry, bookId?: string, chapter 
   return tool.route
     .replace(":bookId", bookId ?? "")
     .replace(":chapter", String(chapter))
+}
+
+export function helpMetadataForTool(tool: WorkspaceToolEntry) {
+  const purpose = tool.purpose ?? tool.description ?? `${tool.label} helps with ${tool.group.toLowerCase()} work.`
+  const whenToUse = tool.whenToUse ?? `Use this when you need to ${tool.keywords.slice(0, 3).join(", ")}.`
+  const requirements = [
+    tool.planGate ? "Author plan" : null,
+    tool.permission ? `Permission: ${tool.permission.replaceAll("_", " ")}` : null,
+    tool.requiresProcessing ? "Processed manuscript required" : null,
+    `Complexity: ${tool.complexity}`,
+  ].filter((value): value is string => Boolean(value))
+  return {
+    purpose,
+    whenToUse,
+    requirements,
+    helpArticleId: tool.helpArticleId ?? "story-bible-analysis-and-search-tools",
+  }
 }

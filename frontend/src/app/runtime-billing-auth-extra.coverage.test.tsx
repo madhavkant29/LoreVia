@@ -15,6 +15,7 @@ const authApiMock = vi.hoisted(() => ({
   verifyEmail: vi.fn(),
 }))
 const billingApiMock = vi.hoisted(() => ({
+  abandonCheckout: vi.fn(),
   confirmation: vi.fn(),
 }))
 const authStoreMock = vi.hoisted(() => ({
@@ -61,23 +62,8 @@ import { PaddleCheckoutPage } from "@/components/billing/PaddleCheckoutPage"
 import ScreenplayStats from "@/components/screenplay/ScreenplayStats"
 import type { ScreenplayStats as ScreenplayStatsData } from "@/types/screenplay"
 
-type PaddleEvent = {
-  name: "checkout.closed" | "checkout.completed"
-  data?: { transaction_id?: string }
-}
-
-type PaddleInitConfig = {
-  eventCallback?: (event: PaddleEvent) => void
-}
-
-type PaddleWindow = Window & {
-  Paddle?: {
-    Initialized: boolean
-    Environment: { set: ReturnType<typeof vi.fn> }
-    Initialize: ReturnType<typeof vi.fn>
-    Checkout: { open: ReturnType<typeof vi.fn> }
-  }
-}
+type PaddleGlobal = NonNullable<Window["Paddle"]>
+type PaddleInitConfig = Parameters<PaddleGlobal["Initialize"]>[0]
 
 let root: Root | null = null
 let container: HTMLDivElement | null = null
@@ -92,18 +78,19 @@ beforeEach(() => {
   authApiMock.resendVerification.mockReset()
   authApiMock.verifyEmail.mockReset()
   billingApiMock.confirmation.mockReset()
+  billingApiMock.abandonCheckout.mockReset()
   authStoreMock.setUser.mockReset()
   process.env.NEXT_PUBLIC_PADDLE_CLIENT_TOKEN = "test_client_token"
   paddleInitConfig = null
-  ;(window as PaddleWindow).Paddle = {
+  window.Paddle = {
     Initialized: false,
-    Environment: { set: vi.fn() },
-    Initialize: vi.fn((config: PaddleInitConfig) => {
+    Environment: { set: vi.fn<PaddleGlobal["Environment"]["set"]>() },
+    Initialize: vi.fn<PaddleGlobal["Initialize"]>((config) => {
       paddleInitConfig = config
-      const paddle = (window as PaddleWindow).Paddle
+      const paddle = window.Paddle
       if (paddle) paddle.Initialized = true
     }),
-    Checkout: { open: vi.fn() },
+    Checkout: { open: vi.fn<PaddleGlobal["Checkout"]["open"]>() },
   }
   billingApiMock.confirmation.mockResolvedValue({
     transaction_id: "txn_123",
@@ -115,6 +102,11 @@ beforeEach(() => {
     total: "$120.00",
     invoice_number: "INV-1",
     invoice_pdf_url: "https://example.com/invoice.pdf",
+  })
+  billingApiMock.abandonCheckout.mockResolvedValue({
+    abandoned: true,
+    transaction_id: "txn_123",
+    status: "canceled",
   })
   authApiMock.verifyEmail.mockResolvedValue({ id: "user-1", email: "mira@example.com", username: "mira" })
   authApiMock.resendVerification.mockResolvedValue({})
@@ -130,7 +122,7 @@ afterEach(() => {
   document.body.innerHTML = ""
   root = null
   container = null
-  delete (window as PaddleWindow).Paddle
+  delete window.Paddle
   process.env.NEXT_PUBLIC_PADDLE_CLIENT_TOKEN = originalPaddleToken
 })
 
@@ -205,7 +197,7 @@ describe("billing, auth, and stats runtime coverage", () => {
     await renderElement(<PaddleCheckoutPage nonce="nonce-1" />)
     await clickButton("Load Paddle script")
 
-    const paddle = (window as PaddleWindow).Paddle
+    const paddle = window.Paddle
     expect(paddle?.Environment.set).toHaveBeenCalledWith("sandbox")
     expect(paddle?.Initialize).toHaveBeenCalled()
     expect(paddle?.Checkout.open).toHaveBeenCalledWith(expect.objectContaining({ transactionId: "txn_123" }))
@@ -213,7 +205,10 @@ describe("billing, auth, and stats runtime coverage", () => {
     act(() => {
       paddleInitConfig?.eventCallback?.({ name: "checkout.closed" })
     })
-    expect(container?.textContent).toContain("Checkout was closed")
+    await flushAsync()
+    expect(billingApiMock.abandonCheckout).toHaveBeenCalledWith("txn_123")
+    expect(container?.textContent).toContain("pending payment was canceled")
+    expect(container?.textContent).toContain("Checkout closed")
   })
 
   it("handles missing checkout references and Paddle script failures", async () => {

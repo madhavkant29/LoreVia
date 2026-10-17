@@ -4,6 +4,7 @@ import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import axios from "axios"
 
+import { ThemeBrandImage } from "@/components/layout/ThemeBrandImage"
 import { authApi } from "@/lib/api/auth"
 import { normalizeLoginError } from "@/lib/auth/loginMessages"
 import { supabase } from "@/lib/supabase"
@@ -150,8 +151,12 @@ export default function AuthCallbackPage() {
   }, [router, setUser])
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-white px-4">
-      <p className="text-sm text-gray-500">{status}</p>
-    </div>
+    <main className="grid min-h-[100dvh] place-items-center bg-[#f8f4ee] px-6 text-stone-950">
+      <section className="w-full max-w-md border-y border-stone-300 py-8" aria-live="polite">
+        <ThemeBrandImage variant="icon" mode="light" alt="LoreVia" className="h-10 w-10 object-contain" priority />
+        <h1 className="mt-8 text-2xl font-semibold tracking-[-0.025em]">Completing sign-in</h1>
+        <p className="mt-3 text-sm leading-7 text-stone-600">{status}</p>
+      </section>
+    </main>
   )
 }

@@ -20,6 +20,7 @@ export default function robots(): MetadataRoute.Robots {
           "/notifications/",
           "/notes/",
           "/quotes/",
+          "/review/",
           "/series/",
           "/settings/",
           "/stats/",

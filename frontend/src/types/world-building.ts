@@ -1,3 +1,16 @@
+export type SeriesWorldContextItem = string | {
+  name?: string
+  title?: string
+  description?: string
+  [key: string]: unknown
+}
+
+export interface SeriesWorldAnalysis {
+  book_count?: number
+  analysis_count?: number
+  world_context?: string | SeriesWorldContextItem[]
+}
+
 export interface WorldBuildingDocument {
   id: string
   book_id: string
@@ -82,6 +95,9 @@ export interface WorldGapGroup {
 
 export interface WorldGapResult {
   mode: string
+  status?: string
+  is_stale?: boolean
+  refresh_job_id?: string | null
   generated_at?: string | null
   gap_categories: Record<string, WorldGapItem[]>
   gap_groups: WorldGapGroup[]
@@ -106,6 +122,9 @@ export interface WorldIntegrationOpportunity {
 
 export interface WorldIntegrationResult {
   mode: string
+  status?: string
+  is_stale?: boolean
+  refresh_job_id?: string | null
   generated_at?: string | null
   integration_opportunities: WorldIntegrationOpportunity[]
   consistency_flags: Record<string, unknown>[]

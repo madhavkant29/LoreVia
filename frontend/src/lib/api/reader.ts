@@ -2,12 +2,32 @@ import { apiClient } from "./client"
 import { readerCacheKey } from "@/lib/query/cacheKeys"
 import { invalidateQueryKeys } from "@/lib/query/queryClient"
 import { normalizeBookRouteId } from "@/lib/utils/bookRoutes"
-import type { BetaReadAssignment, BetaReadAssignmentListResponse, ChapterData, ChapterListResponse, ContextResult, ChapterSummary, ForeshadowingItem, PlotThread, ReadingProgress, RecallResponse, RelationshipEvolutionPair, SummaryCollectionResponse, SummaryMode, ThematicSearchResult, TimelineResponse } from "@/types/reader"
+import type { BetaReadAssignment, BetaReadAssignmentListResponse, ChapterData, ChapterListResponse, ContextResult, ChapterSummary, ForeshadowingItem, PlotThread, PlotThreadPage, ReadingProgress, RecallResponse, RelationshipEvolutionPair, SummaryCollectionResponse, SummaryMode, ThematicSearchResult, TimelineResponse } from "@/types/reader"
 import type { RelationshipGraph } from "@/types/character"
 import type { BookEventsPaginated } from "@/types/book"
 
 function readerPath(bookId: string, suffix = "") {
   return `/reader/${normalizeBookRouteId(bookId)}${suffix}`
+}
+
+async function listAllPlotThreadPages(bookId: string, chapter?: number): Promise<PlotThread[]> {
+  const items: PlotThread[] = []
+  let cursor: string | null = null
+  const seen = new Set<string>()
+  do {
+    const page: PlotThreadPage = await apiClient.get<PlotThreadPage>(readerPath(bookId, "/plot-threads/page"), {
+      params: {
+        ...(typeof chapter === "number" ? { chapter } : {}),
+        limit: 100,
+        ...(cursor ? { cursor } : {}),
+      },
+    }).then((response) => response.data)
+    items.push(...(page.items as PlotThread[]))
+    cursor = page.next_cursor
+    if (cursor && seen.has(cursor)) break
+    if (cursor) seen.add(cursor)
+  } while (cursor)
+  return items
 }
 
 export type ChapterInclude =
@@ -63,8 +83,10 @@ export const readerApi = {
     apiClient.get<RelationshipGraph>(readerPath(bookId, "/relationships"), {
       params: { chapter, include_inactive: options?.includeInactive ?? false, limit: options?.limit ?? 100, offset: options?.offset ?? 0, include: options?.include },
     }).then(r => r.data),
-  search: (bookId: string, q: string, chapter: number) =>
-    apiClient.get(readerPath(bookId, "/search"), { params: { q, chapter } }).then(r => r.data),
+  search: (bookId: string, q: string, chapter?: number) =>
+    apiClient.get(readerPath(bookId, "/search"), {
+      params: { q, ...(typeof chapter === "number" ? { chapter } : {}) },
+    }).then(r => r.data),
   getChapterList: (bookId: string) =>
     apiClient.get<ChapterListResponse>(readerPath(bookId, "/chapters")).then(r => r.data),
   getSummaryCollection: (bookId: string) =>
@@ -88,11 +110,26 @@ export const readerApi = {
       },
     }).then(r => r.data),
   thematicSearch: (bookId: string, q: string) =>
-    apiClient.get<{ results: ThematicSearchResult[] }>(readerPath(bookId, "/thematic-search"), { params: { q } }).then(r => r.data),
+    apiClient.get<{
+      results: ThematicSearchResult[]
+      index_status?: "ready" | "building"
+    }>(readerPath(bookId, "/thematic-search"), { params: { q } }).then(r => r.data),
   getRelationshipEvolution: (bookId: string, chapter: number) =>
     apiClient.get<{ pairs: RelationshipEvolutionPair[] }>(readerPath(bookId, "/relationship-evolution"), { params: { chapter } }).then(r => r.data),
   getPlotThreads: (bookId: string, chapter?: number) =>
-    apiClient.get<PlotThread[]>(readerPath(bookId, "/plot-threads"), { params: chapter ? { chapter } : undefined }).then(r => r.data),
+    listAllPlotThreadPages(bookId, chapter),
+  getPlotThreadsPage: (
+    bookId: string,
+    options?: { chapter?: number; cursor?: string | null; limit?: number },
+  ) => apiClient.get<PlotThreadPage>(readerPath(bookId, "/plot-threads/page"), {
+    params: {
+      ...(typeof options?.chapter === "number" ? { chapter: options.chapter } : {}),
+      ...(options?.cursor ? { cursor: options.cursor } : {}),
+      ...(options?.limit ? { limit: options.limit } : {}),
+    },
+  }).then(r => r.data),
+  getPlotThread: (bookId: string, threadId: string) =>
+    apiClient.get<PlotThread>(readerPath(bookId, `/plot-threads/${threadId}`)).then(r => r.data),
   updatePlotThread: (bookId: string, threadId: string, payload: { note: string | null; status?: string | null }) =>
     apiClient.put<PlotThread>(readerPath(bookId, `/plot-threads/${threadId}`), payload).then(r => {
       void invalidateQueryKeys(readerCacheKey(bookId, "plot-threads:"))

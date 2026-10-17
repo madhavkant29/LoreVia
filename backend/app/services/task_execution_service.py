@@ -8,13 +8,24 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from kombu.exceptions import OperationalError as KombuOperationalError
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.core.redis import cache_del, cache_set_if_absent
+from app.core.redis import cache_del, cache_set_if_absent, mark_book_cache_dirty
+from app.models.book import Chapter
 from app.models.operations import BookProcessingRun, TaskDispatchOutbox, TaskExecution
+from app.services.book_freeze_service import load_persisted_freeze_cutoff
+from app.services.processing_pause_service import (
+    parse_processing_blocker,
+    parse_processing_resume_at,
+    processing_rebuild_is_current,
+    release_execution_processing_reservation,
+    settle_terminal_processing_failure,
+    write_book_pause_state,
+)
+from app.utils.exception_boundaries import BEST_EFFORT_CLEANUP_EXCEPTIONS
 
 ACTIVE_EXECUTION_STATUSES = ("queued", "running")
 TERMINAL_EXECUTION_STATUSES = ("succeeded", "failed_terminal", "dismissed")
@@ -41,6 +52,37 @@ TASK_PUBLISH_EXCEPTIONS = (
 )
 
 log = logging.getLogger("lorevia.task_execution")
+
+
+async def _set_task_execution_cache_lease_best_effort(
+    execution_id: uuid.UUID,
+    celery_task_id: str,
+) -> None:
+    try:
+        await cache_set_if_absent(
+            f"task_execution_lease:{execution_id}",
+            celery_task_id,
+            EXECUTION_LEASE_SECONDS,
+        )
+    except BEST_EFFORT_CLEANUP_EXCEPTIONS:
+        log.warning(
+            "task_execution_cache_lease_set_failed execution_id=%s",
+            execution_id,
+            exc_info=True,
+        )
+
+
+async def _clear_task_execution_cache_lease_best_effort(
+    execution_id: uuid.UUID,
+) -> None:
+    try:
+        await cache_del(f"task_execution_lease:{execution_id}")
+    except BEST_EFFORT_CLEANUP_EXCEPTIONS:
+        log.warning(
+            "task_execution_cache_lease_delete_failed execution_id=%s",
+            execution_id,
+            exc_info=True,
+        )
 
 
 def task_identity(
@@ -176,14 +218,17 @@ async def get_or_create_processing_run(
 ) -> BookProcessingRun:
     await db.execute(select(func.pg_advisory_xact_lock(func.hashtext(f"processing_run:{book_id}"))))
     if reuse_active:
+        active_conditions = [
+            BookProcessingRun.book_id == book_id,
+            BookProcessingRun.status.in_(("queued", "running", "paused")),
+        ]
+        if rebuild_run_id is not None:
+            active_conditions.append(BookProcessingRun.rebuild_run_id == rebuild_run_id)
         active = (
             (
                 await db.execute(
                     select(BookProcessingRun)
-                    .where(
-                        BookProcessingRun.book_id == book_id,
-                        BookProcessingRun.status.in_(("queued", "running", "paused")),
-                    )
+                    .where(*active_conditions)
                     .order_by(BookProcessingRun.created_at.desc())
                     .with_for_update()
                 )
@@ -261,18 +306,50 @@ async def claim_task_execution(db: AsyncSession, execution_id: str, celery_task_
         return False
     now = datetime.now(UTC)
     if execution.status == "running" and execution.locked_until and execution.locked_until > now:
-        return execution.celery_task_id == celery_task_id
+        return False
+    cutoff = await load_persisted_freeze_cutoff(db)
+    if cutoff is not None and execution.created_at is not None and execution.created_at < cutoff:
+        # Deployment transition gate: work created before the one-time legacy
+        # cutoff is dismissed before any provider call. Already-delivered Celery
+        # messages therefore become no-ops instead of spending tokens.
+        execution.status = "dismissed"
+        execution.error_category = "legacy_cutoff"
+        execution.error_detail = (
+            "Held by the one-time legacy freeze cutoff before any provider call."
+        )
+        execution.completed_at = now
+        execution.locked_until = None
+        await db.execute(
+            update(TaskDispatchOutbox)
+            .where(
+                TaskDispatchOutbox.execution_id == execution.id,
+                TaskDispatchOutbox.status.in_(("pending", "publishing", "publish_failed")),
+            )
+            .values(status="cancelled", lease_until=None, last_error="legacy_cutoff")
+        )
+        await release_execution_processing_reservation(db, execution)
+        await db.commit()
+        await _clear_task_execution_cache_lease_best_effort(execution.id)
+        log.warning(
+            "legacy_cutoff_execution_dismissed execution_id=%s book_id=%s",
+            execution.id,
+            execution.book_id,
+        )
+        return False
     if execution.attempt_count >= execution.max_attempts:
         execution.status = "failed_terminal"
         execution.error_category = "attempt_exhausted"
         execution.error_detail = "Task attempt budget exhausted before worker claim."
         execution.completed_at = now
         execution.locked_until = None
+        await settle_terminal_processing_failure(
+            db,
+            execution,
+            error=execution.error_detail,
+            completed_at=now,
+        )
         await db.commit()
-        await cache_del(f"task_execution_lease:{execution.id}")
-        return False
-    lease_key = f"task_execution_lease:{execution.id}"
-    if not await cache_set_if_absent(lease_key, celery_task_id, EXECUTION_LEASE_SECONDS):
+        await _clear_task_execution_cache_lease_best_effort(execution.id)
         return False
     execution.status = "running"
     execution.celery_task_id = celery_task_id
@@ -280,6 +357,7 @@ async def claim_task_execution(db: AsyncSession, execution_id: str, celery_task_
     execution.started_at = execution.started_at or now
     execution.locked_until = now + timedelta(seconds=EXECUTION_LEASE_SECONDS)
     await db.commit()
+    await _set_task_execution_cache_lease_best_effort(execution.id, celery_task_id)
     import sentry_sdk
 
     sentry_sdk.set_tag("processing_run_id", str(execution.processing_run_id))
@@ -291,14 +369,63 @@ async def complete_task_execution(db: AsyncSession, execution_id: str) -> None:
     execution = await db.get(TaskExecution, uuid.UUID(execution_id), with_for_update=True)
     if execution is None:
         return
+    if execution.status in TERMINAL_EXECUTION_STATUSES:
+        await db.commit()
+        await _clear_task_execution_cache_lease_best_effort(execution.id)
+        return
+    now = datetime.now(UTC)
+    if not await processing_rebuild_is_current(db, execution):
+        execution.status = "dismissed"
+        execution.error_category = "stale_rebuild"
+        execution.error_detail = "The rebuild ended before this task completed."
+        execution.completed_at = now
+        execution.locked_until = None
+        await release_execution_processing_reservation(db, execution)
+        run = (
+            await db.get(BookProcessingRun, execution.processing_run_id, with_for_update=True)
+            if execution.processing_run_id
+            else None
+        )
+        if run is not None and run.status not in {
+            "failed_terminal",
+            "dismissed",
+            "succeeded",
+        }:
+            run.status = "dismissed"
+            run.completed_at = now
+        await db.commit()
+        await _clear_task_execution_cache_lease_best_effort(execution.id)
+        return
+    if execution.task_name == "extraction_tasks.process_chapter" and execution.chapter_id:
+        chapter = await db.get(Chapter, execution.chapter_id)
+        if chapter is None or not chapter.processed:
+            execution.status = "failed_terminal"
+            execution.error_category = "extraction_incomplete"
+            execution.error_detail = (
+                "Chapter extraction returned without persisting a successful chapter result."
+            )
+            execution.completed_at = now
+            execution.locked_until = None
+            await settle_terminal_processing_failure(
+                db,
+                execution,
+                error=execution.error_detail,
+                completed_at=now,
+            )
+            await db.commit()
+            await _clear_task_execution_cache_lease_best_effort(execution.id)
+            return
     execution.status = "succeeded"
-    execution.completed_at = datetime.now(UTC)
+    execution.completed_at = now
     execution.locked_until = None
     execution.error_category = None
     execution.error_detail = None
+    refresh_revision_digest = False
     if execution.task_name == "extraction_tasks.process_chapter" and execution.processing_run_id:
         from app.models.user import ProcessingUsageEvent
-        from app.services.processing_allowance_service import consume_processing_reservation
+        from app.services.processing_allowance_service import (
+            consume_processing_reservation,
+        )
 
         reservation_id = (execution.arguments_json or {}).get("processing_reservation_id")
         reservation = (
@@ -318,7 +445,11 @@ async def complete_task_execution(db: AsyncSession, execution_id: str) -> None:
             await consume_processing_reservation(
                 db, reservation.id, task_id=execution.celery_task_id
             )
-        run = await db.get(BookProcessingRun, execution.processing_run_id, with_for_update=True)
+        run = (
+            await db.get(BookProcessingRun, execution.processing_run_id, with_for_update=True)
+            if execution.processing_run_id
+            else None
+        )
         if run is not None:
             completed = await db.scalar(
                 select(func.count(TaskExecution.id)).where(
@@ -350,6 +481,7 @@ async def complete_task_execution(db: AsyncSession, execution_id: str) -> None:
                 run.completed_at = datetime.now(UTC)
                 run.pause_reason = None
                 run.resume_blockers = []
+                refresh_revision_digest = True
     elif (
         execution.task_name == "extraction_tasks.repair_chapter_payload"
         and execution.processing_run_id
@@ -362,7 +494,15 @@ async def complete_task_execution(db: AsyncSession, execution_id: str) -> None:
             run.pause_reason = None
             run.resume_blockers = []
     await db.commit()
-    await cache_del(f"task_execution_lease:{execution.id}")
+    await _clear_task_execution_cache_lease_best_effort(execution.id)
+    if refresh_revision_digest and execution.user_id and execution.book_id:
+        from app.services.notification_service import enqueue_revision_digest_refresh
+
+        await mark_book_cache_dirty(str(execution.book_id))
+        await enqueue_revision_digest_refresh(
+            user_id=execution.user_id,
+            book_id=execution.book_id,
+        )
 
 
 async def pause_task_execution(
@@ -371,73 +511,169 @@ async def pause_task_execution(
     execution = await db.get(TaskExecution, uuid.UUID(execution_id), with_for_update=True)
     if execution is None:
         return
+    if execution.status in TERMINAL_EXECUTION_STATUSES:
+        await db.commit()
+        await _clear_task_execution_cache_lease_best_effort(execution.id)
+        return
+    if not await processing_rebuild_is_current(db, execution):
+        execution.status = "dismissed"
+        execution.error_category = "stale_rebuild"
+        execution.error_detail = "The rebuild was cancelled before this task could pause."
+        execution.completed_at = datetime.now(UTC)
+        execution.locked_until = None
+        await release_execution_processing_reservation(db, execution)
+        run = await db.get(BookProcessingRun, execution.processing_run_id, with_for_update=True)
+        if run is not None and run.status not in {
+            "failed_terminal",
+            "dismissed",
+            "succeeded",
+        }:
+            run.status = "dismissed"
+            run.completed_at = execution.completed_at
+        await db.commit()
+        await _clear_task_execution_cache_lease_best_effort(execution.id)
+        return
     execution.status = "paused"
     execution.error_category = reason
     execution.error_detail = json.dumps(blocker, default=str)[:4000]
     execution.locked_until = None
-    run = await db.get(BookProcessingRun, execution.processing_run_id, with_for_update=True)
+    run = (
+        await db.get(BookProcessingRun, execution.processing_run_id, with_for_update=True)
+        if execution.processing_run_id
+        else None
+    )
     if run is not None:
         run.status = "paused"
         run.pause_reason = reason
         run.resume_blockers = [blocker]
         run.next_chapter_number = execution.chapter_number
         run.paused_at = datetime.now(UTC)
+        await write_book_pause_state(db, run, blocker=blocker)
     await db.commit()
-    await cache_del(f"task_execution_lease:{execution.id}")
+    await _clear_task_execution_cache_lease_best_effort(execution.id)
 
 
 async def resume_temporary_capacity_pauses(
     db: AsyncSession,
     *,
-    limit: int = 500,
+    limit: int = 20,
     min_age_seconds: int = 60,
+    now: datetime | None = None,
 ) -> int:
-    """Return temporary LLM-capacity pauses to durable dispatch after a cooldown."""
+    """Return eligible LLM capacity and token-window pauses to durable dispatch."""
 
-    cutoff = datetime.now(UTC) - timedelta(seconds=max(1, min_age_seconds))
+    current = now or datetime.now(UTC)
+    cutoff = current - timedelta(seconds=max(1, min_age_seconds))
+    effective_limit = max(1, min(int(limit or 20), 20))
     executions = list(
         (
             await db.execute(
                 select(TaskExecution)
                 .where(
                     TaskExecution.status == "paused",
-                    TaskExecution.error_category == "llm_capacity",
-                    TaskExecution.updated_at <= cutoff,
+                    TaskExecution.error_category.in_(
+                        ("llm_capacity", "llm_token_limit", "llm_budget")
+                    ),
                 )
                 .order_by(TaskExecution.updated_at, TaskExecution.created_at)
                 .with_for_update(skip_locked=True)
-                .limit(limit)
+                .limit(effective_limit * 5)
             )
         )
         .scalars()
         .all()
     )
     resumed = 0
-    now = datetime.now(UTC)
+    affected_run_ids: set[uuid.UUID] = set()
+    resumed_user_ids: set[uuid.UUID] = set()
+    circuit_open_by_model: dict[str, bool] = {}
+    if executions:
+        from app.services.llm_circuit_breaker_service import provider_circuit_is_open
+
+        provider_models = {
+            (
+                settings.OPENAI_EMBED_MODEL
+                if row.task_name == "embedding_tasks.update_character_embedding"
+                else settings.OPENAI_EXTRACT_MODEL
+            )
+            for row in executions
+        }
+        for provider_model in provider_models:
+            circuit_open_by_model[provider_model] = await provider_circuit_is_open(
+                provider="openai",
+                model=provider_model,
+            )
     for execution in executions:
-        run = await db.get(
-            BookProcessingRun,
-            execution.processing_run_id,
-            with_for_update=True,
+        if resumed >= effective_limit or execution.user_id in resumed_user_ids:
+            continue
+        if not await processing_rebuild_is_current(db, execution):
+            execution.status = "dismissed"
+            execution.error_category = "stale_rebuild"
+            execution.error_detail = "The rebuild ended before automatic resumption."
+            execution.completed_at = current
+            execution.locked_until = None
+            await release_execution_processing_reservation(db, execution)
+            run = (
+                await db.get(
+                    BookProcessingRun,
+                    execution.processing_run_id,
+                    with_for_update=True,
+                )
+                if execution.processing_run_id
+                else None
+            )
+            if run is not None and run.status not in {
+                "failed_terminal",
+                "dismissed",
+                "succeeded",
+            }:
+                run.status = "dismissed"
+                run.completed_at = current
+            continue
+        provider_model = (
+            settings.OPENAI_EMBED_MODEL
+            if execution.task_name == "embedding_tasks.update_character_embedding"
+            else settings.OPENAI_EXTRACT_MODEL
+        )
+        if circuit_open_by_model.get(provider_model, False):
+            continue
+        blocker = parse_processing_blocker(execution.error_detail)
+        if execution.error_category == "llm_capacity":
+            cooldowns = (60, 180, 600)
+            cooldown_index = min(max(int(execution.attempt_count or 1) - 1, 0), 2)
+            deterministic_jitter = int(execution.id.int % 31)
+            eligible_at = execution.updated_at + timedelta(
+                seconds=cooldowns[cooldown_index] + deterministic_jitter
+            )
+            if execution.updated_at > cutoff or eligible_at > current:
+                continue
+        else:
+            next_resume_at = parse_processing_resume_at(blocker.get("next_resume_at"))
+            if not blocker.get("auto_resume") or next_resume_at is None:
+                continue
+            if next_resume_at > current:
+                continue
+        run = (
+            await db.get(
+                BookProcessingRun,
+                execution.processing_run_id,
+                with_for_update=True,
+            )
+            if execution.processing_run_id
+            else None
         )
         if execution.attempt_count >= execution.max_attempts:
             execution.status = "failed_terminal"
             execution.error_category = "attempt_exhausted"
             execution.error_detail = "Temporary LLM capacity remained unavailable."
-            execution.completed_at = now
-            reservation_id = (execution.arguments_json or {}).get("processing_reservation_id")
-            if reservation_id:
-                from app.services.processing_allowance_service import (
-                    release_processing_reservation,
-                )
-
-                await release_processing_reservation(
-                    db,
-                    uuid.UUID(str(reservation_id)),
-                )
-            if run is not None:
-                run.status = "failed_terminal"
-                run.completed_at = now
+            execution.completed_at = current
+            await settle_terminal_processing_failure(
+                db,
+                execution,
+                error="Automatic processing retries were exhausted.",
+                completed_at=current,
+            )
+            resumed_user_ids.add(execution.user_id)
             continue
 
         execution.status = "pending_dispatch"
@@ -446,12 +682,40 @@ async def resume_temporary_capacity_pauses(
         execution.locked_until = None
         execution.error_category = None
         execution.error_detail = None
+        resumed_user_ids.add(execution.user_id)
         if run is not None:
-            run.status = "queued"
-            run.pause_reason = None
-            run.resume_blockers = []
-            run.paused_at = None
+            affected_run_ids.add(run.id)
         resumed += 1
+    for run_id in affected_run_ids:
+        run = await db.get(BookProcessingRun, run_id, with_for_update=True)
+        if run is None:
+            continue
+        remaining_paused = (
+            (
+                await db.execute(
+                    select(TaskExecution)
+                    .where(
+                        TaskExecution.processing_run_id == run.id,
+                        TaskExecution.status == "paused",
+                    )
+                    .order_by(TaskExecution.updated_at, TaskExecution.created_at)
+                )
+            )
+            .scalars()
+            .first()
+        )
+        if remaining_paused is not None:
+            remaining_blocker = parse_processing_blocker(remaining_paused.error_detail)
+            run.status = "paused"
+            run.pause_reason = remaining_paused.error_category
+            run.resume_blockers = [remaining_blocker]
+            await write_book_pause_state(db, run, blocker=remaining_blocker)
+            continue
+        run.status = "queued"
+        run.pause_reason = None
+        run.resume_blockers = []
+        run.paused_at = None
+        await write_book_pause_state(db, run, blocker=None)
     await db.commit()
     return resumed
 
@@ -467,6 +731,10 @@ async def fail_task_execution(
     execution = await db.get(TaskExecution, uuid.UUID(execution_id), with_for_update=True)
     if execution is None:
         return
+    if execution.status in TERMINAL_EXECUTION_STATUSES:
+        await db.commit()
+        await _clear_task_execution_cache_lease_best_effort(execution.id)
+        return
     now = datetime.now(UTC)
     terminal = terminal or execution.attempt_count >= execution.max_attempts
     execution.status = "failed_terminal" if terminal else "queued"
@@ -477,18 +745,14 @@ async def fail_task_execution(
     execution.locked_until = None
     if terminal:
         execution.completed_at = now
-        reservation_id = (execution.arguments_json or {}).get("processing_reservation_id")
-        if reservation_id:
-            from app.services.processing_allowance_service import release_processing_reservation
-
-            await release_processing_reservation(db, uuid.UUID(str(reservation_id)))
-        if execution.processing_run_id:
-            run = await db.get(BookProcessingRun, execution.processing_run_id, with_for_update=True)
-            if run is not None:
-                run.status = "failed_terminal"
-                run.completed_at = now
+        await settle_terminal_processing_failure(
+            db,
+            execution,
+            error=execution.error_detail,
+            completed_at=now,
+        )
     await db.commit()
-    await cache_del(f"task_execution_lease:{execution.id}")
+    await _clear_task_execution_cache_lease_best_effort(execution.id)
 
 
 async def reconcile_stale_task_dispatch_outbox(db: AsyncSession, *, limit: int = 500) -> int:
@@ -604,6 +868,7 @@ async def publish_task_dispatch_outbox(
 ) -> int:
     await reconcile_stale_task_dispatch_outbox(db, limit=limit)
     now = datetime.now(UTC)
+    cutoff = await load_persisted_freeze_cutoff(db)
     rows = (
         (
             await db.execute(
@@ -643,6 +908,20 @@ async def publish_task_dispatch_outbox(
                     fresh.lease_until = None
                 await db.commit()
                 continue
+            if (
+                cutoff is not None
+                and execution.created_at is not None
+                and execution.created_at < cutoff
+            ):
+                # Never publish pre-cutoff (legacy) work; the one-time freeze
+                # owns it and it must not spend provider tokens.
+                fresh = await db.get(TaskDispatchOutbox, row.id, with_for_update=True)
+                if fresh is not None:
+                    fresh.status = "cancelled"
+                    fresh.lease_until = None
+                    fresh.last_error = "legacy_cutoff"
+                await db.commit()
+                continue
             _publish_outbox_task(row)
             fresh = await db.get(TaskDispatchOutbox, row.id, with_for_update=True)
             execution.status = "queued"
@@ -678,22 +957,22 @@ async def publish_task_dispatch_outbox(
 
 async def dispatch_pending_extraction_tasks(db: AsyncSession) -> int:
     await db.execute(select(func.pg_advisory_xact_lock(func.hashtext("task_dispatch:extraction"))))
-    candidates = (
-        (
-            await db.execute(
-                select(TaskExecution)
-                .where(
-                    TaskExecution.task_name.in_(EXTRACTION_TASK_NAMES),
-                    TaskExecution.status == "pending_dispatch",
-                )
-                .order_by(TaskExecution.created_at, TaskExecution.chapter_number)
-                .with_for_update(skip_locked=True)
-                .limit(100)
-            )
+    cutoff = await load_persisted_freeze_cutoff(db)
+    candidate_statement = (
+        select(TaskExecution)
+        .where(
+            TaskExecution.task_name.in_(EXTRACTION_TASK_NAMES),
+            TaskExecution.status == "pending_dispatch",
         )
-        .scalars()
-        .all()
+        .order_by(TaskExecution.created_at, TaskExecution.chapter_number)
+        .with_for_update(skip_locked=True)
+        .limit(100)
     )
+    if cutoff is not None:
+        # Legacy executions stay pending_dispatch until the one-time freeze
+        # dismisses them; they must not occupy dispatch slots or be published.
+        candidate_statement = candidate_statement.where(TaskExecution.created_at >= cutoff)
+    candidates = (await db.execute(candidate_statement)).scalars().all()
     if not candidates:
         await db.commit()
         return 0
@@ -723,23 +1002,26 @@ async def dispatch_pending_extraction_tasks(db: AsyncSession) -> int:
         .scalars()
         .all()
     )
+    pending_book_heads_statement = (
+        select(
+            TaskExecution.book_id,
+            func.min(TaskExecution.chapter_number),
+        )
+        .where(
+            TaskExecution.task_name.in_(BOOK_SERIAL_EXTRACTION_TASK_NAMES),
+            TaskExecution.status == "pending_dispatch",
+            TaskExecution.book_id.isnot(None),
+            TaskExecution.chapter_number.isnot(None),
+        )
+        .group_by(TaskExecution.book_id)
+    )
+    if cutoff is not None:
+        pending_book_heads_statement = pending_book_heads_statement.where(
+            TaskExecution.created_at >= cutoff
+        )
     pending_book_heads = {
         book_id: int(chapter_number)
-        for book_id, chapter_number in (
-            await db.execute(
-                select(
-                    TaskExecution.book_id,
-                    func.min(TaskExecution.chapter_number),
-                )
-                .where(
-                    TaskExecution.task_name.in_(BOOK_SERIAL_EXTRACTION_TASK_NAMES),
-                    TaskExecution.status == "pending_dispatch",
-                    TaskExecution.book_id.isnot(None),
-                    TaskExecution.chapter_number.isnot(None),
-                )
-                .group_by(TaskExecution.book_id)
-            )
-        ).all()
+        for book_id, chapter_number in (await db.execute(pending_book_heads_statement)).all()
     }
     available_slots = max(
         int(settings.EXTRACTION_WORKER_CONCURRENCY) - sum(active.values()),
@@ -830,7 +1112,7 @@ async def enqueue_extraction_execution(
         arguments={
             "book_id": str(book_id),
             "chapter_number": chapter_number,
-            "chapter_version_id": str(chapter_version_id) if chapter_version_id else None,
+            "chapter_version_id": (str(chapter_version_id) if chapter_version_id else None),
             "processing_run_id": str(run.id),
             "processing_reservation_id": (
                 str(processing_reservation_id) if processing_reservation_id else None
@@ -839,9 +1121,64 @@ async def enqueue_extraction_execution(
         },
         identity_suffix=identity_suffix or processing_reservation_id,
     )
+    if processing_reservation_id is not None:
+        from app.models.user import ProcessingUsageEvent
+
+        reservation = await db.get(
+            ProcessingUsageEvent,
+            processing_reservation_id,
+            with_for_update=True,
+        )
+        if reservation is None:
+            raise RuntimeError(f"processing_reservation_missing:{processing_reservation_id}")
+        reservation.task_id = str(execution.id)
+        await db.flush()
     await db.commit()
     await dispatch_pending_extraction_tasks(db)
     return execution
+
+
+async def enqueue_extraction_execution_batch(
+    db: AsyncSession,
+    *,
+    book_id: uuid.UUID,
+    user_id: uuid.UUID,
+    chapters: list[tuple[uuid.UUID, int]],
+    chapters_total: int,
+    rebuild_run_id: str | None = None,
+    manual_reprocess: bool = False,
+    run_kind: str = "chapter_reprocess",
+) -> list[TaskExecution]:
+    if not chapters:
+        return []
+    run = await get_or_create_processing_run(
+        db,
+        user_id=user_id,
+        book_id=book_id,
+        run_kind=run_kind,
+        rebuild_run_id=rebuild_run_id,
+        chapters_total=chapters_total,
+    )
+    executions: list[TaskExecution] = []
+    for chapter_id, chapter_number in chapters:
+        execution = await ensure_task_execution(
+            db,
+            task_name="extraction_tasks.process_chapter",
+            processing_run=run,
+            chapter_id=chapter_id,
+            chapter_number=chapter_number,
+            rebuild_run_id=rebuild_run_id,
+            arguments={
+                "book_id": str(book_id),
+                "chapter_number": chapter_number,
+                "processing_run_id": str(run.id),
+                "manual_reprocess": manual_reprocess,
+            },
+        )
+        executions.append(execution)
+    await db.commit()
+    await dispatch_pending_extraction_tasks(db)
+    return executions
 
 
 async def enqueue_chapter_repair_execution(
@@ -937,22 +1274,20 @@ async def dispatch_pending_analysis_tasks(db: AsyncSession) -> int:
     if available_slots == 0:
         await db.commit()
         return 0
-    candidates = (
-        (
-            await db.execute(
-                select(TaskExecution)
-                .where(
-                    TaskExecution.task_name == "analysis_tasks.analyse_chapter",
-                    TaskExecution.status == "pending_dispatch",
-                )
-                .order_by(TaskExecution.created_at, TaskExecution.chapter_number)
-                .with_for_update(skip_locked=True)
-                .limit(available_slots)
-            )
+    cutoff = await load_persisted_freeze_cutoff(db)
+    analysis_statement = (
+        select(TaskExecution)
+        .where(
+            TaskExecution.task_name == "analysis_tasks.analyse_chapter",
+            TaskExecution.status == "pending_dispatch",
         )
-        .scalars()
-        .all()
+        .order_by(TaskExecution.created_at, TaskExecution.chapter_number)
+        .with_for_update(skip_locked=True)
+        .limit(available_slots)
     )
+    if cutoff is not None:
+        analysis_statement = analysis_statement.where(TaskExecution.created_at >= cutoff)
+    candidates = (await db.execute(analysis_statement)).scalars().all()
     if not candidates:
         await db.commit()
         return 0
@@ -999,22 +1334,20 @@ async def dispatch_pending_embedding_tasks(db: AsyncSession) -> int:
     if available_slots == 0:
         await db.commit()
         return 0
-    candidates = (
-        (
-            await db.execute(
-                select(TaskExecution)
-                .where(
-                    TaskExecution.task_name == "embedding_tasks.update_character_embedding",
-                    TaskExecution.status == "pending_dispatch",
-                )
-                .order_by(TaskExecution.created_at)
-                .with_for_update(skip_locked=True)
-                .limit(available_slots)
-            )
+    cutoff = await load_persisted_freeze_cutoff(db)
+    embedding_statement = (
+        select(TaskExecution)
+        .where(
+            TaskExecution.task_name == "embedding_tasks.update_character_embedding",
+            TaskExecution.status == "pending_dispatch",
         )
-        .scalars()
-        .all()
+        .order_by(TaskExecution.created_at)
+        .with_for_update(skip_locked=True)
+        .limit(available_slots)
     )
+    if cutoff is not None:
+        embedding_statement = embedding_statement.where(TaskExecution.created_at >= cutoff)
+    candidates = (await db.execute(embedding_statement)).scalars().all()
     if not candidates:
         await db.commit()
         return 0
@@ -1050,9 +1383,15 @@ async def release_stale_task_leases(db: AsyncSession, *, limit: int = 500) -> in
             row.completed_at = now
             row.error_category = "attempt_exhausted"
             row.error_detail = "Task attempt budget exhausted after stale worker lease."
+            await settle_terminal_processing_failure(
+                db,
+                row,
+                error=row.error_detail,
+                completed_at=now,
+            )
         else:
             row.status = "pending_dispatch"
         row.locked_until = None
         row.celery_task_id = None
-        await cache_del(f"task_execution_lease:{row.id}")
+        await _clear_task_execution_cache_lease_best_effort(row.id)
     return len(rows)

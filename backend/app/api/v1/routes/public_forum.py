@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps.auth import get_current_user, get_optional_current_user
+from app.api.deps.feature_flags import require_cursor_page_apis_enabled
 from app.core.database import get_db
 from app.core.redis import (
     cache_get,
@@ -16,15 +17,23 @@ from app.core.redis import (
     set_public_forum_comments_cache,
 )
 from app.schemas.public import (
+    PublicForumCommentCursorPageOut,
     PublicForumCommentListOut,
     PublicForumCommentOut,
     PublicForumCommentReactionBody,
     PublicForumInterestCreateBody,
+    PublicForumInterestCursorPageOut,
     PublicForumInterestListOut,
     PublicForumInterestOut,
+    PublicForumPostCursorPageOut,
     PublicForumPostListOut,
     PublicForumPostOut,
     PublicForumPostReactionBody,
+)
+from app.services.forum_paging_service import (
+    list_author_forum_posts_page,
+    list_forum_comments_page,
+    list_forum_interests_page,
 )
 from app.utils.public.forum_engagement import (
     create_public_forum_comment,
@@ -102,6 +111,26 @@ async def list_current_author_public_forum_posts(
 ):
     ensure_public_forum_read_enabled()
     return await list_author_public_forum_posts(db, author_user_id=current_user.id)
+
+
+@router.get(
+    "/forum/my-posts/page",
+    response_model=PublicForumPostCursorPageOut,
+    dependencies=[Depends(require_cursor_page_apis_enabled)],
+)
+async def list_current_author_public_forum_posts_page(
+    limit: int = Query(default=40, ge=1, le=100),
+    cursor: str | None = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    ensure_public_forum_read_enabled()
+    return await list_author_forum_posts_page(
+        db,
+        author_user_id=current_user.id,
+        limit=limit,
+        cursor=cursor,
+    )
 
 
 @router.get("/forum/posts/{post_id}", response_model=PublicForumPostOut)
@@ -198,6 +227,28 @@ async def list_public_beta_forum_interests(
     )
 
 
+@router.get(
+    "/forum/posts/{post_id}/interests/page",
+    response_model=PublicForumInterestCursorPageOut,
+    dependencies=[Depends(require_cursor_page_apis_enabled)],
+)
+async def list_public_beta_forum_interests_page(
+    post_id: uuid.UUID,
+    limit: int = Query(default=40, ge=1, le=100),
+    cursor: str | None = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    ensure_public_forum_write_enabled()
+    return await list_forum_interests_page(
+        db,
+        post_id=post_id,
+        author_user_id=current_user.id,
+        limit=limit,
+        cursor=cursor,
+    )
+
+
 @router.get("/forum/posts/{post_id}/comments", response_model=PublicForumCommentListOut)
 async def list_public_beta_forum_comments(
     post_id: uuid.UUID,
@@ -224,6 +275,28 @@ async def list_public_beta_forum_comments(
             [item.model_dump(mode="json") for item in payload.items],
         )
     return payload
+
+
+@router.get(
+    "/forum/posts/{post_id}/comments/page",
+    response_model=PublicForumCommentCursorPageOut,
+    dependencies=[Depends(require_cursor_page_apis_enabled)],
+)
+async def list_public_beta_forum_comments_page(
+    post_id: uuid.UUID,
+    limit: int = Query(default=40, ge=1, le=100),
+    cursor: str | None = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_optional_current_user),
+):
+    ensure_public_forum_read_enabled()
+    return await list_forum_comments_page(
+        db,
+        post_id=post_id,
+        current_user=current_user,
+        limit=limit,
+        cursor=cursor,
+    )
 
 
 @router.post(

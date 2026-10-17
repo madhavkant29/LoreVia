@@ -3,13 +3,15 @@ import { apiClient } from "./client"
 import {
   bookCacheKey,
   booksNotesCacheKey,
+  booksPageCacheKey,
   booksSeriesCacheKey,
+  booksSelectorCacheKey,
   booksStatsCacheKey,
   readerCacheKey,
 } from "@/lib/query/cacheKeys"
 import { invalidateQueryKeys } from "@/lib/query/queryClient"
 import { normalizeBookRouteId } from "@/lib/utils/bookRoutes"
-import type { Book, BookCollaborator, BookEvents, BookNote, BookOverviewPayload, BookProcessing, BookSeries, BookWorkType, CanonFact, ChapterConsistencyReport, ChapterSceneOrder, ChapterVersion, ChapterVersionDetail, CollaboratorActivity, CollaborationPermissions, CollaborationRole, CollaborationScope, ContinuityFinding, ContinuityScan, EmotionalArcOverview, ImportPreview, ManuscriptAnnotation, ManuscriptBootstrapPayload, ManuscriptWorkspaceTree, NovelEpubMetadata, NovelExportPreset, NovelFrontMatter, NovelImagePlacement, NovelScene, ReaderBootstrapPayload, VaultGraph, VaultNoteRelations, VaultPreview, VaultNote, VaultNoteSaveResult, PaginatedSeries, PreWritingCheck, ReadabilityMetrics, RevisionIntelligence, RevisionTagSet, RevisionTagTarget, SavedQuote, SceneMetadata, SceneVersion, SceneVersionDetail, SeriesBible, StoryHealth, UserStats, WorkspaceSearchFilters, WorkspaceSearchResult, WriterWorkspace } from "@/types/book"
+import type { Book, BookCollaborator, BookEvents, BookNote, BookNotePage, BookOverviewPayload, BookProcessing, BookSelector, BookSeries, BookWorkType, CanonFact, ChapterConsistencyReport, ChapterSceneOrder, ChapterVersion, ChapterVersionDetail, CollaboratorActivity, CollaborationPermissions, CollaborationRole, CollaborationScope, ContinuityFinding, ContinuityScan, EmotionalArcOverview, ImportPreview, ManuscriptAnnotation, ManuscriptBootstrapPayload, ManuscriptWorkspaceTree, NovelEpubMetadata, NovelExportPreset, NovelFrontMatter, NovelImagePlacement, NovelScene, NovelScenePage, ReaderBootstrapPayload, VaultGraph, VaultNoteRelations, VaultPreview, VaultNote, VaultNotePage, VaultNoteSaveResult, PaginatedSeries, PreWritingCheck, ReadabilityMetrics, RevisionIntelligence, RevisionRound, RevisionRoundComparison, RevisionTagSet, RevisionTagTarget, SavedQuote, SavedQuotePage, SceneMetadata, SceneVersion, SceneVersionDetail, SeriesBible, StoryHealth, UserStats, WorkflowBridgePreview, WorkspaceSearchFilters, WorkspaceSearchPage, WorkspaceSearchResult, WriterWorkspace } from "@/types/book"
 import type {
   Character,
   CharacterAliasRecord,
@@ -33,13 +35,75 @@ export interface ManuscriptImportResponse {
   chapter_reports: ChapterConsistencyReport[]
 }
 
+export interface ManuscriptImportJob {
+  id: string
+  book_id: string
+  status: "queued" | "running" | "completed" | "failed" | "cancel_requested" | "cancelled"
+  progress_completed: number
+  progress_total: number
+  cancel_requested: boolean
+  result: ManuscriptImportResponse | null
+  error: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface ManuscriptExportJob {
+  id: string
+  book_id: string
+  status: "queued" | "running" | "completed" | "failed" | "expired"
+  export_kind: "manuscript" | "novel"
+  format: "pdf" | "docx" | "epub" | "vault"
+  progress_completed: number
+  progress_total: number
+  filename: string | null
+  media_type: string | null
+  size_bytes: number | null
+  download_url: string | null
+  error: string | null
+  expires_at: string | null
+  created_at: string
+  updated_at: string
+}
+
+type ManuscriptExportRequest = {
+  export_kind: "manuscript" | "novel"
+  format: "pdf" | "docx" | "epub" | "vault"
+  preset: string
+  include_scene_metadata?: boolean
+  include_toc?: boolean
+  font_family: string
+  include_images?: boolean
+  image_placement?: NovelImagePlacement
+  include_image_captions?: boolean
+  preview_chapters?: number | null
+}
+
+type ManuscriptExportPreparation = {
+  delivery: "synchronous" | "job"
+  job: ManuscriptExportJob | null
+}
+
+export interface BookPage {
+  items: Book[]
+  next_cursor: string | null
+}
+
 type BootstrapProfile = "critical" | "full"
 
 function invalidateBookCache(bookId: string) {
   void invalidateQueryKeys(`book:${normalizeBookRouteId(bookId)}:`)
-  void invalidateQueryKeys("books:list:")
+  void invalidateQueryKeys("books:")
   void invalidateQueryKeys(booksStatsCacheKey())
   void invalidateQueryKeys(booksSeriesCacheKey())
+}
+
+function invalidateBookCollectionCaches() {
+  void invalidateQueryKeys("books:list:")
+  void invalidateQueryKeys(booksPageCacheKey())
+  void invalidateQueryKeys(booksPageCacheKey(true))
+  void invalidateQueryKeys(booksSelectorCacheKey())
+  void invalidateQueryKeys(booksSelectorCacheKey(true))
 }
 
 function invalidateReaderCache(bookId: string) {
@@ -50,12 +114,198 @@ function bookPath(bookId: string, suffix = "") {
   return `/books/${normalizeBookRouteId(bookId)}${suffix}`
 }
 
+async function waitForExportPollDelay(delayMs: number) {
+  if (typeof document !== "undefined" && document.visibilityState === "hidden") {
+    await new Promise<void>((resolve) => {
+      const onVisibilityChange = () => {
+        if (document.visibilityState !== "visible") return
+        document.removeEventListener("visibilitychange", onVisibilityChange)
+        resolve()
+      }
+      document.addEventListener("visibilitychange", onVisibilityChange)
+    })
+  }
+  await new Promise<void>((resolve) => setTimeout(resolve, delayMs))
+}
+
+async function waitForManuscriptExportJob(bookId: string, initialJob: ManuscriptExportJob) {
+  const deadline = Date.now() + 30 * 60 * 1_000
+  let job = initialJob
+  let delayMs = 1_000
+  while (Date.now() < deadline) {
+    job = await apiClient.get<ManuscriptExportJob>(
+      bookPath(bookId, `/exports/${job.id}`),
+    ).then((response) => response.data)
+    if (job.status === "completed" && job.download_url) return job
+    if (job.status === "failed") throw new Error(job.error || "Export generation failed")
+    if (job.status === "expired") throw new Error("The generated export expired")
+    await waitForExportPollDelay(delayMs)
+    delayMs = Math.min(30_000, Math.round(delayMs * 1.75))
+  }
+  throw new Error("Export generation timed out")
+}
+
+async function exportBlobWithDurableFallback(
+  bookId: string,
+  request: ManuscriptExportRequest,
+  synchronousDownload: () => Promise<Blob>,
+) {
+  const preparation = await apiClient.post<ManuscriptExportPreparation>(
+    bookPath(bookId, "/exports/prepare"),
+    request,
+  ).then((response) => response.data)
+  if (preparation.delivery !== "job" || !preparation.job) {
+    return synchronousDownload()
+  }
+  const job = await waitForManuscriptExportJob(bookId, preparation.job)
+  return apiClient.get<Blob>(job.download_url!, { responseType: "blob" }).then(
+    (response) => response.data,
+  )
+}
+
+async function listAllBookPages(includeHidden: boolean): Promise<Book[]> {
+  const items: Book[] = []
+  let cursor: string | null = null
+  const seen = new Set<string>()
+  do {
+    const page: BookPage = await apiClient.get<BookPage>("/books/page", {
+      params: { include_hidden: includeHidden, limit: 100, ...(cursor ? { cursor } : {}) },
+    }).then((response) => response.data)
+    items.push(...page.items)
+    cursor = page.next_cursor
+    if (cursor && seen.has(cursor)) break
+    if (cursor) seen.add(cursor)
+  } while (cursor)
+  return items
+}
+
+async function listAllVaultNotePages(id: string): Promise<VaultNote[]> {
+  const items: VaultNote[] = []
+  let cursor: string | null = null
+  const seen = new Set<string>()
+  do {
+    const page: VaultNotePage = await apiClient.get<VaultNotePage>(bookPath(id, "/notes/vault/page"), {
+      params: { limit: 100, include_content: true, ...(cursor ? { cursor } : {}) },
+    }).then((response) => response.data)
+    items.push(...(page.items as VaultNote[]))
+    cursor = page.next_cursor
+    if (cursor && seen.has(cursor)) break
+    if (cursor) seen.add(cursor)
+  } while (cursor)
+  return items
+}
+
+async function listAllScenePages(
+  id: string,
+  params?: { chapterNumber?: number; status?: string; query?: string },
+): Promise<NovelScene[]> {
+  const items: NovelScene[] = []
+  let cursor: string | null = null
+  const seen = new Set<string>()
+  do {
+    const page: NovelScenePage = await apiClient.get<NovelScenePage>(bookPath(id, "/scenes/page"), {
+      params: {
+        chapter_number: params?.chapterNumber,
+        status: params?.status,
+        query: params?.query,
+        include_body: true,
+        limit: 100,
+        ...(cursor ? { cursor } : {}),
+      },
+    }).then((response) => response.data)
+    items.push(...(page.items as NovelScene[]))
+    cursor = page.next_cursor
+    if (cursor && seen.has(cursor)) break
+    if (cursor) seen.add(cursor)
+  } while (cursor)
+  return items
+}
+
+async function listAllSavedQuotePages(): Promise<SavedQuote[]> {
+  const items: SavedQuote[] = []
+  let cursor: string | null = null
+  const seen = new Set<string>()
+  do {
+    const page: SavedQuotePage = await apiClient.get<SavedQuotePage>("/books/quotes/page", {
+      params: { limit: 100, ...(cursor ? { cursor } : {}) },
+    }).then((response) => response.data)
+    if (!Array.isArray(page.items) || (page.has_more && !page.next_cursor)) {
+      throw new Error("Saved quotes pagination is incomplete. Refresh quotes to try again.")
+    }
+    items.push(...page.items)
+    cursor = page.next_cursor
+    if (cursor && seen.has(cursor)) throw new Error("Saved quotes pagination repeated a cursor. Refresh quotes to try again.")
+    if (cursor) seen.add(cursor)
+  } while (cursor)
+  return [...new Map(items.map((quote) => [quote.id, quote])).values()]
+}
+
+async function listAllSavedNotePages(): Promise<BookNote[]> {
+  const items: BookNote[] = []
+  let cursor: string | null = null
+  const seen = new Set<string>()
+  do {
+    const page: BookNotePage = await apiClient.get<BookNotePage>("/books/notes/page", {
+      params: { limit: 100, include_body: true, ...(cursor ? { cursor } : {}) },
+    }).then((response) => response.data)
+    if (!Array.isArray(page.items) || (page.has_more && !page.next_cursor)) {
+      throw new Error("Saved notes pagination is incomplete. Refresh notes to try again.")
+    }
+    items.push(...(page.items as BookNote[]))
+    cursor = page.next_cursor
+    if (cursor && seen.has(cursor)) throw new Error("Saved notes pagination repeated a cursor. Refresh notes to try again.")
+    if (cursor) seen.add(cursor)
+  } while (cursor)
+  return [...new Map(items.map((note) => [note.id, note])).values()]
+}
+
+function isManuscriptImportJob(
+  payload: ManuscriptImportResponse | ManuscriptImportJob,
+): payload is ManuscriptImportJob {
+  return "id" in payload && "progress_total" in payload && "status" in payload
+}
+
+async function waitForManuscriptImport(
+  bookId: string,
+  initialJob: ManuscriptImportJob,
+  onProgress?: (completed: number, total: number) => void,
+): Promise<ManuscriptImportResponse> {
+  let job = initialJob
+  const deadline = Date.now() + 30 * 60 * 1000
+  let delayMs = 1_500
+  while (Date.now() < deadline) {
+    onProgress?.(job.progress_completed, job.progress_total)
+    if (job.status === "completed" && job.result) return job.result
+    if (job.status === "failed") {
+      throw new Error(job.error || "Manuscript import failed. Please try again.")
+    }
+    if (job.status === "cancelled") throw new Error("Manuscript import was cancelled.")
+    await waitForExportPollDelay(delayMs)
+    delayMs = Math.min(8_000, Math.round(delayMs * 1.5))
+    job = await apiClient
+      .get<ManuscriptImportJob>(bookPath(bookId, `/manuscript/import/${job.id}`))
+      .then((response) => response.data)
+  }
+  throw new Error("Manuscript import is still running. Check its status and try again shortly.")
+}
+
 export const booksApi = {
-  list: (includeHidden = false) =>
-    apiClient.get<Book[]>("/books", { params: { include_hidden: includeHidden } }).then(r => r.data),
+  list: (includeHidden = false) => listAllBookPages(includeHidden),
+  listPage: (includeHidden = false, cursor?: string | null, limit = 50) =>
+    apiClient.get<BookPage>("/books/page", {
+      params: {
+        include_hidden: includeHidden,
+        limit,
+        ...(cursor ? { cursor } : {}),
+      },
+    }).then((response) => response.data),
+  listSelector: (includeHidden = false, limit = 200) =>
+    apiClient.get<BookSelector[]>("/books/selector", {
+      params: { include_hidden: includeHidden, limit },
+    }).then((response) => response.data),
   getStats: () => apiClient.get<UserStats>("/books/stats").then(r => r.data),
-  listQuotes: () => apiClient.get<SavedQuote[]>("/books/quotes").then(r => r.data),
-  listNotes: () => apiClient.get<BookNote[]>("/books/notes").then(r => r.data),
+  listQuotes: () => listAllSavedQuotePages(),
+  listNotes: () => listAllSavedNotePages(),
   get: (id: string) => apiClient.get<Book>(bookPath(id)).then(r => r.data),
   getVisibilitySummary: (id: string) =>
     apiClient.get<BookVisibilitySummary>(bookPath(id, "/visibility-summary")).then(r => r.data),
@@ -149,6 +399,18 @@ export const booksApi = {
     }),
   getBookNotes: (id: string) =>
     apiClient.get<BookNote[]>(bookPath(id, "/notes")).then(r => r.data),
+  getBookNotesPage: (
+    id: string,
+    options?: { cursor?: string | null; limit?: number; includeBody?: boolean },
+  ) => apiClient.get<BookNotePage>(bookPath(id, "/notes/page"), {
+    params: {
+      ...(options?.cursor ? { cursor: options.cursor } : {}),
+      ...(options?.limit ? { limit: options.limit } : {}),
+      ...(options?.includeBody ? { include_body: true } : {}),
+    },
+  }).then(r => r.data),
+  getBookNote: (id: string, noteId: string) =>
+    apiClient.get<BookNote>(bookPath(id, `/notes/${noteId}`)).then(r => r.data),
   updateRevisionTags: (
     id: string,
     payload: { entityType: RevisionTagTarget; entityId?: string | null; chapterNumber?: number | null; tags: string[] }
@@ -166,14 +428,42 @@ export const booksApi = {
     apiClient.get<ManuscriptAnnotation[]>(bookPath(id, "/annotations"), {
       params: typeof chapterNumber === "number" ? { chapter_number: chapterNumber } : undefined,
     }).then(r => r.data),
-  getChapterReports: (id: string, limit = 12) =>
-    apiClient.get<ChapterConsistencyReport[]>(bookPath(id, "/chapter-reports"), { params: { limit } }).then(r => r.data),
+  getChapterReports: (id: string, limit = 12, beforeChapter?: number) =>
+    apiClient.get<ChapterConsistencyReport[]>(bookPath(id, "/chapter-reports"), { params: { limit, ...(beforeChapter !== undefined ? { before_chapter: beforeChapter } : {}) } }).then(r => r.data),
   getPreWritingCheck: (id: string, upcomingChapter?: number) =>
     apiClient.get<PreWritingCheck>(bookPath(id, "/pre-writing-check"), { params: typeof upcomingChapter === "number" ? { upcoming_chapter: upcomingChapter } : undefined }).then(r => r.data),
   getStoryHealth: (id: string) =>
     apiClient.get<StoryHealth>(bookPath(id, "/story-health")).then(r => r.data),
   getRevisionIntelligence: (id: string) =>
     apiClient.get<RevisionIntelligence>(bookPath(id, "/revision-intelligence")).then(r => r.data),
+  listRevisionRounds: (id: string) =>
+    apiClient.get<{ items: RevisionRound[] }>(bookPath(id, "/revision-rounds")).then(r => r.data.items),
+  createRevisionRound: (id: string, payload: { label: string; note?: string | null }) =>
+    apiClient.post<RevisionRound>(bookPath(id, "/revision-rounds"), payload).then(r => {
+      void invalidateQueryKeys(bookCacheKey(id, "writer-workspace"))
+      return r.data
+    }),
+  compareRevisionRound: (id: string, baseRoundId: string, targetRoundId?: string | null) =>
+    apiClient.get<RevisionRoundComparison>(bookPath(id, `/revision-rounds/${baseRoundId}/compare`), {
+      params: targetRoundId ? { target_round_id: targetRoundId } : undefined,
+    }).then(r => r.data),
+  previewWorkflowBridge: (id: string, file: File) => {
+    const form = new FormData()
+    form.append("file", file)
+    return apiClient.post<WorkflowBridgePreview>(bookPath(id, "/workflow-bridge/preview"), form).then(r => r.data)
+  },
+  applyWorkflowBridge: (id: string, file: File, previewToken: string) => {
+    const form = new FormData()
+    form.append("file", file)
+    form.append("preview_token", previewToken)
+    return apiClient.post<ManuscriptImportResponse>(bookPath(id, "/workflow-bridge/apply"), form).then(r => {
+      invalidateBookCache(id)
+      invalidateReaderCache(id)
+      return r.data
+    })
+  },
+  exportScrivenerProject: (id: string) =>
+    apiClient.get<Blob>(bookPath(id, "/workflow-bridge/scrivener"), { responseType: "blob" }).then(r => r.data),
   createContinuityScan: (
     id: string,
     payload: { scope?: "full_book" | "targeted"; chapterNumbers?: number[] } = {},
@@ -257,8 +547,11 @@ export const booksApi = {
       invalidateReaderCache(id)
       return r.data
     }),
-  getRestoreStatus: (id: string, versionId: string) =>
-    apiClient.get<import("@/types/book").ChapterVersionRestoreStatus>(bookPath(id, `/chapter-versions/${versionId}/restore-status`)).then(r => r.data),
+  getRestoreStatus: (id: string, versionId: string, signal?: AbortSignal) =>
+    apiClient.get<import("@/types/book").ChapterVersionRestoreStatus>(
+      bookPath(id, `/chapter-versions/${versionId}/restore-status`),
+      { signal },
+    ).then(r => r.data),
   getSceneVersions: (id: string, sceneId: string, limit = 12) =>
     apiClient.get<SceneVersion[]>(bookPath(id, `/scenes/${sceneId}/versions`), { params: { limit } }).then(r => r.data),
   createSceneSnapshot: (id: string, sceneId: string, note?: string) =>
@@ -273,8 +566,10 @@ export const booksApi = {
       void invalidateQueryKeys(readerCacheKey(id, ""))
       return r.data
     }),
-  getWorkspaceTree: (id: string) =>
-    apiClient.get<ManuscriptWorkspaceTree>(bookPath(id, "/workspace/tree")).then(r => r.data),
+  getWorkspaceTree: (id: string, options?: { includeSceneBodies?: boolean }) =>
+    apiClient.get<ManuscriptWorkspaceTree>(bookPath(id, "/workspace/tree"), {
+      params: options?.includeSceneBodies ? { include_scene_bodies: true } : undefined,
+    }).then(r => r.data),
   searchWorkspace: (
     id: string,
     payload: {
@@ -284,6 +579,7 @@ export const booksApi = {
       wholeWord?: boolean
       regex?: boolean
       filters?: WorkspaceSearchFilters
+      limit?: number
     }
   ) => apiClient.post<WorkspaceSearchResult[]>(bookPath(id, "/workspace/search"), {
     query: payload.query,
@@ -292,15 +588,54 @@ export const booksApi = {
     whole_word: payload.wholeWord ?? false,
     regex: payload.regex ?? false,
     filters: payload.filters ?? {},
+    ...(payload.limit ? { limit: payload.limit } : {}),
+  }).then(r => r.data),
+  searchWorkspacePage: (
+    id: string,
+    payload: {
+      query: string
+      scopes?: Array<"manuscript" | "scenes" | "notes">
+      caseSensitive?: boolean
+      wholeWord?: boolean
+      regex?: boolean
+      filters?: WorkspaceSearchFilters
+      limit?: number
+      cursor?: string | null
+    },
+  ) => apiClient.post<WorkspaceSearchPage>(bookPath(id, "/workspace/search/page"), {
+    query: payload.query,
+    scopes: payload.scopes ?? ["manuscript", "scenes", "notes"],
+    case_sensitive: payload.caseSensitive ?? false,
+    whole_word: payload.wholeWord ?? false,
+    regex: payload.regex ?? false,
+    filters: payload.filters ?? {},
+    ...(payload.limit ? { limit: payload.limit } : {}),
+    ...(payload.cursor ? { cursor: payload.cursor } : {}),
   }).then(r => r.data),
   listScenes: (id: string, params?: { chapterNumber?: number; status?: string; query?: string }) =>
-    apiClient.get<NovelScene[]>(bookPath(id, "/scenes"), {
-      params: {
-        chapter_number: params?.chapterNumber,
-        status: params?.status,
-        query: params?.query,
-      },
-    }).then(r => r.data),
+    listAllScenePages(id, params),
+  listScenesPage: (
+    id: string,
+    params?: {
+      chapterNumber?: number
+      status?: string
+      query?: string
+      cursor?: string | null
+      limit?: number
+      includeBody?: boolean
+    },
+  ) => apiClient.get<NovelScenePage>(bookPath(id, "/scenes/page"), {
+    params: {
+      chapter_number: params?.chapterNumber,
+      status: params?.status,
+      query: params?.query,
+      ...(params?.cursor ? { cursor: params.cursor } : {}),
+      ...(params?.limit ? { limit: params.limit } : {}),
+      ...(params?.includeBody ? { include_body: true } : {}),
+    },
+  }).then(r => r.data),
+  getScene: (id: string, sceneId: string) =>
+    apiClient.get<NovelScene>(bookPath(id, `/scenes/${sceneId}`)).then(r => r.data),
   saveScene: (
     id: string,
     payload: {
@@ -384,8 +719,16 @@ export const booksApi = {
     apiClient.get<BookEvents>(bookPath(id, "/events")).then(r => r.data),
   getReaderEvents: (id: string, chapter?: number) =>
     apiClient.get<BookEvents>(bookPath(id, "/events/reader"), { params: typeof chapter === "number" ? { chapter } : undefined }).then(r => r.data),
-  getCharacters: (id: string) =>
-    apiClient.get<Character[]>(bookPath(id, "/characters")).then(r => r.data),
+  getCharacters: <T extends Partial<Character> = Character>(
+    id: string,
+    options?: { fields?: string[] | string; include?: string[] | string },
+  ) =>
+    apiClient.get<T[]>(bookPath(id, "/characters"), {
+      params: {
+        fields: Array.isArray(options?.fields) ? options.fields.join(",") : options?.fields,
+        include: Array.isArray(options?.include) ? options.include.join(",") : options?.include,
+      },
+    }).then(r => r.data),
   getCharacterReview: (
     id: string,
     options?: { includeQuarantined?: boolean; includePlaces?: boolean; includeRejected?: boolean },
@@ -742,8 +1085,19 @@ export const booksApi = {
     apiClient.get<VaultNote[]>(bookPath(id, "/export/character-bible/notes")).then(r => r.data),
   saveCharacterBibleVaultNote: (id: string, payload: { path: string; content: string }) =>
     apiClient.put<VaultNoteSaveResult>(bookPath(id, "/export/character-bible/notes"), payload).then(r => r.data),
-  listVaultNotes: (id: string) =>
-    apiClient.get<VaultNote[]>(bookPath(id, "/notes/vault")).then(r => r.data),
+  listVaultNotes: (id: string) => listAllVaultNotePages(id),
+  listVaultNotesPage: (
+    id: string,
+    options?: { cursor?: string | null; limit?: number; includeContent?: boolean },
+  ) => apiClient.get<VaultNotePage>(bookPath(id, "/notes/vault/page"), {
+    params: {
+      ...(options?.cursor ? { cursor: options.cursor } : {}),
+      ...(options?.limit ? { limit: options.limit } : {}),
+      ...(options?.includeContent ? { include_content: true } : {}),
+    },
+  }).then(r => r.data),
+  getVaultNote: (id: string, path: string) =>
+    apiClient.get<VaultNote>(bookPath(id, `/notes/vault/${encodeURIComponent(path)}`)).then(r => r.data),
   getVaultGraph: (id: string) =>
     apiClient.get<VaultGraph>(bookPath(id, "/notes/vault/graph")).then(r => r.data),
   getVaultNoteRelations: (id: string, path: string) =>
@@ -936,6 +1290,7 @@ export const booksApi = {
       workType?: BookWorkType
       coverFile?: File | null
       mode?: "reader" | "author"
+      structurePlan?: { source_sha256: string; content_sha256: string; parser_version: string; sections: import("@/types/book").SectionMeta[] }
       onProgress?: (percent: number) => void
     }
   ) => {
@@ -955,6 +1310,7 @@ export const booksApi = {
     form.append("preserve_chapter_numbers", options?.preserveChapterNumbers ? "true" : "false")
     form.append("preserve_source_chapters", options?.preserveSourceChapters ? "true" : "false")
     form.append("force_single_manuscript", options?.forceSingleManuscript ? "true" : "false")
+    if (options?.structurePlan) form.append("structure_plan", JSON.stringify(options.structurePlan))
     if (options?.coverFile) form.append("cover_file", options.coverFile)
     return apiClient.post("/books/upload", form, {
       onUploadProgress: (event) => {
@@ -963,7 +1319,7 @@ export const booksApi = {
         options.onProgress(percent)
       },
     }).then(r => {
-      void invalidateQueryKeys("books:list:")
+      invalidateBookCollectionCaches()
       void invalidateQueryKeys(booksStatsCacheKey())
       return r.data
     })
@@ -981,6 +1337,8 @@ export const booksApi = {
       splitIntoChapters?: boolean
       workType?: BookWorkType
       files?: File[]
+      structurePlan?: { source_sha256: string; content_sha256: string; parser_version: string; sections: import("@/types/book").SectionMeta[] }
+      onProgress?: (completed: number, total: number) => void
     }
   ) => {
     const form = new FormData()
@@ -993,26 +1351,84 @@ export const booksApi = {
     if (payload.chunkLongDocuments) form.append("chunk_long_documents", "true")
     if (payload.splitIntoChapters === false) form.append("split_into_chapters", "false")
     if (payload.workType) form.append("work_type", payload.workType)
+    if (payload.structurePlan) form.append("structure_plan", JSON.stringify(payload.structurePlan))
     payload.files?.forEach((file) => form.append("files", file))
-    return apiClient.post<ManuscriptImportResponse>(bookPath(bookId, "/manuscript/import"), form).then(r => {
+    return apiClient.post<ManuscriptImportResponse | ManuscriptImportJob>(
+      bookPath(bookId, "/manuscript/import"),
+      form,
+    ).then(async (r) => {
+      const result = isManuscriptImportJob(r.data)
+        ? await waitForManuscriptImport(bookId, r.data, payload.onProgress)
+        : r.data
       invalidateBookCache(bookId)
       invalidateReaderCache(bookId)
-      return r.data
+      return result
     })
   },
-  exportManuscript: (
+  getManuscriptImportJob: (bookId: string, jobId: string) =>
+    apiClient.get<ManuscriptImportJob>(
+      bookPath(bookId, `/manuscript/import/${jobId}`),
+    ).then((response) => response.data),
+  cancelManuscriptImportJob: (bookId: string, jobId: string) =>
+    apiClient.post<ManuscriptImportJob>(
+      bookPath(bookId, `/manuscript/import/${jobId}/cancel`),
+    ).then((response) => response.data),
+  retryManuscriptImportJob: (bookId: string, jobId: string) =>
+    apiClient.post<ManuscriptImportJob>(
+      bookPath(bookId, `/manuscript/import/${jobId}/retry`),
+    ).then((response) => response.data),
+  saveChapterContent: (
+    bookId: string,
+    chapterNumber: number,
+    payload: {
+      title?: string
+      text: string
+      sanitizedHtml?: string
+      expectedContentVersion: number
+      clientMutationId: string
+    },
+  ) => apiClient.put<{
+    status: "created" | "updated" | "unchanged"
+    book_id: string
+    chapter_number: number
+    content_version: number
+    client_mutation_id: string
+    saved_at: string
+    story_memory_status: "queued" | "not_required"
+  }>(bookPath(bookId, `/chapters/${chapterNumber}/content`), {
+    title: payload.title,
+    text: payload.text,
+    sanitized_html: payload.sanitizedHtml,
+    expected_content_version: payload.expectedContentVersion,
+    client_mutation_id: payload.clientMutationId,
+  }).then((response) => {
+    invalidateBookCache(bookId)
+    invalidateReaderCache(bookId)
+    return response.data
+  }),
+  exportManuscript: async (
     bookId: string,
     format: "pdf" | "docx" | "epub" | "vault" = "docx",
     preset: "standard_manuscript" | "trade_paperback" | "kdp_paperback" = "standard_manuscript",
     includeSceneMetadata = true,
     fontFamily = "serif",
     includeToc = false
-  ) =>
-    apiClient.get<Blob>(bookPath(bookId, "/manuscript/export"), {
-      params: { format, preset, include_scene_metadata: includeSceneMetadata, font_family: fontFamily, include_toc: includeToc },
-      responseType: "blob",
-    }).then(r => r.data),
-  exportNovel: (
+  ) => exportBlobWithDurableFallback(
+    bookId,
+    {
+      export_kind: "manuscript",
+      format,
+      preset,
+      include_scene_metadata: includeSceneMetadata,
+      include_toc: includeToc,
+      font_family: fontFamily,
+    },
+    () => apiClient.get<Blob>(bookPath(bookId, "/manuscript/export"), {
+        params: { format, preset, include_scene_metadata: includeSceneMetadata, font_family: fontFamily, include_toc: includeToc },
+        responseType: "blob",
+      }).then(r => r.data),
+  ),
+  exportNovel: async (
     bookId: string,
     format: "pdf" | "docx" | "epub" = "pdf",
     preset: NovelExportPreset = "standard_novel",
@@ -1023,19 +1439,31 @@ export const booksApi = {
       includeImageCaptions?: boolean
       previewChapters?: number | null
     } = {}
-  ) =>
-    apiClient.get<Blob>(bookPath(bookId, "/novel/export"), {
-      params: {
-        format,
-        preset,
-        include_images: includeImages,
-        image_placement: options.imagePlacement ?? "end",
-        include_image_captions: options.includeImageCaptions ?? false,
-        preview_chapters: options.previewChapters ?? undefined,
-        font_family: fontFamily,
-      },
-      responseType: "blob",
-    }).then(r => r.data),
+  ) => exportBlobWithDurableFallback(
+    bookId,
+    {
+      export_kind: "novel",
+      format,
+      preset,
+      include_images: includeImages,
+      image_placement: options.imagePlacement ?? "end",
+      include_image_captions: options.includeImageCaptions ?? false,
+      preview_chapters: options.previewChapters ?? null,
+      font_family: fontFamily,
+    },
+    () => apiClient.get<Blob>(bookPath(bookId, "/novel/export"), {
+        params: {
+          format,
+          preset,
+          include_images: includeImages,
+          image_placement: options.imagePlacement ?? "end",
+          include_image_captions: options.includeImageCaptions ?? false,
+          preview_chapters: options.previewChapters ?? undefined,
+          font_family: fontFamily,
+        },
+        responseType: "blob",
+      }).then(r => r.data),
+  ),
   saveNovelPreface: (bookId: string, preface: string) =>
     apiClient.put<{ preface: string }>(bookPath(bookId, "/novel/preface"), { preface }).then(r => {
       void invalidateQueryKeys(bookCacheKey(bookId, "writer-workspace"))
@@ -1063,7 +1491,7 @@ export const booksApi = {
   }),
   createEmptyProject: (body: { title: string; author?: string | null; genre?: string | null; work_type?: string | null; series_ids?: string[] | null }) =>
     apiClient.post<{ book_id: string; status: string; mode: string; is_editor_project: boolean }>("/books/empty-project", body).then(r => {
-      void invalidateQueryKeys("books:list:")
+      invalidateBookCollectionCaches()
       void invalidateQueryKeys(booksStatsCacheKey())
       return r.data
     }),
@@ -1081,6 +1509,8 @@ export const booksApi = {
       total_words: number
       upload_charge_consumed: boolean
       charge_kind?: "manual_reprocess" | null
+      processed_words_reserved: number
+      processed_words_remaining: number
     }>(
       bookPath(bookId, "/manuscript/reprocess"),
       { confirm_upload_charge: true }

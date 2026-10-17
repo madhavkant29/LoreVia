@@ -41,7 +41,9 @@ vi.mock("axios", () => ({
   isAxiosError: isAxiosErrorMock,
 }))
 
-export { booksApi } from "./books"
+const { booksApi } = await import("./books")
+
+export { booksApi }
 
 export function resetBooksApiMocks() {
   getMock.mockReset()

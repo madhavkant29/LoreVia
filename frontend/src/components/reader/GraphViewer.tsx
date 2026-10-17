@@ -74,7 +74,7 @@ export const GraphViewer = memo(function GraphViewer({
   const focusPath = hoveredPath || selectedPath
   const focusNode = renderedGraph.nodes.find((node) => node.path === focusPath) ?? null
 
-  const graphStylesheet = useMemo<any>(
+  const graphStylesheet = useMemo<cytoscape.StylesheetJson>(
     () => [
       {
         selector: "node",
@@ -260,7 +260,7 @@ export const GraphViewer = memo(function GraphViewer({
       cy.destroy()
       cyRef.current = null
     }
-  }, [isDark, onOpenNote, renderedGraph, selectedPath])
+  }, [graphStylesheet, isDark, onOpenNote, renderedGraph, selectedPath])
 
   const runAction = (fn: (cy: Core) => void) => {
     const cy = cyRef.current
@@ -297,9 +297,9 @@ export const GraphViewer = memo(function GraphViewer({
         }}
       />
 
-      <div className="absolute inset-x-3 top-3 z-10 flex items-start justify-between gap-3">
+      <div className="absolute inset-x-3 top-3 z-10 flex flex-wrap items-start justify-between gap-3">
         <div className={`rounded-md border px-3 py-2 ${isDark ? "border-white/10 bg-black/60 text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}>
-          <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Graph View</p>
+          <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-400" : "text-stone-600"}`}>Graph View</p>
           <p className="mt-1 text-sm font-medium">{renderedGraph.nodes.length} notes | {renderedGraph.edges.length} links</p>
           {focusNode ? (
             <p className={`mt-1 text-xs ${isDark ? "text-slate-400" : "text-stone-500"}`}>Focus: {focusNode.title}</p>
@@ -309,10 +309,10 @@ export const GraphViewer = memo(function GraphViewer({
         </div>
 
         <div className={`flex flex-wrap items-center gap-2 rounded-md border px-2 py-2 ${isDark ? "border-white/10 bg-black/60" : "border-stone-200 bg-white"}`}>
-          <GraphButton label="+" ariaLabel="Zoom in graph" tooltip="Zoom in" onClick={() => runAction((cy) => cy.zoom({ level: cy.zoom() * 1.18, renderedPosition: { x: 180, y: 120 } }))} />
-          <GraphButton label="-" ariaLabel="Zoom out graph" tooltip="Zoom out" onClick={() => runAction((cy) => cy.zoom({ level: cy.zoom() / 1.18, renderedPosition: { x: 180, y: 120 } }))} />
-          <GraphButton label="Fit" ariaLabel="Fit graph to view" tooltip="Fit graph to view" onClick={() => runAction((cy) => cy.fit(undefined, 28))} wide />
-          <GraphButton
+          <GraphButton isDark={isDark} label="+" ariaLabel="Zoom in graph" tooltip="Zoom in" onClick={() => runAction((cy) => cy.zoom({ level: cy.zoom() * 1.18, renderedPosition: { x: 180, y: 120 } }))} />
+          <GraphButton isDark={isDark} label="-" ariaLabel="Zoom out graph" tooltip="Zoom out" onClick={() => runAction((cy) => cy.zoom({ level: cy.zoom() / 1.18, renderedPosition: { x: 180, y: 120 } }))} />
+          <GraphButton isDark={isDark} label="Fit" ariaLabel="Fit graph to view" tooltip="Fit graph to view" onClick={() => runAction((cy) => cy.fit(undefined, 28))} wide />
+          <GraphButton isDark={isDark}
             label={localMode ? "Global" : "Local"}
             ariaLabel={localMode ? "Show full graph" : "Show local note graph"}
             tooltip={localMode ? "Show full graph" : "Show current note neighborhood"}
@@ -320,7 +320,7 @@ export const GraphViewer = memo(function GraphViewer({
             wide
             active={localMode}
           />
-          <GraphButton
+          <GraphButton isDark={isDark}
             label="Reset"
             ariaLabel="Reset graph layout"
             tooltip="Reset graph layout"
@@ -369,6 +369,7 @@ export const GraphViewer = memo(function GraphViewer({
 })
 
 function GraphButton({
+  isDark,
   label,
   ariaLabel,
   tooltip,
@@ -376,6 +377,7 @@ function GraphButton({
   wide = false,
   active = false,
 }: {
+  isDark: boolean
   label: string
   ariaLabel: string
   tooltip: string
@@ -391,8 +393,8 @@ function GraphButton({
       onClick={onClick}
       className={`rounded-xl border px-3 py-1.5 text-xs font-semibold transition ${
         active
-          ? "border-sky-400/40 bg-sky-500/15 text-sky-100"
-          : "border-white/10 bg-white/5 text-slate-200 hover:bg-white/10"
+          ? isDark ? "border-sky-400/40 bg-sky-500/15 text-sky-100" : "border-sky-700 bg-sky-50 text-sky-900"
+          : isDark ? "border-white/10 bg-white/5 text-slate-200 hover:bg-white/10" : "border-stone-300 bg-white text-stone-800 hover:bg-stone-100"
       } ${wide ? "min-w-[3.8rem]" : "min-w-[2rem]"}`}
     >
       {label}

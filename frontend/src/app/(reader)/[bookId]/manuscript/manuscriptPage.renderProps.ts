@@ -8,7 +8,13 @@ import { buildManuscriptRailOverlayProps } from "./manuscriptPage.railOverlayPro
 import { buildManuscriptRightRailProps } from "./manuscriptPage.rightRailProps"
 import { buildManuscriptTopProps } from "./manuscriptPage.topProps"
 
-type ManuscriptRenderPropsArgs = Record<string, any>
+type ManuscriptRenderPropsArgs = ReturnType<
+  (typeof import("./manuscriptPage.setup"))["useManuscriptPageSetup"]
+> & ReturnType<
+  (typeof import("./manuscriptPage.documentBindings"))["useManuscriptDocumentBindings"]
+> & ReturnType<
+  (typeof import("./manuscriptPage.actionBindings"))["useManuscriptActionBindings"]
+>
 
 export function buildManuscriptRenderProps(args: ManuscriptRenderPropsArgs) {
   const {
@@ -18,7 +24,7 @@ export function buildManuscriptRenderProps(args: ManuscriptRenderPropsArgs) {
     annotationDraft, annotationSave, annotationVisibility, annotationsLoading, arcSummaryCharacter,
     autoReprocessEnabled, autosaveMetaLabel, book, bookDrafts, bookGoalProgress, bookId,
     chapterAnnotations, chapterApproxPages, chapterGoalProgress, chapterIndexFormat, chapterList,
-    chapterListItems, chapterManualNotes, chapterPageSummaryLabel, chapterPreviewSections,
+    chapterManualNotes, chapterPageSummaryLabel, chapterPreviewSections,
     chapterReadingTime, chapterRefs, chapterRowStats, chapterSceneOutline, chapterSearch,
     chapterTitle, chapterVersionDetail, chapterVersionNameDraft, chapterVersions, chapterWordCount,
     charCardDraft, charCardEditing, charCardSaving, characters, collapsedSceneGroups, compileFormat,
@@ -42,17 +48,17 @@ export function buildManuscriptRenderProps(args: ManuscriptRenderPropsArgs) {
     sceneTitleDraft, sceneVersionDetail, sceneVersionNameDraft, sceneVersions, searchInputRef,
     selectedChapter, selectedCharCard, selectionMenu, setActiveRightPane, setAddCharacterOpen,
     setAnnotationCategory, setAnnotationDraft, setAnnotationVisibility, setChapterPreviewPageCount,
-    setChapterSearch, setChapterVersionNameDraft, setCharCardEditing, setDraftSurfaceMode,
-    setEditNoteBody, setEditNoteTitle, setEditorMode, setFirstLineIndent, setFocusMode,
+    setChapterSearch, setChapterVersionNameDraft, setDraftSurfaceMode,
+    setEditorMode, setFirstLineIndent, setFocusMode,
     setFontFamily, setFontSize, setFontSizeLocked, setFullBookPreviewPageCount, setGotoPageInput,
-    setIncludeTableOfContentsOnExport, setJumpTarget, setLineHeight, setNewCorkboardTitle,
+    setIncludeTableOfContentsOnExport, setLineHeight, setNewCorkboardTitle,
     setNoteScope, setNoteTitle, setNotes, setRecallQuery, setReplaceQuery, setReplaceValue,
     setSceneBodyDraft, setSceneChapterDraft, setSceneDescriptionDraft, setSceneDropTarget,
-    setSceneHtmlDraft, setSceneTitleDraft, setSceneVersionNameDraft, setSelectedCharCard,
-    setShowCompileDialog, setShowEditorSettings, setShowExportMenu, setShowLeftRail,
+    setSceneHtmlDraft, setSceneTitleDraft, setSceneVersionNameDraft,
+    setShowCompileDialog, setShowEditorSettings, setShowExportMenu, setShowLeftRail, setShowRightRail,
     setShowPageGuides, setShowPageSetup, setShowReprocessConfirm, setShowSearchTools,
     setWorkspaceTab, setWriterWorkspace, sheetStyle, showCompileDialog, showEditorSettings,
-    showExportMenu, showPageGuides, showPageSetup, showReprocessConfirm, showSearchTools,
+    showExportMenu, showLeftRail, showPageGuides, showPageSetup, showReprocessConfirm, showRightRail, showSearchTools,
     statusMessage, suggestions, synopsis, text, tighteningSelection, vaultNotesData,
     warningSummary, workspaceSaving, workspaceTab, workspaceTree, writerWorkspace,
   } = args
@@ -102,10 +108,14 @@ export function buildManuscriptRenderProps(args: ManuscriptRenderPropsArgs) {
     setShowCompileDialog,
     setShowEditorSettings,
     setShowExportMenu,
+    setShowLeftRail,
     setShowReprocessConfirm,
+    setShowRightRail,
     setWorkspaceTab,
     setWriterWorkspace,
     showExportMenu,
+    showLeftRail,
+    showRightRail,
     tighteningSelection,
     workspaceSaving,
     workspaceTab,
@@ -198,7 +208,7 @@ export function buildManuscriptRenderProps(args: ManuscriptRenderPropsArgs) {
     setAnnotationCategory, setAnnotationDraft, setAnnotationVisibility, setCharCardEditing: args.setCharCardEditing,
     setEditNoteBody: args.setEditNoteBody, setEditNoteTitle: args.setEditNoteTitle, setGotoPageInput, setNoteScope, setNoteTitle,
     setNotes, setSelectedCharCard: args.setSelectedCharCard, suggestions, synopsis,
-    totalChapters: book?.total_chapters ?? chapterListItems.length, vaultNotes: vaultNotesData, warningSummary,
+    vaultNotes: vaultNotesData, warningSummary,
     onBackToCharacters: args.clearSelectedCharacter, onCancelAnnotation: args.cancelAnnotation, onCancelEditingNote: args.cancelEditingNote,
     onCharacterDraftFieldChange: args.changeCharacterDraftField, onCharacterNameClick: args.openCharacterByName,
     onDownloadContinuityReport: args.downloadContinuityReport, onEditNoteBodyChange: args.changeNoteBody,

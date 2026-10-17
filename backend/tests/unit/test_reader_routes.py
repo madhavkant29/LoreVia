@@ -129,6 +129,7 @@ async def test_search_uses_reader_specific_retrieval_settings(monkeypatch):
         return None
 
     async def _fake_semantic_search(*_args, **kwargs):
+        captured["chapter_limit"] = _args[3]
         captured.update(kwargs)
         return [{"chapter_num": 3, "chapter_title": "Storm", "text": "Result", "relevance": 0.9}]
 
@@ -141,10 +142,11 @@ async def test_search_uses_reader_specific_retrieval_settings(monkeypatch):
     patch_route_dependency(monkeypatch, reader, "semantic_search", _fake_semantic_search)
 
     payload = await reader.search(
-        book.id, q="storm clue", chapter=3, db=_FakeDB(), current_user=_user(user_id), _=None
+        book.id, q="storm clue", chapter=None, db=_FakeDB(), current_user=_user(user_id), _=None
     )
 
     assert payload[0]["chapter_num"] == 3
+    assert captured["chapter_limit"] == 8
     assert captured["limit"] == 4
     assert captured["candidate_limit"] == 10
     assert captured["similarity_threshold"] == 0.55
@@ -202,9 +204,17 @@ async def test_get_chapter_media_public_validates_token_and_download(monkeypatch
         "decode_token",
         lambda _token: {"type": "asset", "sub": str(user_id), "res": f"chapter-media:{media_id}"},
     )
+    offloaded: list[tuple[object, tuple[object, ...]]] = []
+
+    async def fake_to_thread(function, *args):
+        offloaded.append((function, args))
+        return function(*args)
+
+    monkeypatch.setattr(reader.asyncio, "to_thread", fake_to_thread)
     patch_route_dependency(monkeypatch, reader, "download_book", lambda _key: b"png")
     response = await reader.get_chapter_media_public(media_id, token="ok", db=db)
     assert response.media_type == "image/png"
+    assert offloaded and offloaded[0][1] == ("media.bin",)
 
 
 @pytest.mark.asyncio
@@ -562,17 +572,16 @@ async def test_smart_tap_handles_processing_character_and_search_paths(monkeypat
     assert payload["character"]["description"] == "hero:green"
     assert payload["character"]["analysis_metadata"]["confidence_band"] == "medium"
 
-    db = _FakeDB(
-        get_values=[book],
-        scalar_values=[1],
-        execute_values=[_Result(scalar=None), _Result(all_rows=[("lexical match", 4, 2, "Storm")])],
-    )
+    db = _FakeDB(get_values=[book], scalar_values=[1], execute_values=[_Result(scalar=None)])
 
     async def _fake_context(*_args, **_kwargs):
         return []
 
+    async def _fake_lexical(*_args, **_kwargs):
+        return [{"chapter_num": 2, "chapter_title": "Storm", "text": "lexical match"}]
+
     patch_route_dependency(monkeypatch, reader, "find_context_for_tap", _fake_context)
-    patch_route_dependency(monkeypatch, reader, "build_search_result", lambda **kwargs: kwargs)
+    patch_route_dependency(monkeypatch, reader, "lexical_reader_chunk_search", _fake_lexical)
     payload = await reader.smart_tap(
         book.id, q="storm", chapter=2, db=db, current_user=_user(user_id)
     )
@@ -711,7 +720,11 @@ async def test_reader_collection_routes_cover_events_relationships_search_and_ch
         return []
 
     patch_route_dependency(monkeypatch, reader, "semantic_search", _fake_semantic_search)
-    patch_route_dependency(monkeypatch, reader, "build_search_result", lambda **kwargs: kwargs)
+
+    async def _fake_lexical(*_args, **_kwargs):
+        return [{"chapter_num": 3, "chapter_title": "Storm", "text": "Storm clue"}]
+
+    patch_route_dependency(monkeypatch, reader, "lexical_reader_chunk_search", _fake_lexical)
 
     async def _fake_int_map(*_args, **_kwargs):
         return {1: True}
@@ -762,7 +775,6 @@ async def test_reader_collection_routes_cover_events_relationships_search_and_ch
             _Result(scalars=[character]),
             _Result(scalars=[rel]),
             _Result(scalars=[]),
-            _Result(all_rows=[("Storm clue", 2, 3, "Storm")]),
             _Result(scalar=progress),
             _Result(scalars=[chapter]),
             _Result(scalar=progress),
@@ -1127,7 +1139,21 @@ async def test_reader_highlight_timeline_and_thematic_routes(monkeypatch):
         reader, "timeline_relationship_detail", lambda a, b, *_args: (f"{a}/{b}", "shift")
     )
     patch_route_dependency(monkeypatch, reader, "dedupe_timeline_events", lambda items: items)
-    patch_route_dependency(monkeypatch, reader, "download_book", lambda _key: b"storm signal text")
+
+    async def _fake_thematic(*_args, **_kwargs):
+        return {
+            "results": [
+                {
+                    "chapter_number": 1,
+                    "chapter_title": "One",
+                    "score": 1,
+                    "summary": "storm signal",
+                }
+            ],
+            "index_status": "ready",
+        }
+
+    patch_route_dependency(monkeypatch, reader, "thematic_reader_search", _fake_thematic)
 
     rel = SimpleNamespace(
         id=uuid.uuid4(),
@@ -1157,9 +1183,6 @@ async def test_reader_highlight_timeline_and_thematic_routes(monkeypatch):
             _Result(all_rows=[(rel, "Iris", "mc")]),
             _Result(scalars=[character]),
             _Result(scalars=[character]),
-            _Result(
-                all_rows=[(1, "One", "storm signal", [{"event": "signal"}], [{"clue": "Signal"}])]
-            ),
         ],
     )
 
@@ -1184,6 +1207,12 @@ async def test_reader_crud_progress_and_recall_routes(monkeypatch):
     chapter = SimpleNamespace(
         id=uuid.uuid4(), number=2, processed=False, current_chapter=0, chapters_read=[]
     )
+    dashboard_invalidations: list[str] = []
+
+    async def _mark_dashboard_dirty(user_id: str):
+        dashboard_invalidations.append(user_id)
+
+    monkeypatch.setattr(reader, "mark_user_dashboard_cache_dirty", _mark_dashboard_dirty)
     quote_db = _FakeDB(get_values=[book])
     with pytest.raises(HTTPException):
         await reader.save_quote(
@@ -1200,6 +1229,7 @@ async def test_reader_crud_progress_and_recall_routes(monkeypatch):
         current_user=_user(user_id),
     )
     assert payload["saved"] is True
+    assert dashboard_invalidations == [str(user_id)]
 
     async def _fake_cache_get(_key):
         return None

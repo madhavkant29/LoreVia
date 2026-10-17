@@ -3,25 +3,35 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 const {
   axiosCreateMock,
   axiosPostMock,
+  axiosGetMock,
   isAxiosErrorMock,
   buildDailyCapEventDetailMock,
   dispatchDailyCapEventMock,
+  captureApiFailureMock,
 } = vi.hoisted(() => ({
   axiosCreateMock: vi.fn(),
   axiosPostMock: vi.fn(),
+  axiosGetMock: vi.fn(),
   isAxiosErrorMock: vi.fn(),
   buildDailyCapEventDetailMock: vi.fn(),
   dispatchDailyCapEventMock: vi.fn(),
+  captureApiFailureMock: vi.fn(),
+}))
+
+vi.mock("@/lib/analytics/browserTelemetry", () => ({
+  captureApiFailure: captureApiFailureMock,
 }))
 
 vi.mock("axios", () => ({
   default: {
     create: axiosCreateMock,
     post: axiosPostMock,
+    get: axiosGetMock,
     isAxiosError: isAxiosErrorMock,
   },
   create: axiosCreateMock,
   post: axiosPostMock,
+  get: axiosGetMock,
   isAxiosError: isAxiosErrorMock,
 }))
 
@@ -36,7 +46,7 @@ async function loadClientModule() {
   const captured: {
     request?: (config: Record<string, unknown>) => Record<string, unknown>
     responseSuccess?: (response: unknown) => unknown
-    responseError?: (error: Record<string, any>) => Promise<unknown>
+    responseError?: (error: Record<string, unknown>) => Promise<unknown>
   } = {}
 
   const apiClientMock = Object.assign(vi.fn(), {
@@ -65,9 +75,11 @@ describe("api client", () => {
   beforeEach(() => {
     axiosCreateMock.mockReset()
     axiosPostMock.mockReset()
+    axiosGetMock.mockReset()
     isAxiosErrorMock.mockReset()
     buildDailyCapEventDetailMock.mockReset()
     dispatchDailyCapEventMock.mockReset()
+    captureApiFailureMock.mockReset()
     vi.restoreAllMocks()
     vi.unstubAllGlobals()
     process.env.VITEST = "true"
@@ -80,6 +92,7 @@ describe("api client", () => {
     expect(axiosCreateMock).toHaveBeenCalledWith({
       baseURL: "/api/v1",
       headers: { "Content-Type": "application/json" },
+      timeout: 60_000,
       withCredentials: true,
     })
   })
@@ -92,11 +105,12 @@ describe("api client", () => {
     expect(axiosCreateMock).toHaveBeenCalledWith({
       baseURL: "/api/v1",
       headers: { "Content-Type": "application/json" },
+      timeout: 60_000,
       withCredentials: true,
     })
   })
 
-  it("uses the backend origin directly for localhost browser sessions", async () => {
+  it("keeps localhost browser sessions same-origin so auth cookies are shared with middleware", async () => {
     const originalWindow = globalThis.window
     const originalVitest = process.env.VITEST
     delete process.env.VITEST
@@ -106,8 +120,9 @@ describe("api client", () => {
       await loadClientModule()
 
       expect(axiosCreateMock).toHaveBeenCalledWith({
-        baseURL: "http://127.0.0.1:8000/api/v1",
+        baseURL: "/api/v1",
         headers: { "Content-Type": "application/json" },
+        timeout: 60_000,
         withCredentials: true,
       })
     } finally {
@@ -151,6 +166,30 @@ describe("api client", () => {
     expect(config?.headers).toEqual({ "Content-Type": "application/json" })
   })
 
+  it("uses a longer timeout for uploads and blob downloads without overriding custom values", async () => {
+    const { captured } = await loadClientModule()
+
+    const upload = captured.request?.({
+      data: new FormData(),
+      headers: {},
+      timeout: 60_000,
+    })
+    const download = captured.request?.({
+      headers: {},
+      responseType: "blob",
+      timeout: 60_000,
+    })
+    const custom = captured.request?.({
+      data: new FormData(),
+      headers: {},
+      timeout: 900_000,
+    })
+
+    expect(upload?.timeout).toBe(600_000)
+    expect(download?.timeout).toBe(600_000)
+    expect(custom?.timeout).toBe(900_000)
+  })
+
   it("adds the auth csrf header to unsafe requests when the cookie is present", async () => {
     const { captured } = await loadClientModule()
     const originalDocument = globalThis.document
@@ -178,6 +217,15 @@ describe("api client", () => {
     })
 
     expect(config?.headers).toEqual({ "X-CSRF-Token": "fresh-token" })
+    vi.stubGlobal("document", originalDocument)
+  })
+
+  it("exposes the auth csrf header for browser keepalive requests", async () => {
+    const { getAuthCsrfHeaders } = await loadClientModule()
+    const originalDocument = globalThis.document
+    vi.stubGlobal("document", { cookie: "lorevia_csrf=pagehide%20token" })
+
+    expect(getAuthCsrfHeaders()).toEqual({ "X-CSRF-Token": "pagehide token" })
     vi.stubGlobal("document", originalDocument)
   })
 
@@ -224,6 +272,7 @@ describe("api client", () => {
       requestPath: "/intelligence/book-1/qa",
       status: 429,
     })
+    expect(captureApiFailureMock).toHaveBeenCalledWith(error)
   })
 
   it("refreshes and retries non-auth 401 responses", async () => {
@@ -242,11 +291,32 @@ describe("api client", () => {
     expect(axiosPostMock).toHaveBeenCalledWith("/api/v1/auth/refresh", null, {
       withCredentials: true,
       headers: { "X-CSRF-Token": "csrf-token" },
+      timeout: 15_000,
     })
     expect(originalRequest._retry).toBe(true)
     expect(apiClientMock).toHaveBeenCalledWith(originalRequest)
     expect(result).toEqual({ data: { retried: true } })
     vi.stubGlobal("document", originalDocument)
+  })
+
+  it("bootstraps a missing CSRF cookie and retries CSRF-protected writes once", async () => {
+    const { captured, apiClientMock } = await loadClientModule()
+    const originalRequest: { url: string; _csrfRetry?: boolean } = { url: "/notifications/notification-1/read" }
+    axiosGetMock.mockResolvedValue({ status: 204 })
+    apiClientMock.mockResolvedValue({ data: { retried: true } })
+
+    const result = await captured.responseError?.({
+      config: originalRequest,
+      response: { status: 403, data: { detail: "Invalid CSRF token." } },
+    })
+
+    expect(axiosGetMock).toHaveBeenCalledWith("/api/v1/auth/csrf", {
+      withCredentials: true,
+      timeout: 15_000,
+    })
+    expect(originalRequest._csrfRetry).toBe(true)
+    expect(apiClientMock).toHaveBeenCalledWith(originalRequest)
+    expect(result).toEqual({ data: { retried: true } })
   })
 
   it("keeps refresh requests same-origin in the browser even when NEXT_PUBLIC_API_URL is set", async () => {
@@ -261,7 +331,10 @@ describe("api client", () => {
       response: { status: 401 },
     })
 
-    expect(axiosPostMock).toHaveBeenCalledWith("/api/v1/auth/refresh", null, { withCredentials: true })
+    expect(axiosPostMock).toHaveBeenCalledWith("/api/v1/auth/refresh", null, {
+      withCredentials: true,
+      timeout: 15_000,
+    })
   })
 
   it("does not refresh auth me failures", async () => {

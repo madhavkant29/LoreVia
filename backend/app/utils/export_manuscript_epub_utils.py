@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import shutil
 from html import escape
-from typing import Any
+from typing import Any, BinaryIO
 
 from app.utils.books.manuscript import clean_manuscript_html
 from app.utils.export_common_utils import (
@@ -98,7 +99,8 @@ def manuscript_epub_compiled(
     font_family: str | None = None,
     include_toc: bool = False,
     index_format: str = "arabic",
-) -> bytes:
+    output: BinaryIO | None = None,
+) -> bytes | None:
     import os
     import tempfile
 
@@ -262,4 +264,7 @@ def manuscript_epub_compiled(
         target = os.path.join(tmpdir, "manuscript.epub")
         epub.write_epub(target, book, {})
         with open(target, "rb") as handle:
+            if output is not None:
+                shutil.copyfileobj(handle, output, length=1024 * 1024)
+                return None
             return handle.read()

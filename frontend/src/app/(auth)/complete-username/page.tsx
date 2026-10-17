@@ -88,12 +88,8 @@ export default function CompleteUsernamePage() {
   }
 
   return (
-    <div
-      className={`rounded-lg border p-8 ${
-        isDark ? "border-white/10 bg-white/5" : "border-white/80 bg-white/92"
-      }`}
-    >
-      <div className="mb-8 text-center">
+    <div className={`border-y py-8 ${isDark ? "border-white/10" : "border-stone-200"}`}>
+      <div className="mb-8">
         <h1 className={`text-3xl font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>Choose a username</h1>
         <p className={`mt-2 text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>
           OAuth accounts need a username before you can continue.
@@ -102,7 +98,7 @@ export default function CompleteUsernamePage() {
 
       <form onSubmit={submit} className="flex flex-col gap-4">
         <label className="flex flex-col gap-1.5">
-          <span className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-500"}`}>Username</span>
+          <span className={`text-sm font-medium ${isDark ? "text-slate-300" : "text-stone-700"}`}>Username</span>
           <input
             type="text"
             value={username}

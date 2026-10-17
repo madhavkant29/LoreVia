@@ -1,3 +1,5 @@
+import asyncio
+from datetime import datetime
 from html import escape
 from typing import Any, cast
 from urllib.parse import urlparse
@@ -10,6 +12,7 @@ from sqlalchemy import func, select
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal
 from app.models.user import User
+from app.utils.billing_utils import RENEWAL_REMINDER_DAYS_BEFORE, plan_display_name
 from app.utils.email_utils import (
     EMAIL_CATEGORY_MARKETING,
     EMAIL_CATEGORY_PRODUCT_UPDATES,
@@ -385,7 +388,7 @@ async def _send_categorized_email(
     else:
         payload["html"] = html.replace("<!-- PROMOTIONAL_FOOTER -->", "")
 
-    return _send(payload)
+    return await asyncio.to_thread(_send, payload)
 
 
 def _render_stats_grid(stats: list[tuple[str, str]]) -> str:
@@ -507,6 +510,180 @@ async def send_subscription_confirmation(email: str, plan: str) -> None:
             body_html=body_html,
             cta_label="Go to your library",
             cta_url=library_url,
+            closing_html=closing_html,
+        ),
+    )
+
+
+def _format_renewal_date(value: datetime) -> str:
+    return value.strftime("%B %d, %Y").replace(" 0", " ")
+
+
+async def send_subscription_renewal_reminder(
+    email: str,
+    plan: str,
+    *,
+    renewal_at: datetime,
+    amount_usd: int,
+) -> bool:
+    billing_url = _app_link("/settings")
+    plan_label = plan_display_name(plan)
+    plan_name = escape(plan_label)
+    renewal_label = escape(_format_renewal_date(renewal_at))
+    amount_label = escape(f"${amount_usd}")
+    body_html = "".join(
+        [
+            _paragraph(
+                f"Your <strong>LoreVia {plan_name}</strong> subscription renews in "
+                f"{RENEWAL_REMINDER_DAYS_BEFORE} days."
+            ),
+            _paragraph(
+                f"Your {plan_name} subscription will renew on <strong>{renewal_label}</strong> "
+                f"for <strong>{amount_label}</strong>."
+            ),
+            _paragraph(
+                "No action is needed if you would like to continue. You can manage or cancel "
+                "your subscription from your LoreVia account settings before the renewal date."
+            ),
+            _paragraph(
+                "If you cancel before the renewal date, your paid access continues until the "
+                "end of the current billing period and you will not be charged again."
+            ),
+        ]
+    )
+    closing_html = _paragraph(
+        "Your subscription renews automatically until canceled. No action is required to keep it."
+    )
+    return await _send_categorized_email(
+        email=email,
+        subject=f"Your LoreVia subscription renews in {RENEWAL_REMINDER_DAYS_BEFORE} days",
+        category=EMAIL_CATEGORY_TRANSACTIONAL,
+        html=_render_email(
+            preheader=(
+                f"Your LoreVia {plan_label} subscription will renew on {renewal_label} "
+                f"for {amount_label}."
+            ),
+            eyebrow="Renewal reminder",
+            heading=f"Your {plan_label} plan renews soon",
+            body_html=body_html,
+            cta_label="Manage subscription",
+            cta_url=billing_url,
+            closing_html=closing_html,
+        ),
+    )
+
+
+async def send_subscription_payment_failed(
+    email: str,
+    plan: str,
+    *,
+    amount: str | None = None,
+) -> bool:
+    billing_url = _app_link("/settings")
+    plan_label = plan_display_name(plan)
+    plan_name = escape(plan_label)
+    amount_sentence = (
+        _paragraph(f"The attempted charge was <strong>{escape(amount)}</strong>.") if amount else ""
+    )
+    body_html = "".join(
+        [
+            _paragraph(
+                f"We couldn't process your <strong>LoreVia {plan_name}</strong> subscription payment."
+            ),
+            amount_sentence,
+            _paragraph(
+                "Paddle, our payment provider, may automatically retry the payment. If the retry "
+                "succeeds, your subscription returns to active and you keep your paid access."
+            ),
+            _paragraph(
+                "If the payment keeps failing, Paddle may cancel the subscription at the end of "
+                "the recovery window. You can update your payment method or billing details in "
+                "your LoreVia account settings at any time."
+            ),
+            _list_panel(
+                "What you can do now",
+                [
+                    "Review the payment method on file and update it if needed.",
+                    "Make sure your bank or card provider is not blocking the charge.",
+                    "Open your billing settings if you need invoices or payment history.",
+                ],
+            ),
+            _paragraph(
+                "Your paid access is not removed immediately because the first payment attempt "
+                "failed. Update your billing details before Paddle exhausts its retry attempts."
+            ),
+        ]
+    )
+    closing_html = _paragraph(
+        "Update your billing details in LoreVia settings to keep your plan active."
+    )
+    return await _send_categorized_email(
+        email=email,
+        subject="We couldn't process your LoreVia subscription payment",
+        category=EMAIL_CATEGORY_TRANSACTIONAL,
+        html=_render_email(
+            preheader=(
+                f"Paddle could not process your LoreVia {plan_label} payment. "
+                "Update your billing details to keep your plan active."
+            ),
+            eyebrow="Payment issue",
+            heading="We couldn't process your payment",
+            body_html=body_html,
+            cta_label="Manage billing",
+            cta_url=billing_url,
+            closing_html=closing_html,
+        ),
+    )
+
+
+async def send_subscription_renewal_succeeded(
+    email: str,
+    plan: str,
+    *,
+    amount: str | None = None,
+    current_period_end: datetime | None = None,
+) -> bool:
+    billing_url = _app_link("/settings")
+    plan_label = plan_display_name(plan)
+    plan_name = escape(plan_label)
+    amount_sentence = (
+        f" successfully for <strong>{escape(amount)}</strong>" if amount else " successfully"
+    )
+    period_sentence = (
+        "Your subscription remains active until "
+        f"<strong>{escape(_format_renewal_date(current_period_end))}</strong>."
+        if current_period_end is not None
+        else "Your subscription remains active."
+    )
+    body_html = "".join(
+        [
+            _paragraph(
+                f"Your <strong>LoreVia {plan_name}</strong> subscription has renewed"
+                f"{amount_sentence}."
+            ),
+            _paragraph(period_sentence),
+            _paragraph(
+                "You can manage your subscription at any time from your LoreVia billing settings."
+            ),
+        ]
+    )
+    closing_html = _paragraph(
+        "Thank you for continuing to use LoreVia for your reading and writing workflow."
+    )
+    return await _send_categorized_email(
+        email=email,
+        subject=f"Your LoreVia {plan_label} subscription has renewed",
+        category=EMAIL_CATEGORY_TRANSACTIONAL,
+        html=_render_email(
+            preheader=(
+                f"Your LoreVia {plan_label} subscription renewed successfully. "
+                "Your plan remains active."
+            ),
+            eyebrow="Subscription renewed",
+            heading=f"Your {plan_label} plan has renewed",
+            body_html=body_html,
+            cta_label="Manage subscription",
+            cta_url=billing_url,
             closing_html=closing_html,
         ),
     )

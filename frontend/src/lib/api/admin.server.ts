@@ -85,10 +85,19 @@ function resolveDevAdminSessionOverride(
   cookieHeader: string | null,
   adminCookieValue: string | null,
 ): { matched: boolean, session: AdminSession | null } {
-  if (process.env.NODE_ENV === "production") {
+  const configuredSecret = process.env.ADMIN_E2E_TEST_SECRET?.trim() ?? ""
+  // Production builds refuse the override unless three independent switches are
+  // set: the public mock flag, a non-empty secret, and the server-only
+  // production acknowledgement. The acknowledgement is not a NEXT_PUBLIC value,
+  // so a misconfigured public build flag alone can never expose admin access.
+  const productionE2eEnabled =
+    process.env.NEXT_PUBLIC_E2E_MOCK_API === "1" &&
+    configuredSecret.length > 0 &&
+    process.env.ADMIN_E2E_ALLOW_PRODUCTION === "1"
+  if (process.env.NODE_ENV === "production" && !productionE2eEnabled) {
     return { matched: false, session: null }
   }
-  const secret = (process.env.ADMIN_E2E_TEST_SECRET || "codex-e2e-admin-secret").trim()
+  const secret = configuredSecret || "codex-e2e-admin-secret"
   if (!secret) {
     return { matched: false, session: null }
   }

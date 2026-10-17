@@ -20,6 +20,17 @@ class FakeDb:
         return self.user
 
 
+def test_extraction_batches_count_joined_separator_within_token_budget(monkeypatch):
+    monkeypatch.setattr(flow_service.settings, "EXTRACTION_BATCH_MAX_TOKENS", 5)
+    monkeypatch.setattr(flow_service.settings, "EXTRACTION_BATCH_MAX_CHUNKS", 10)
+    monkeypatch.setattr(flow_service, "count_tokens", lambda text: len(text))
+
+    assert flow_service._group_chunks_for_extraction(["ab", "cd", "e"]) == [
+        ["ab"],
+        ["cd", "e"],
+    ]
+
+
 @pytest.mark.asyncio
 async def test_finalize_book_completion_returns_false_when_book_not_complete(monkeypatch):
     async def claim(_db, _book_id):

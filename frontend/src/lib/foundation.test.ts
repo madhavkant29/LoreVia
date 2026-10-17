@@ -190,7 +190,7 @@ describe("foundation utilities", () => {
   })
 
   it("builds website json-ld with the publisher logo", () => {
-    expect(websiteJsonLd.publisher.logo).toBe("https://getlorevia.com/logoandtext.png")
+    expect(websiteJsonLd.publisher.logo).toBe("https://getlorevia.com/logoandtextlight.png")
   })
 
   it("builds website json-ld with the site name", () => {
@@ -198,7 +198,7 @@ describe("foundation utilities", () => {
   })
 
   it("builds organization json-ld with the canonical logo", () => {
-    expect(organizationJsonLd.logo).toBe("https://getlorevia.com/logoandtext.png")
+    expect(organizationJsonLd.logo).toBe("https://getlorevia.com/logoandtextlight.png")
   })
 
   it("marks author tiers as able to use author features", () => {

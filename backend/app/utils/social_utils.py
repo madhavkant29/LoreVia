@@ -468,28 +468,3 @@ async def send_direct_message(
     await db.commit()
     await db.refresh(message)
     return message
-
-
-async def mark_conversation_read(
-    db: AsyncSession, *, current_user: User, conversation_id: uuid.UUID
-) -> None:
-    await ensure_conversation_access(db, current_user=current_user, conversation_id=conversation_id)
-    rows = (
-        (
-            await db.execute(
-                select(DirectMessage).where(
-                    DirectMessage.conversation_id == conversation_id,
-                    DirectMessage.recipient_user_id == current_user.id,
-                    DirectMessage.recipient_read_at.is_(None),
-                )
-            )
-        )
-        .scalars()
-        .all()
-    )
-    if not rows:
-        return
-    now = datetime.now(UTC)
-    for row in rows:
-        row.recipient_read_at = now
-    await db.commit()

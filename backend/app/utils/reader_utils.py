@@ -6,11 +6,14 @@ intelligence availability checks extracted from the reader route.
 
 from __future__ import annotations
 
+import asyncio
 import base64
+import binascii
 import json
 import logging
 import re
 import uuid
+from datetime import datetime
 from typing import Any
 
 import bleach  # type: ignore[import-untyped]
@@ -18,6 +21,7 @@ from fastapi import HTTPException
 from sqlalchemy import and_, desc, or_, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import load_only
 
 from app.core.config import settings
 from app.core.redis import cache_del, cache_set_if_absent, key_analysis_queued
@@ -29,7 +33,7 @@ from app.engine.character.entity_filters import (
     character_visibility_score,
 )
 from app.engine.character.profile_builder import build_description
-from app.models.book import Book, Chapter, ChapterMedia
+from app.models.book import Book, BookSection, Chapter, ChapterMedia
 from app.models.character import Character
 from app.models.intelligence import ChapterSummary, PlotThread
 from app.models.progress import ReadingProgress
@@ -800,6 +804,25 @@ async def build_chapter_list_payload(
         entity_ids=[chapter.id for chapter in chapters],
         book_id=book.id,
     )
+    section_by_chapter: dict[uuid.UUID, BookSection] = {}
+    parts_by_id: dict[uuid.UUID, BookSection] = {}
+    import_structure = getattr(book, "import_structure", None) or {}
+    if import_structure.get("parser_version") or import_structure.get("additional_imports"):
+        outline = (
+            (
+                await db.execute(
+                    select(BookSection)
+                    .where(BookSection.book_id == book.id)
+                    .order_by(BookSection.display_order)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        section_by_chapter = {
+            section.chapter_id: section for section in outline if section.chapter_id
+        }
+        parts_by_id = {section.id: section for section in outline if section.kind == "part"}
     return {
         "read_upto": read_upto,
         "current_chapter": read_upto,
@@ -808,9 +831,27 @@ async def build_chapter_list_payload(
                 "number": chapter.number,
                 "title": chapter.title,
                 "chapter_kind": getattr(chapter, "chapter_kind", "chapter"),
+                "printed_label": section_by_chapter[chapter.id].source_label
+                if chapter.id in section_by_chapter
+                else None,
+                "parent_part_id": str(section_by_chapter[chapter.id].parent_id)
+                if chapter.id in section_by_chapter and section_by_chapter[chapter.id].parent_id
+                else None,
+                "parent_part_title": parts_by_id[section_by_chapter[chapter.id].parent_id].title
+                if chapter.id in section_by_chapter
+                and section_by_chapter[chapter.id].parent_id in parts_by_id
+                else None,
+                "analysis_included": section_by_chapter[chapter.id].include_in_analysis
+                if chapter.id in section_by_chapter
+                else None,
                 "word_count": getattr(chapter, "word_count", None),
                 "processed": chapter.processed,
-                "intelligence_available": intelligence_map.get(chapter.number, True),
+                "intelligence_available": (
+                    False
+                    if chapter.id in section_by_chapter
+                    and not section_by_chapter[chapter.id].include_in_analysis
+                    else intelligence_map.get(chapter.number, True)
+                ),
                 "read": access.workspace_shell == "author" or chapter.number in read_set,
                 "analysis_status": chapter_analysis_status(chapter),
                 "tags": tags_by_chapter.get(chapter.id, []),
@@ -1126,9 +1167,9 @@ async def serialize_chapter_media(
         }
         if get_presigned_url(row.storage_key) is None:
             try:
-                item["content_base64"] = base64.b64encode(download_book(row.storage_key)).decode(
-                    "ascii"
-                )
+                item["content_base64"] = base64.b64encode(
+                    await asyncio.to_thread(download_book, row.storage_key)
+                ).decode("ascii")
             except STORAGE_IO_EXCEPTIONS:
                 item["content_base64"] = None
         items.append(item)
@@ -1186,11 +1227,11 @@ def parse_chapter_from_source(book: Book, chapter_num: int) -> dict | None:
         if book.format == "pdf":
             from app.parsers.pdf_parser import parse_pdf
 
-            chapters = parse_pdf(raw, split_large_chapters=not preserve_numbers)
+            chapters = parse_pdf(raw, split_large_chapters=False)
         else:
             from app.parsers.epub_parser import parse_epub
 
-            chapters = parse_epub(raw, split_large_chapters=not preserve_numbers)
+            chapters = parse_epub(raw, split_large_chapters=False)
         chapters = apply_chapter_number_strategy(
             chapters,
             preserve_chapter_numbers=preserve_numbers,
@@ -1251,8 +1292,14 @@ def serialize_plot_thread(
     *,
     current_chapter: int | None,
     tags: list[str] | None = None,
+    include_detail_fields: bool = True,
 ) -> dict:
-    return build_plot_thread_payload(thread, current_chapter=current_chapter, tags=tags)
+    return build_plot_thread_payload(
+        thread,
+        current_chapter=current_chapter,
+        tags=tags,
+        include_detail_fields=include_detail_fields,
+    )
 
 
 async def list_plot_threads(
@@ -1284,6 +1331,163 @@ async def list_plot_threads(
         )
         for thread in threads
     ]
+
+
+def encode_plot_thread_page_cursor(created_at: datetime, thread_id: uuid.UUID) -> str:
+    payload = json.dumps(
+        {"created_at": created_at.isoformat(), "id": str(thread_id)}, separators=(",", ":")
+    ).encode()
+    return base64.urlsafe_b64encode(payload).decode().rstrip("=")
+
+
+def decode_plot_thread_page_cursor(cursor: str) -> tuple[datetime, uuid.UUID]:
+    try:
+        padded = cursor + "=" * (-len(cursor) % 4)
+        payload = json.loads(base64.urlsafe_b64decode(padded.encode()))
+        created_at = datetime.fromisoformat(str(payload["created_at"]))
+        if created_at.tzinfo is None:
+            raise ValueError("Cursor timestamp must include a timezone")
+        return created_at, uuid.UUID(str(payload["id"]))
+    except (
+        KeyError,
+        TypeError,
+        ValueError,
+        UnicodeDecodeError,
+        binascii.Error,
+        json.JSONDecodeError,
+    ) as exc:
+        raise HTTPException(400, "Invalid plot thread page cursor") from exc
+
+
+def _plot_thread_list_item(thread: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: thread.get(key)
+        for key in (
+            "id",
+            "title",
+            "type",
+            "status",
+            "description",
+            "introduced_at",
+            "resolved_at",
+            "first_mentioned",
+            "last_mentioned",
+            "mention_count",
+            "importance",
+            "tags",
+        )
+    }
+
+
+async def list_plot_threads_page(
+    db: AsyncSession,
+    *,
+    book_id: uuid.UUID,
+    chapter: int | None = None,
+    limit: int = 50,
+    cursor: str | None = None,
+) -> dict[str, Any]:
+    """Return compact plot-thread cards from a stable keyset page."""
+    bounded_limit = max(1, min(int(limit), 100))
+    statement = (
+        select(PlotThread)
+        .options(
+            load_only(
+                PlotThread.id,
+                PlotThread.book_id,
+                PlotThread.title,
+                PlotThread.description,
+                PlotThread.thread_type,
+                PlotThread.status,
+                PlotThread.introduced_at,
+                PlotThread.last_mentioned_at,
+                PlotThread.resolved_at,
+                PlotThread.mention_count,
+                PlotThread.importance,
+                PlotThread.created_at,
+            )
+        )
+        .where(PlotThread.book_id == book_id)
+    )
+    if chapter is not None:
+        statement = statement.where(PlotThread.introduced_at <= chapter)
+    if cursor:
+        cursor_created_at, cursor_id = decode_plot_thread_page_cursor(cursor)
+        statement = statement.where(
+            or_(
+                PlotThread.created_at < cursor_created_at,
+                and_(PlotThread.created_at == cursor_created_at, PlotThread.id < cursor_id),
+            )
+        )
+    rows = list(
+        (
+            await db.execute(
+                statement.order_by(PlotThread.created_at.desc(), PlotThread.id.desc()).limit(
+                    bounded_limit + 1
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    has_more = len(rows) > bounded_limit
+    threads = rows[:bounded_limit]
+    current_chapter = chapter
+    if current_chapter is None:
+        current_chapter = await db.scalar(select(Book.total_chapters).where(Book.id == book_id))
+    tags_by_thread = await list_custom_tags_for_entity_ids(
+        db,
+        entity_type=ENTITY_TYPE_PLOT_THREAD,
+        entity_ids=[thread.id for thread in threads],
+        book_id=book_id,
+    )
+    return {
+        "items": [
+            _plot_thread_list_item(
+                serialize_plot_thread(
+                    thread,
+                    current_chapter=current_chapter,
+                    tags=tags_by_thread.get(thread.id, []),
+                    include_detail_fields=False,
+                )
+            )
+            for thread in threads
+        ],
+        "next_cursor": (
+            encode_plot_thread_page_cursor(threads[-1].created_at, threads[-1].id)
+            if has_more and threads
+            else None
+        ),
+        "has_more": has_more,
+    }
+
+
+async def get_plot_thread(
+    db: AsyncSession,
+    *,
+    book_id: uuid.UUID,
+    thread_id: uuid.UUID,
+    current_chapter: int | None = None,
+) -> dict[str, Any] | None:
+    thread = (
+        await db.execute(
+            select(PlotThread).where(PlotThread.book_id == book_id, PlotThread.id == thread_id)
+        )
+    ).scalar_one_or_none()
+    if thread is None:
+        return None
+    if current_chapter is None:
+        current_chapter = await db.scalar(select(Book.total_chapters).where(Book.id == book_id))
+    return serialize_plot_thread(
+        thread,
+        current_chapter=current_chapter,
+        tags=await get_custom_tags_for_entity(
+            db,
+            entity_type=ENTITY_TYPE_PLOT_THREAD,
+            entity_id=thread.id,
+            book_id=book_id,
+        ),
+    )
 
 
 async def update_plot_thread_note(

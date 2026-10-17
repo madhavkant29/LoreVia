@@ -15,13 +15,16 @@ from app.utils import reader_utils, social_utils
 
 
 @pytest.mark.asyncio
-async def test_embed_batch_splits_provider_requests_and_restores_order(monkeypatch):
-    closed: list[bool] = []
+async def test_embed_batch_splits_provider_requests_restores_order_and_reuses_client(monkeypatch):
     calls: list[list[str]] = []
+    clients_created: list[bool] = []
 
     class Client:
-        async def close(self):
-            closed.append(True)
+        pass
+
+    def get_client():
+        clients_created.append(True)
+        return Client()
 
     async def create_embedding(**kwargs):
         calls.append(list(kwargs["input"]))
@@ -32,19 +35,22 @@ async def test_embed_batch_splits_provider_requests_and_restores_order(monkeypat
             ]
         )
 
-    monkeypatch.setattr(embedder, "get_client", lambda: Client())
+    monkeypatch.setattr(embedder, "get_client", get_client)
     monkeypatch.setattr(embedder, "count_tokens", lambda text: 6)
     monkeypatch.setattr(embedder, "MAX_EMBED_BATCH_TOKENS", 10)
     monkeypatch.setattr(embedder, "create_tracked_embedding", create_embedding)
 
-    vectors = await embedder.embed_batch(["first", "second", "third"])
+    vectors = await embedder.embed_batch(
+        ["first", "second", "third"],
+        user_id=None,
+        billing_scope="system",
+    )
     assert calls == [["first"], ["second"], ["third"]]
     assert vectors == [[0.0, 5.0], [0.0, 6.0], [0.0, 5.0]]
-    assert closed == [True]
+    assert clients_created == [True]
 
-    closed.clear()
-    assert await embedder.embed_batch([]) == []
-    assert closed == [True]
+    assert await embedder.embed_batch([], user_id=None, billing_scope="system") == []
+    assert clients_created == [True]
 
 
 @pytest.mark.asyncio
@@ -54,15 +60,44 @@ async def test_gemini_completion_handles_text_candidates_and_json_fallback(monke
             self.__dict__.update(kwargs)
 
     fake_types = SimpleNamespace(GenerateContentConfig=Config)
-    monkeypatch.setitem(sys.modules, "google.generativeai", SimpleNamespace(types=fake_types))
+    monkeypatch.setitem(sys.modules, "google.genai", SimpleNamespace(types=fake_types))
+    monkeypatch.setattr(llm, "_get_gemini_client", lambda: SimpleNamespace())
+
+    async def allow_system_call(**_kwargs):
+        return None
+
+    permit = SimpleNamespace()
+
+    async def acquire_permit(**_kwargs):
+        return permit
+
+    async def record_success(received):
+        assert received is permit
+
+    async def record_failure(*_args, **_kwargs):
+        raise AssertionError("successful Gemini calls must not record a provider failure")
+
     monkeypatch.setattr(
-        llm, "_get_gemini_client", lambda: SimpleNamespace(models=SimpleNamespace())
+        "app.services.llm_control_service.enforce_system_llm_rate_limit",
+        allow_system_call,
+    )
+    monkeypatch.setattr(
+        "app.services.llm_circuit_breaker_service.acquire_provider_circuit_permit",
+        acquire_permit,
+    )
+    monkeypatch.setattr(
+        "app.services.llm_circuit_breaker_service.record_provider_success",
+        record_success,
+    )
+    monkeypatch.setattr(
+        "app.services.llm_circuit_breaker_service.record_provider_failure",
+        record_failure,
     )
 
-    async def direct_text(fn):
+    async def direct_text(**_kwargs):
         return SimpleNamespace(text="  direct answer  ", candidates=[])
 
-    monkeypatch.setattr(llm, "_run_blocking", direct_text)
+    monkeypatch.setattr(llm, "_call_gemini_generation", direct_text)
     assert (
         await llm._complete_with_gemini(
             system="system",
@@ -75,13 +110,13 @@ async def test_gemini_completion_handles_text_candidates_and_json_fallback(monke
         == "direct answer"
     )
 
-    async def candidate_text(fn):
+    async def candidate_text(**_kwargs):
         part = SimpleNamespace(text="candidate answer")
         return SimpleNamespace(
             text="", candidates=[SimpleNamespace(content=SimpleNamespace(parts=[part]))]
         )
 
-    monkeypatch.setattr(llm, "_run_blocking", candidate_text)
+    monkeypatch.setattr(llm, "_call_gemini_generation", candidate_text)
     assert (
         await llm._complete_with_gemini(
             system="system",
@@ -94,10 +129,10 @@ async def test_gemini_completion_handles_text_candidates_and_json_fallback(monke
         == "candidate answer"
     )
 
-    async def empty(fn):
+    async def empty(**_kwargs):
         return SimpleNamespace(text="", candidates=[])
 
-    monkeypatch.setattr(llm, "_run_blocking", empty)
+    monkeypatch.setattr(llm, "_call_gemini_generation", empty)
     assert (
         await llm._complete_with_gemini(
             system="system",

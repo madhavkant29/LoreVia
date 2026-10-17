@@ -81,6 +81,21 @@ def validate_document_upload_bytes(filename: str, raw: bytes, format_name: str) 
         )
         _validate_zip_container(filename, raw, required_names={"word/document.xml"})
         return
+    if format_name == "scrivener":
+        validate_zip_archive_safety(
+            raw,
+            max_entries=settings.UPLOAD_ARCHIVE_MAX_ENTRIES,
+            max_total_uncompressed_bytes=settings.UPLOAD_ARCHIVE_MAX_UNCOMPRESSED_BYTES,
+            max_compression_ratio=settings.UPLOAD_ARCHIVE_MAX_COMPRESSION_RATIO,
+            label=filename,
+        )
+        try:
+            with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+                if not any(name.lower().endswith(".scrivx") for name in archive.namelist()):
+                    raise HTTPException(400, f"{filename} does not contain a Scrivener project.")
+        except zipfile.BadZipFile as exc:
+            raise HTTPException(400, f"Invalid {filename}") from exc
+        return
     if format_name == "doc":
         if not raw.startswith(_OLE_MAGIC):
             raise HTTPException(400, f"{filename} is not a valid DOC file.")
@@ -130,9 +145,14 @@ def _validate_text_upload(filename: str, raw: bytes) -> None:
     if b"\x00" in raw:
         raise HTTPException(400, f"{filename} must be a text-based file.")
     try:
-        raw.decode("utf-8")
+        decoded = raw.decode("utf-8")
     except UnicodeDecodeError as exc:
         raise HTTPException(400, f"{filename} must be UTF-8 encoded.") from exc
+    if not decoded.strip():
+        raise HTTPException(
+            400,
+            f"{filename} is empty. Choose a file that contains manuscript text.",
+        )
 
 
 def _validate_zip_container(

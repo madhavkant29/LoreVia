@@ -13,7 +13,7 @@ type Props = {
   inputRef: RefObject<HTMLInputElement | null>
   newUploadAccept: string
   files: File[]
-  setFiles: Dispatch<SetStateAction<File[]>>
+  onFilesSelected: (files: File[]) => void
   primaryFile: File | null
   isScreenplayWorkspace: boolean
   importPreview: ImportPreview | null
@@ -34,7 +34,7 @@ export function UploadSourceStep({
   inputRef,
   newUploadAccept,
   files,
-  setFiles,
+  onFilesSelected,
   primaryFile,
   isScreenplayWorkspace,
   importPreview,
@@ -69,7 +69,10 @@ export function UploadSourceStep({
             type="file"
             accept={newUploadAccept}
             className="hidden"
-            onChange={(event) => setFiles(Array.from(event.target.files ?? []))}
+            onChange={(event) => {
+              onFilesSelected(Array.from(event.target.files ?? []))
+              event.target.value = ""
+            }}
           />
           <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
             <div>
@@ -79,7 +82,7 @@ export function UploadSourceStep({
               <p className={`mt-1 text-sm ${isDark ? "text-slate-400" : "text-slate-500"}`}>
                 {files.length > 0
                   ? "Replace the selected file at any time before uploading."
-                  : `Supported formats: ${isScreenplayWorkspace ? "PDF, TXT, Markdown" : "DOCX, PDF, EPUB, TXT, Markdown"}.`}
+                  : `Supported formats: ${isScreenplayWorkspace ? "PDF, Fountain, TXT, Markdown" : "DOCX, PDF, EPUB, TXT, Markdown, Scrivener"}. Up to 100 MB per file.`}
               </p>
             </div>
             <div className={`inline-flex rounded-full px-4 py-2 text-sm font-medium ${isDark ? "bg-white text-slate-950" : "bg-slate-900 text-white"}`}>
@@ -102,13 +105,9 @@ export function UploadSourceStep({
         <div className={`rounded-lg border p-5 ${isDark ? "border-indigo-500/30 bg-indigo-500/5" : "border-indigo-200 bg-indigo-50/80"}`}>
           <div className="mb-3 flex items-center justify-between">
             <p className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-indigo-300" : "text-indigo-600"}`}>Structure preview</p>
-            <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${
-              importPreview.confidence >= 0.8
-                ? isDark ? "bg-green-500/20 text-green-300" : "bg-green-100 text-green-700"
-                : importPreview.confidence >= 0.5
-                  ? isDark ? "bg-amber-500/20 text-amber-300" : "bg-amber-100 text-amber-700"
-                  : isDark ? "bg-red-500/20 text-red-300" : "bg-red-100 text-red-700"
-            }`}>{Math.round(importPreview.confidence * 100)}% confident</span>
+            <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${importPreview.sections.some((section) => section.warnings?.length) ? "bg-amber-500/20 text-amber-400" : "bg-emerald-500/15 text-emerald-400"}`}>
+              {importPreview.sections.some((section) => section.warnings?.length) ? "Review uncertain boundaries" : "Outline ready for review"}
+            </span>
           </div>
 
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
@@ -128,15 +127,20 @@ export function UploadSourceStep({
           {importPreview.sections.length > 0 ? (
             <div className="mt-3">
               <p className={`mb-2 text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-400" : "text-slate-500"}`}>Sections ({importPreview.sections.length})</p>
-              <div className={`max-h-48 overflow-y-auto rounded-lg border ${isDark ? "border-white/10" : "border-slate-200"}`}>
-                {importPreview.sections.filter((section) => section.type !== "unknown" || section.title).slice(0, 20).map((section) => (
-                  <div key={section.id} className={`flex items-center gap-3 border-b px-3 py-2 text-xs last:border-b-0 ${isDark ? "border-white/5" : "border-slate-100"}`}>
+              <div className={`max-h-80 overflow-y-auto rounded-lg border ${isDark ? "border-white/10" : "border-slate-200"}`}>
+                {importPreview.sections.map((section) => (
+                  <div key={section.id} className={`border-b px-3 py-2 text-xs last:border-b-0 ${isDark ? "border-white/5" : "border-slate-100"}`}>
+                    <div className="flex items-center gap-3">
                     <span className={`rounded px-1.5 py-0.5 font-medium ${section.include_in_analysis ? isDark ? "bg-green-500/20 text-green-300" : "bg-green-100 text-green-700" : isDark ? "bg-slate-500/20 text-slate-400" : "bg-slate-100 text-slate-500"}`}>{section.type}</span>
-                    <span className={isDark ? "text-slate-300" : "text-slate-700"}>{section.title || `Section ${section.number ?? "?"}`}</span>
+                    <span className={isDark ? "text-slate-300" : "text-slate-700"}>{section.parent_id ? "↳ " : ""}{section.title || `Section ${section.number ?? "?"}`}</span>
                     {!section.include_in_analysis ? <span className={`ml-auto text-[10px] ${isDark ? "text-slate-500" : "text-slate-400"}`}>excluded</span> : null}
+                    </div>
+                    <p className="mt-1 opacity-70">{section.source_location ?? "Location unavailable"} · {section.word_count ?? 0} words</p>
+                    {section.opening_excerpt ? <p className="mt-1 opacity-70">Starts: {section.opening_excerpt}</p> : null}
+                    {section.closing_excerpt ? <p className="opacity-70">Ends: {section.closing_excerpt}</p> : null}
+                    {section.warnings?.map((warning) => <p key={warning} className="mt-1 text-amber-500">{warning}</p>)}
                   </div>
                 ))}
-                {importPreview.sections.length > 20 ? <div className={`px-3 py-2 text-xs ${isDark ? "text-slate-500" : "text-slate-400"}`}>+{importPreview.sections.length - 20} more sections</div> : null}
               </div>
             </div>
           ) : null}
@@ -153,6 +157,7 @@ export function UploadSourceStep({
           ) : null}
 
           <div className="mt-4 flex flex-wrap items-center gap-2">
+            {importPreview.sections.some((section) => section.type === "unknown") ? <p className="w-full text-xs text-amber-500">Unclassified sections will be analyzed and count toward your processed-word allowance. Supplemental material in them may affect analysis.</p> : null}
             <button type="submit" onClick={() => setImportAsSingle(false)} className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-indigo-700">Confirm &amp; Import</button>
             <button type="submit" onClick={() => setImportAsSingle(true)} className={`rounded-lg px-4 py-2 text-sm font-medium transition ${isDark ? "border border-white/20 bg-white/5 text-slate-200 hover:bg-white/10" : "border border-slate-300 bg-white text-slate-700 hover:bg-slate-50"}`}>Import as single file</button>
             <button type="button" onClick={() => setShowEditor(true)} className={`rounded-lg px-4 py-2 text-sm font-medium transition ${isDark ? "text-slate-400 hover:text-slate-200" : "text-slate-500 hover:text-slate-700"}`}>Edit structure</button>
@@ -163,6 +168,10 @@ export function UploadSourceStep({
       {importPreview && showEditor ? (
         <ImportStructureEditor
           sections={importPreview.sections}
+          blockWordCounts={importPreview.block_word_counts}
+          blockOpenings={importPreview.block_openings}
+          blockClosings={importPreview.block_closings}
+          blockLocations={importPreview.block_locations}
           isDark={isDark}
           onSave={(sections) => {
             setImportPreview({ ...importPreview, sections })

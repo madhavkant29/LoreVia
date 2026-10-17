@@ -19,6 +19,7 @@ describe("large reader runtime pages", () => {
     await flushUi()
 
     const container = getReaderLargePagesContainer()
+    await clickText("Outline")
     expect(container?.textContent).toContain("The Ember Gate")
     expect(container?.textContent).toContain("Chapters")
     expect(container?.textContent).toContain("Chapter 1")
@@ -71,15 +72,26 @@ describe("large reader runtime pages", () => {
     expect(booksApiMock.exportManuscript).toHaveBeenCalledWith("book-1", "pdf", expect.any(String), expect.any(Boolean), "serif", true)
     await clickText("Exit focus")
 
+    await clickText("Outline")
     await clickText("Create chapter snapshot")
     await clickText("Preview chapter snapshot")
     await clickText("Restore chapter snapshot")
     expect(booksApiMock.createChapterSnapshot).toHaveBeenCalled()
     expect(booksApiMock.getChapterVersionDetail).toHaveBeenCalledWith("book-1", "version-1")
     expect(booksApiMock.restoreChapterVersion).toHaveBeenCalledWith("book-1", "version-1")
+    await flushUi()
+    expect(booksApiMock.getRestoreStatus).toHaveBeenCalledWith(
+      "book-1",
+      "version-1",
+      expect.any(AbortSignal),
+    )
 
     await clickText("Save now")
-    expect(booksApiMock.importManuscript).toHaveBeenCalledWith("book-1", expect.objectContaining({ chapterNumber: 2 }))
+    expect(booksApiMock.saveChapterContent).toHaveBeenCalledWith(
+      "book-1",
+      2,
+      expect.objectContaining({ expectedContentVersion: 3, clientMutationId: expect.any(String) }),
+    )
 
     await clickText("New chapter")
     expect(container?.textContent).toContain("Chapter 3")
@@ -105,6 +117,7 @@ describe("large reader runtime pages", () => {
     expect(booksApiMock.updateWriterWorkspace).toHaveBeenCalled()
 
     await clickText("Write")
+    await clickText("Inspector")
     await clickText("Open notes pane")
     await clickText("Inject note")
     await clickText("Open character card")
@@ -152,6 +165,7 @@ describe("large reader runtime pages", () => {
 
     const container = getReaderLargePagesContainer()
     await clickText("Write")
+    await clickText("Inspector")
     await clickText("Open character card")
     await clickText("Analysis")
     await clickText("Insights")

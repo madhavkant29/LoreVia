@@ -181,7 +181,7 @@ export function useCharacterPageDerivedState({
     () => selectedCharacter ? openQuestionsForCharacter(selectedCharacter, selectedConnections) : [],
     [selectedCharacter, selectedConnections],
   )
-  const hiddenGraphNodes = graphData?.hidden_nodes ?? []
+  const hiddenGraphNodes = useMemo(() => graphData?.hidden_nodes ?? [], [graphData?.hidden_nodes])
   const selectedHiddenGraphRecord = useMemo(
     () => selectedCharacter ? hiddenGraphNodes.find((node) => node.id === selectedCharacter.id) ?? null : null,
     [hiddenGraphNodes, selectedCharacter],

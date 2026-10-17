@@ -48,15 +48,15 @@ afterEach(() => {
 })
 
 describe("runtime editor components", () => {
-  it("edits import structure with quick marks, merge, delete, cancel, and save", async () => {
+  it("edits import structure with Part grouping, cancel, and save", async () => {
     const onSave = vi.fn()
     const onCancel = vi.fn()
     await render(
       <ImportStructureEditor
         sections={[
-          { id: "s1", type: "preface", title: "Opening", number: 1, confidence: 0.8, include_in_analysis: true },
-          { id: "s2", type: "chapter", title: "Chapter One", number: 2, confidence: 0.7, include_in_analysis: true },
-          { id: "s3", type: "toc", title: "Contents", number: 3, confidence: 0.4, include_in_analysis: false },
+          { id: "s1", type: "preface", title: "Opening", number: 1, confidence: 0.8, include_in_analysis: true, start_block: 0, end_block: 1 },
+          { id: "s2", type: "chapter", title: "Chapter One", number: 2, confidence: 0.7, include_in_analysis: true, start_block: 1, end_block: 2 },
+          { id: "s3", type: "toc", title: "Contents", number: 3, confidence: 0.4, include_in_analysis: false, start_block: 2, end_block: 2 },
         ] as never}
         onCancel={onCancel}
         onSave={onSave}
@@ -65,16 +65,15 @@ describe("runtime editor components", () => {
 
     expect(text()).toContain("Edit section structure")
     setInputValue('input[aria-label="Section 1 title"]', "Updated Opening")
-    await click("All chapters")
-    await click("Merge")
-    await click("Merge with #2")
-    await click("Delete")
+    await click("Make this a Part opening")
+    await click("Remove Part grouping")
     await click("Cancel")
     await click("Save changes")
 
     expect(onCancel).toHaveBeenCalled()
     expect(onSave).toHaveBeenCalled()
-    expect(onSave.mock.calls[0][0]).toHaveLength(1)
+    expect(onSave.mock.calls[0][0]).toHaveLength(3)
+    expect(onSave.mock.calls[0][0][0]).toMatchObject({ title: "Updated Opening", type: "chapter" })
   })
 
   it("renders editorial review results and drives save and continuity report actions", async () => {
@@ -97,6 +96,18 @@ describe("runtime editor components", () => {
               suggestion: "Move the oath earlier.",
             },
           ],
+          insertion_opportunities: [
+            {
+              title: "Seed the oath earlier",
+              problem: "The gate knowledge arrives after Mara uses it.",
+              target_chapter: 2,
+              target_chapter_title: "The Rule",
+              anchor_excerpt: "The rule was sworn.",
+              what_to_add: "Let Mara overhear the first line of the oath.",
+              why_here: "This establishes knowledge before the gate scene.",
+              purpose: "foreshadowing",
+            },
+          ],
           grammar_issues: [
             { issue: "Comma splice", original: "The gate opens, Mara runs", fix: "The gate opens, and Mara runs." },
           ],
@@ -108,11 +119,13 @@ describe("runtime editor components", () => {
     )
 
     expect(text()).toContain("Overall verdict")
+    expect(text()).toContain("Seed the oath earlier")
     await click("Save summary note")
     await click("Download continuity report")
     await click("Save note (Ch. 4)")
     await click("Save note", 1)
     await click("Save note", 2)
+    await click("Save note", 3)
 
     expect(onSaveNote).toHaveBeenCalled()
     expect(intelligenceApiMock.continuityReport).toHaveBeenCalledWith("book-1", "Mara breaks the gate rule.", "pdf", 4)
@@ -128,6 +141,7 @@ describe("runtime editor components", () => {
           overall_verdict: "Clean.",
           thematic_fit: { score: "strong", notes: "Theme lands." },
           continuity_issues: [],
+          insertion_opportunities: [],
           grammar_issues: [],
           formatting_notes: [],
         } as never}
@@ -136,6 +150,25 @@ describe("runtime editor components", () => {
       />,
     )
     expect(text()).toContain("No continuity or grammar issues found")
+  })
+
+  it("prevents duplicate saves and provides persistent error feedback with retry", async () => {
+    let finish!: () => void
+    const save = vi.fn().mockImplementationOnce(() => new Promise<void>((resolve) => { finish = resolve })).mockRejectedValueOnce(new Error("Offline")).mockResolvedValue(undefined)
+    await render(<EditorialReviewResults bookId="book-1" chapterNumber={null} editText="Source" editPassages={[]} editResult={{ overall_verdict: "Review", thematic_fit: { score: "strong", notes: "Fits" }, continuity_issues: [], grammar_issues: [], formatting_notes: [], insertion_opportunities: [] }} isDark onSaveNote={save} />)
+    await click("Save summary note")
+    const button = Array.from(container!.querySelectorAll("button")).find((item) => item.textContent?.includes("Save summary note"))!
+    expect(button.disabled).toBe(true)
+    await click("Save summary note")
+    expect(save).toHaveBeenCalledTimes(1)
+    await act(async () => { finish(); await Promise.resolve() })
+    expect(text()).toContain("Saved to Notes.")
+    await click("Save summary note")
+    expect(container!.querySelector('[role="alert"]')?.textContent).toContain("Could not complete")
+    expect(button.disabled).toBe(false)
+    await click("Save summary note")
+    expect(container!.querySelector('[role="alert"]')).toBeNull()
+    expect(text()).toContain("Saved to Notes.")
   })
 
   it("renders manuscript overlay scene and compile dialogs with callbacks", async () => {

@@ -10,12 +10,14 @@ import { useParams, useRouter } from "next/navigation"
 import { ContextualUpgradePrompt } from "@/components/billing/ContextualUpgradePrompt"
 import { CreateFab } from "@/components/overview/CreateFab"
 import { ActivationExperience } from "@/components/reader/ActivationExperience"
+import { WorkspaceModeSwitcher } from "@/components/reader/WorkspaceModeSwitcher"
+import { SUPPORT_HELP_EVENT } from "@/components/ui/ShortcutHelp"
 import { ErrorCard } from "@/components/ui/ErrorCard"
 import { RecentActivityList } from "@/components/ui/RecentActivityList"
 import { ProcessingStatusPanel } from "@/components/ui/ResponsivenessStatus"
 import { DashboardSkeleton, SidebarSkeleton } from "@/components/ui/Skeleton"
 import { VisibilityBadge } from "@/components/ui/VisibilityBadge"
-import { capture, captureTiming } from "@/lib/analytics/posthog"
+import { captureTiming } from "@/lib/analytics/posthog"
 import { booksApi } from "@/lib/api/books"
 import { canUseAuthorFeatures } from "@/lib/billing/plans"
 import { asQueryKey, bookCacheKey, booksQuotesCacheKey, booksStatsCacheKey, readerCacheKey } from "@/lib/query/cacheKeys"
@@ -24,8 +26,8 @@ import { useBookModeStore } from "@/lib/stores/bookModeStore"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 import { getBookRouteSegment, normalizeBookRouteId } from "@/lib/utils/bookRoutes"
 import { normalizeProcessingStatus } from "@/lib/utils/processingStatus"
-import type { Book, BookOverviewPayload, GoalCalendarItem, PreWritingCheck, ReaderBootstrapPayload, RevisionIntelligence, StoryHealth, UserStats, WriterWorkspace } from "@/types/book"
-import type { ReadingProgress } from "@/types/reader"
+import { buildGoalCalendarSavePatch, findRevisionTaskSource, patchRevisionIntelligenceItem } from "@/lib/utils/revisionIntelligence"
+import type { Book, BookOverviewPayload, GoalCalendarItem, ReaderBootstrapPayload, RevisionIntelligence, UserStats, WriterWorkspace } from "@/types/book"
 import type { RecentActivityItem } from "@/types/ux"
 
 const AuthorWorkspaceDashboard = dynamic(
@@ -114,19 +116,6 @@ function getProcessingSummary(book: Book | null) {
   return parts.length > 0 ? parts.join(" / ") : null
 }
 
-function estimateWordCount(book: Book | null, progress: ReadingProgress | null, targetWords: number) {
-  if (typeof book?.total_tokens === "number" && book.total_tokens > 0) {
-    return Math.round(book.total_tokens * 0.75)
-  }
-
-  const percent = progress?.percent_complete ?? book?.progress_pct
-  if (typeof percent === "number" && percent > 0) {
-    return Math.round(targetWords * (percent / 100))
-  }
-
-  return null
-}
-
 function formatDateKey(date: Date) {
   const year = date.getFullYear()
   const month = `${date.getMonth() + 1}`.padStart(2, "0")
@@ -160,6 +149,8 @@ export default function BookOverviewPage() {
   const [featureGateMessage, setFeatureGateMessage] = useState<string | null>(null)
   const [modeSaving, setModeSaving] = useState(false)
   const [processingRetrying, setProcessingRetrying] = useState(false)
+  const [processingError, setProcessingError] = useState<string | null>(null)
+  const [modeError, setModeError] = useState<string | null>(null)
   const router = useRouter()
   const queryClient = useQueryClient()
   const { theme, toggleTheme } = usePreferencesStore()
@@ -212,14 +203,7 @@ export default function BookOverviewPage() {
     refetchIntervalInBackground: false,
   })
 
-  useEffect(() => {
-    if (overviewQuery.isError) {
-      router.replace("/library")
-    }
-  }, [overviewQuery.isError, router])
-
   const resolvedBookMode = overviewQuery.data?.book.workspace_shell ?? overviewQuery.data?.book.mode ?? bookMode
-  const resolvedCollaborationRole = overviewQuery.data?.book.collaboration_role ?? null
   const resolvedCollaborationPermissions = overviewQuery.data?.book.collaboration_permissions ?? null
   const resolvedCanSwitchWorkspaceMode = overviewQuery.data?.book.can_switch_workspace_mode ?? true
   const hasOwnAuthorAccess = canUseAuthorFeatures(userTier)
@@ -228,13 +212,13 @@ export default function BookOverviewPage() {
     queryKey: asQueryKey(bookCacheKey(bookId, "notes")),
     queryFn: () => booksApi.getBookNotes(bookId),
     staleTime: 20_000,
-    enabled: secondaryDataEnabled && resolvedBookMode === "reader",
+    enabled: secondaryDataEnabled && (resolvedBookMode === "reader" || !canUsePaidAuthorTools),
   })
   const savedQuotesQuery = useQuery({
     queryKey: asQueryKey(booksQuotesCacheKey()),
     queryFn: () => booksApi.listQuotes(),
     staleTime: 45_000,
-    enabled: secondaryDataEnabled && resolvedBookMode === "reader",
+    enabled: secondaryDataEnabled && (resolvedBookMode === "reader" || !canUsePaidAuthorTools),
   })
   const userStatsQuery = useQuery<UserStats>({
     queryKey: asQueryKey(booksStatsCacheKey()),
@@ -243,8 +227,8 @@ export default function BookOverviewPage() {
     enabled: secondaryDataEnabled && resolvedBookMode === "author" && canUsePaidAuthorTools,
   })
   const charactersQuery = useQuery({
-    queryKey: asQueryKey(bookCacheKey(bookId, "characters")),
-    queryFn: () => booksApi.getCharacters(bookId),
+    queryKey: asQueryKey(bookCacheKey(bookId, "characters:count")),
+    queryFn: () => booksApi.getCharacters(bookId, { fields: ["id"] }),
     staleTime: 45_000,
     enabled: secondaryDataEnabled && resolvedBookMode === "author" && canUsePaidAuthorTools,
   })
@@ -284,7 +268,7 @@ export default function BookOverviewPage() {
   const chapterList = overviewQuery.data?.chapter_list ?? null
   const summaryCollection = overviewQuery.data?.summary_collection ?? null
   const bookNotes = bookNotesQuery.data ?? []
-  const savedQuotes = (savedQuotesQuery.data ?? []).filter((quote) => quote.book_id === bookId)
+  const savedQuotes = (savedQuotesQuery.data ?? []).filter((quote) => quote.book_id === normalizedBookId)
   const userStats = userStatsQuery.data ?? null
   const characters = charactersQuery.data ?? []
   const chapterReports = chapterReportsQuery.data ?? []
@@ -412,23 +396,34 @@ export default function BookOverviewPage() {
   const shouldShowAuthorWorkspace = activeBookMode === "author" && canUsePaidAuthorTools
   const processingSummary = getProcessingSummary(book)
   const normalizedProcessingStatus = normalizeProcessingStatus(book?.processing, book)
+  const showActivationExperience = Boolean(
+    shouldShowAuthorWorkspace
+      && revisionIntelligence?.activation
+      && !revisionIntelligence.activation.completed
+      && (!normalizedProcessingStatus || normalizedProcessingStatus.ready),
+  )
   const unitTitle = storyUnitTitle(book?.work_type)
   const unitPrefix = storyUnitPrefix(book?.work_type)
   const chapters = chapterList?.chapters ?? []
   const chapterCount = chapters.length || book?.total_chapters || null
-  const targetWords = Math.max(1, writerWorkspace?.word_count_goals.book_target ?? 100000)
-  const currentWords = typeof book?.total_words === "number" && book.total_words > 0 ? book.total_words : estimateWordCount(book, progress, targetWords)
+  const configuredTargetWords = writerWorkspace?.word_count_goals.book_target
+  const currentWords = typeof book?.total_words === "number" && book.total_words >= 0 ? book.total_words : null
+  const targetWords = typeof configuredTargetWords === "number" && configuredTargetWords > 0 ? configuredTargetWords : null
   const dailyTarget = Math.max(1, user?.daily_word_goal ?? 1000)
   const dailyWords = Math.max(0, user?.today_word_count ?? 0)
   const loginStreakDays = Math.max(0, user?.login_streak_days ?? 0)
   const weeklyLoginActivity = getCurrentWeekActivity(user?.login_activity_dates ?? [])
   const continuityIssueCount = chapterReports.reduce((sum, report) => sum + report.continuity_flags.length, 0)
   const worldGapCount = preWritingCheck?.alerts.length ?? 0
-  const timelineIssueCount = Math.max(0, chaptersLeft > 0 ? Math.min(3, Math.ceil(chaptersLeft / 8)) : 0)
+  const worldItemCount = Math.max(0, overviewQuery.data?.world_stats?.total_items ?? 0)
+  const timelineIssueCount = (revisionIntelligence?.priority_findings ?? []).filter((finding) => {
+    if (finding.is_stale || ["fixed", "ignored"].includes(finding.status)) return false
+    return /timeline|temporal|chronolog|sequence|date|time/.test(finding.category.toLowerCase())
+  }).length
   const greetingName = authHydrated ? user?.username?.trim() || "there" : "there"
   const overviewActivityItems = useMemo<RecentActivityItem[]>(() => {
     const items: RecentActivityItem[] = []
-    if (processingSummary) {
+    if (processingSummary && book?.status !== "ready") {
       items.push({
         id: "processing",
         label: "Processing status updated",
@@ -438,8 +433,8 @@ export default function BookOverviewPage() {
     }
     items.push({
       id: "progress",
-      label: `${percentComplete}% complete`,
-      detail: `${chaptersLeft} ${storyUnitName(book?.work_type, true)} left from the current reading progress.`,
+      label: `${percentComplete}% read`,
+      detail: `${chaptersLeft} ${storyUnitName(book?.work_type, chaptersLeft !== 1)} left from the current reading progress.`,
       href: `/${bookId}/chapter/${continueChapter}` as Route,
     })
     if (revisionIntelligence?.summary?.recent_edit_label) {
@@ -495,15 +490,34 @@ export default function BookOverviewPage() {
     }
   }
 
-  const saveGoalCalendar = async (goalCalendar: GoalCalendarItem[]) =>
-    saveWorkspacePatch(
-      { goal_calendar: goalCalendar },
+  const saveGoalCalendar = async (goalCalendar: GoalCalendarItem[]) => {
+    if (!writerWorkspace) return false
+    const { patch, removedTaskIds } = buildGoalCalendarSavePatch(writerWorkspace, goalCalendar)
+    const saved = await saveWorkspacePatch(
+      patch,
       {
         saving: "Saving planner...",
         success: "Planner saved.",
         error: "Could not save planner changes.",
       }
     )
+    if (saved && removedTaskIds.length > 0) {
+      const revisionKey = asQueryKey(bookCacheKey(bookId, "revision-intelligence"))
+      queryClient.setQueryData<RevisionIntelligence | undefined>(revisionKey, (current) => {
+        if (!current) return current
+        return removedTaskIds.reduce((updated, taskId) => {
+          const source = findRevisionTaskSource(updated, taskId)
+          return source
+            ? patchRevisionIntelligenceItem(updated, source.id, {
+                task_id: null,
+                status: source.status === "task_created" ? "pending" : source.status,
+              })
+            : updated
+        }, current)
+      })
+    }
+    return saved
+  }
 
   const continueReading = () => {
     navigateWithMemory(`/${bookId}/chapter/${continueChapter}`)
@@ -520,6 +534,7 @@ export default function BookOverviewPage() {
   const retryProcessing = async () => {
     if (!book) return
     setProcessingRetrying(true)
+    setProcessingError(null)
     try {
       const processing = normalizedProcessingStatus?.resumeAvailable
         ? await booksApi.continueProcessing(book.id)
@@ -528,6 +543,8 @@ export default function BookOverviewPage() {
         current ? { ...current, book: { ...current.book, status: "processing", processing } } : current
       ))
       await overviewQuery.refetch()
+    } catch {
+      setProcessingError("Processing could not be restarted. Check your connection and try again.")
     } finally {
       setProcessingRetrying(false)
     }
@@ -541,6 +558,7 @@ export default function BookOverviewPage() {
     const previousBook = book
     startTransition(() => setBookMode(bookId, nextMode))
     setModeSaving(true)
+    setModeError(null)
     if (previousBook) {
       queryClient.setQueryData(bookQueryKey, { ...previousBook, workspace_shell: nextMode, mode: nextMode })
       queryClient.setQueryData(overviewQueryKey, (current: BookOverviewPayload | undefined) => (
@@ -554,7 +572,8 @@ export default function BookOverviewPage() {
         current ? { ...current, book: updated } : current
       ))
     } catch {
-      startTransition(() => setBookMode(bookId, previousBook?.workspace_shell ?? "reader"))
+      setModeError("The workspace could not be changed. Your previous workspace has been restored. Try switching again.")
+      startTransition(() => setBookMode(bookId, previousBook?.workspace_shell ?? previousBook?.mode ?? bookMode))
       if (previousBook) {
         queryClient.setQueryData(bookQueryKey, previousBook)
         queryClient.setQueryData(overviewQueryKey, (current: BookOverviewPayload | undefined) => (
@@ -566,7 +585,7 @@ export default function BookOverviewPage() {
     }
   }
 
-  if (overviewQuery.isError) {
+  if (overviewQuery.isError && !book) {
     return (
       <div className="min-h-screen bg-background text-foreground">
         <div className="mx-auto max-w-[100rem] px-4 pt-10 sm:px-6 lg:px-8">
@@ -589,7 +608,7 @@ export default function BookOverviewPage() {
           <div className="hidden lg:block lg:sticky lg:top-5 lg:self-start">
             <NavPanelLoadingState />
           </div>
-          <main className="min-w-0">
+          <main className="min-w-0" role="status" aria-label="Loading book overview" aria-busy="true">
             <DashboardSkeleton />
           </main>
         </div>
@@ -598,52 +617,45 @@ export default function BookOverviewPage() {
   }
 
   return (
-    <div className="min-h-screen bg-background text-foreground">
-      <div className="mx-auto grid max-w-[100rem] gap-5 px-4 pb-28 pt-5 sm:px-6 lg:grid-cols-[15.5rem_minmax(0,1fr)] lg:px-8 xl:gap-6">
-        <div className="lg:hidden">
-          <AuthorToolsNav
-            bookId={bookId}
-            active="overview"
-            isDark={isDark}
-            bookData={book}
-            title={activeBookMode === "author" ? "Author workspace" : "Reader workspace"}
-            description={activeBookMode === "author" ? "Drafting and intelligence stay nearby without crowding the book." : "Reading, chapters, and quiet tools stay one hover away."}
-            currentChapter={continueChapter}
-            mode={activeBookMode}
-          />
-        </div>
-
-        <div className="hidden lg:block lg:sticky lg:top-5 lg:self-start">
-          <AuthorToolsNav
-            bookId={bookId}
-            active="overview"
-            isDark={isDark}
-            bookData={book}
-            title={activeBookMode === "author" ? "Author workspace" : "Reader workspace"}
-            description={activeBookMode === "author" ? "Drafting and intelligence stay nearby without crowding the book." : "Reading, chapters, and quiet tools stay one hover away."}
-            currentChapter={continueChapter}
-            mode={activeBookMode}
-            variant="rail"
-            railSize="compact"
-          />
-        </div>
+    <div data-book-overview className="min-h-screen bg-background text-foreground">
+      <div className="mx-auto max-w-[100rem] space-y-5 px-4 pb-28 pt-5 sm:px-6 lg:px-8 xl:space-y-6">
+        <AuthorToolsNav
+          bookId={bookId}
+          active="overview"
+          isDark={isDark}
+          bookData={book}
+          title={activeBookMode === "author" ? "Author workspace" : "Reader workspace"}
+          currentChapter={continueChapter}
+          mode={activeBookMode}
+          variant="bar"
+        />
 
         <main className="min-w-0 space-y-5">
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap items-center justify-between gap-2">
             <VisibilityBadge
               state={book?.is_public || book?.public_status === "published" ? "public_sample" : isCollaboratorSession ? "shared" : "private"}
             />
+            <div className="flex items-center gap-2">
+              {showActivationExperience ? (
+                <WorkspaceModeSwitcher
+                  isDark={isDark}
+                  activeMode={activeBookMode}
+                  modeSaving={modeSaving}
+                  writingAvailable={canUseAuthorWorkspace && canSwitchWorkspaceMode}
+                  onModeChange={updateMode}
+                />
+              ) : null}
+              <button type="button" onClick={() => window.dispatchEvent(new CustomEvent(SUPPORT_HELP_EVENT))} className="min-h-10 rounded-sm border border-border px-3 text-sm font-medium">Help</button>
+              {shouldShowAuthorWorkspace && canEditSharedManuscript ? <CreateFab inline bookId={bookId} isDark={isDark} onAddScene={openAddSceneFlow} onNavigate={navigateWithMemory} /> : null}
+            </div>
           </div>
+          {modeError ? <p role="alert" className="border-l-2 border-amber-500 px-3 py-2 text-sm text-amber-900 dark:text-amber-200">{modeError}</p> : null}
+          {processingError ? <p role="alert" className="border-l-2 border-amber-500 px-3 py-2 text-sm text-amber-900 dark:text-amber-200">{processingError}</p> : null}
+          {overviewQuery.isError ? <ErrorCard variant="compact" isDark={isDark} message="The overview could not be refreshed. Showing the last loaded information." onRetry={() => overviewQuery.refetch()} /> : null}
           <ProcessingStatusPanel
             status={normalizedProcessingStatus}
             retrying={processingRetrying}
             onRetry={normalizedProcessingStatus?.retryAvailable ? () => void retryProcessing() : undefined}
-          />
-
-          <RecentActivityList
-            title="Project signals"
-            items={overviewActivityItems}
-            emptyLabel="No project signals yet. Start writing or reading to see your activity trail here."
           />
 
           {featureGateMessage ? (
@@ -671,6 +683,9 @@ export default function BookOverviewPage() {
               summaryCollection={summaryCollection}
               bookNotes={bookNotes}
               savedQuotes={savedQuotes}
+              savedItemsLoading={bookNotesQuery.isPending || savedQuotesQuery.isPending}
+              savedItemsError={bookNotesQuery.isError || savedQuotesQuery.isError}
+              onRetrySavedItems={() => { void bookNotesQuery.refetch(); void savedQuotesQuery.refetch() }}
               bookmark={bookmark}
               isDark={isDark}
               modeSaving={modeSaving}
@@ -681,16 +696,16 @@ export default function BookOverviewPage() {
               onNavigate={navigateWithMemory}
               onContinueReading={continueReading}
             />
-          ) : revisionIntelligence?.activation
-            && !revisionIntelligence.activation.completed
-            && (!normalizedProcessingStatus || normalizedProcessingStatus.ready) ? (
+          ) : showActivationExperience && revisionIntelligence ? (
             <ActivationExperience
               bookId={bookId}
               bookCreatedAt={book?.created_at}
               bookTitle={book?.title ?? "your manuscript"}
+              bookWorkType={book?.work_type}
               chapterCount={chapterCount ?? 0}
               isDark={isDark}
               revision={revisionIntelligence}
+              enableFirstImpression={book?.access_class === "owner" && ["novel", "screenplay"].includes(book?.work_type ?? "novel")}
               onNavigate={navigateWithMemory}
               onRevisionChange={(nextRevision) => {
                 queryClient.setQueryData(asQueryKey(bookCacheKey(bookId, "revision-intelligence")), nextRevision)
@@ -710,19 +725,20 @@ export default function BookOverviewPage() {
               targetWords={targetWords}
               percentComplete={percentComplete}
               chapters={chapters}
+              summaryCollection={summaryCollection}
               unitTitle={unitTitle}
               unitPrefix={unitPrefix}
               storyHealth={storyHealth}
               preWritingCheck={preWritingCheck}
               revisionIntelligence={revisionIntelligence}
               writerWorkspace={writerWorkspace}
-              continuityIssueCount={continuityIssueCount}
-              worldGapCount={worldGapCount}
-              timelineIssueCount={timelineIssueCount}
-              processingSummary={processingSummary}
+              continuityIssueCount={chapterReportsQuery.data ? continuityIssueCount : null}
+              worldGapCount={preWritingCheck ? worldGapCount : null}
+              timelineIssueCount={revisionIntelligence ? timelineIssueCount : null}
+              processingSummary={book.status === "ready" ? null : processingSummary}
               chapterCount={chapterCount}
               characterCount={characters.length}
-              worldArticleCount={(writerWorkspace?.templates.length ?? 0) + (writerWorkspace?.corkboard_cards.length ?? 0)}
+              worldArticleCount={worldItemCount}
               loginStreakDays={loginStreakDays}
               weeklyLoginActivity={weeklyLoginActivity}
               dailyWords={dailyWords}
@@ -752,25 +768,26 @@ export default function BookOverviewPage() {
               onRetryWriterWorkspace={() => writerWorkspaceQuery.refetch()}
             />
           )}
+          <details className="border-y border-border py-3">
+            <summary className="cursor-pointer text-sm font-semibold">Project signals</summary>
+            <RecentActivityList title="Latest updates" items={overviewActivityItems} emptyLabel="No project signals yet. Start writing or reading to see your activity here." variant="compact" />
+          </details>
         </main>
       </div>
 
-      {shouldShowAuthorWorkspace && canEditSharedManuscript ? (
-        <CreateFab bookId={bookId} isDark={isDark} onAddScene={openAddSceneFlow} onNavigate={navigateWithMemory} />
-      ) : null}
 
-      <nav className="fixed inset-x-0 bottom-0 z-30 border-t border-slate-200 bg-card px-4 py-3 dark:border-white/10 dark:bg-background lg:hidden">
-        <div className="mx-auto grid max-w-xl grid-cols-6 gap-2 text-center text-3xs font-medium text-muted-foreground">
-          <Link href={`/${bookId}`} className="rounded-xl px-2 py-2 text-teal-800">Overview</Link>
-          <button onClick={continueReading} className="rounded-xl px-2 py-2">Read</button>
-          <Link href={`/${bookId}/chapters`} className="rounded-xl px-2 py-2">Chapters</Link>
-          <Link href={`/${bookId}/summaries`} className="rounded-xl px-2 py-2">Summary</Link>
+      <nav aria-label="Book shortcuts" data-lorevia-bottom-floating className="fixed inset-x-0 bottom-0 z-30 border-t border-slate-200 bg-card px-4 py-3 dark:border-white/10 dark:bg-background lg:hidden">
+        <div className="mx-auto grid max-w-xl grid-cols-3 gap-1 text-center text-xs sm:grid-cols-6 font-medium text-muted-foreground">
+          <Link href={`/${bookId}`} aria-current="page" className="min-h-10 rounded-sm bg-teal-50 px-2 py-2 text-teal-800 dark:bg-teal-950 dark:text-teal-200">Overview</Link>
+          <button onClick={continueReading} className="min-h-10 rounded-sm px-2 py-2">Read</button>
+          <Link href={`/${bookId}/chapters`} className="min-h-10 rounded-sm px-2 py-2">Chapters</Link>
+          <Link href={`/${bookId}/notes`} className="min-h-10 rounded-sm px-2 py-2">Notes</Link>
           {activeBookMode === "author" ? (
-            <button onClick={openRelationships} className="rounded-xl px-2 py-2">Graph</button>
+            <button onClick={openRelationships} className="min-h-10 rounded-sm px-2 py-2">Graph</button>
           ) : (
-            <Link href={`/${bookId}/timeline`} className="rounded-xl px-2 py-2">Timeline</Link>
+            <Link href={`/${bookId}/timeline`} className="min-h-10 rounded-sm px-2 py-2">Timeline</Link>
           )}
-          <Link href="/library" className="rounded-xl px-2 py-2">Library</Link>
+          <Link href="/library" className="min-h-10 rounded-sm px-2 py-2">Library</Link>
         </div>
       </nav>
     </div>

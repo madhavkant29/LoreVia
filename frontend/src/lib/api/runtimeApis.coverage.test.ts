@@ -6,6 +6,7 @@ const {
   patchMock,
   postMock,
   putMock,
+  prefetchInfiniteQueryMock,
   prefetchQueryMock,
   invalidateQueryKeysMock,
 } = vi.hoisted(() => ({
@@ -14,6 +15,7 @@ const {
   patchMock: vi.fn(),
   postMock: vi.fn(),
   putMock: vi.fn(),
+  prefetchInfiniteQueryMock: vi.fn(),
   prefetchQueryMock: vi.fn(),
   invalidateQueryKeysMock: vi.fn(),
 }))
@@ -30,6 +32,7 @@ vi.mock("./client", () => ({
 
 vi.mock("@/lib/query/queryClient", () => ({
   queryClient: {
+    prefetchInfiniteQuery: prefetchInfiniteQueryMock,
     prefetchQuery: prefetchQueryMock,
   },
   invalidateQueryKeys: invalidateQueryKeysMock,
@@ -45,6 +48,7 @@ import { notificationsApi } from "@/lib/api/notifications"
 import {
   NOTIFICATIONS_SIDEBAR_LIMIT,
   NOTIFICATIONS_SIDEBAR_QUERY_KEY,
+  SOCIAL_CONVERSATIONS_SIDEBAR_LIMIT,
   SOCIAL_CONVERSATIONS_QUERY_KEY,
   SOCIAL_RELATIONSHIPS_QUERY_KEY,
   prefetchChatsSidebarData,
@@ -62,6 +66,7 @@ describe("runtime api wrappers", () => {
     patchMock.mockReset()
     postMock.mockReset()
     putMock.mockReset()
+    prefetchInfiniteQueryMock.mockReset()
     prefetchQueryMock.mockReset()
     invalidateQueryKeysMock.mockReset()
 
@@ -70,20 +75,31 @@ describe("runtime api wrappers", () => {
     patchMock.mockResolvedValue({ data: { ok: true } })
     postMock.mockResolvedValue({ data: { ok: true } })
     putMock.mockResolvedValue({ data: { ok: true } })
+    prefetchInfiniteQueryMock.mockResolvedValue(undefined)
     prefetchQueryMock.mockResolvedValue(undefined)
     vi.mocked(notificationsApi.list).mockClear()
   })
 
   it("builds billing checkout, confirmation, and portal requests", async () => {
-    await billingApi.checkout("author_monthly")
+    await billingApi.checkoutPreview("author_monthly")
+    await billingApi.checkout("author_monthly", true, "signed-quote")
+    await billingApi.abandonCheckout("txn-1")
     await billingApi.confirmation("txn-1", "confirm-1")
     await billingApi.portal()
 
-    expect(postMock).toHaveBeenNthCalledWith(1, "/billing/checkout", { plan: "author_monthly" })
+    expect(postMock).toHaveBeenNthCalledWith(1, "/billing/checkout/preview", { plan: "author_monthly" })
+    expect(postMock).toHaveBeenNthCalledWith(2, "/billing/checkout", {
+      plan: "author_monthly",
+      confirmed_immediate_charge: true,
+      quote_token: "signed-quote",
+    })
+    expect(postMock).toHaveBeenNthCalledWith(3, "/billing/checkout/abandon", {
+      transaction_id: "txn-1",
+    })
     expect(getMock).toHaveBeenCalledWith("/billing/confirmation", {
       params: { transaction_id: "txn-1", confirmation_token: "confirm-1" },
     })
-    expect(postMock).toHaveBeenNthCalledWith(2, "/billing/portal")
+    expect(postMock).toHaveBeenNthCalledWith(4, "/billing/portal")
   })
 
   it("omits optional billing confirmation tokens", async () => {
@@ -102,6 +118,8 @@ describe("runtime api wrappers", () => {
     await socialApi.cancelFriendRequest("request-3")
     await socialApi.openDirectConversation("user-3")
     await socialApi.listMessages("conversation-1", 25)
+    await socialApi.listConversationsPage(30, "next-conversations")
+    await socialApi.listMessagesPage("conversation-1", 25, "next-messages")
     await socialApi.sendMessage("conversation-1", "Hello")
     await socialApi.markConversationRead("conversation-1")
 
@@ -112,6 +130,12 @@ describe("runtime api wrappers", () => {
     expect(postMock).toHaveBeenCalledWith("/social/friend-requests/request-3/cancel")
     expect(postMock).toHaveBeenCalledWith("/social/conversations/direct", { target_user_id: "user-3" })
     expect(getMock).toHaveBeenCalledWith("/social/conversations/conversation-1/messages", { params: { limit: 25 } })
+    expect(getMock).toHaveBeenCalledWith("/social/conversations/page", {
+      params: { limit: 30, cursor: "next-conversations" },
+    })
+    expect(getMock).toHaveBeenCalledWith("/social/conversations/conversation-1/messages/page", {
+      params: { limit: 25, cursor: "next-messages" },
+    })
     expect(postMock).toHaveBeenCalledWith("/social/conversations/conversation-1/messages", { body: "Hello" })
     expect(postMock).toHaveBeenCalledWith("/social/conversations/conversation-1/read")
   })
@@ -217,17 +241,21 @@ describe("runtime api wrappers", () => {
     await prefetchNotificationsSidebarData()
     await prefetchChatsSidebarData()
 
-    expect(prefetchQueryMock).toHaveBeenCalledWith({
+    expect(prefetchInfiniteQueryMock).toHaveBeenCalledWith({
       queryKey: NOTIFICATIONS_SIDEBAR_QUERY_KEY,
+      initialPageParam: null,
+      queryFn: expect.any(Function),
+      getNextPageParam: expect.any(Function),
+    })
+    await prefetchInfiniteQueryMock.mock.calls[0]?.[0].queryFn({ pageParam: null })
+    expect(notificationsApi.list).toHaveBeenCalledWith(NOTIFICATIONS_SIDEBAR_LIMIT, { cursor: null })
+    expect(prefetchQueryMock).toHaveBeenCalledWith({
+      queryKey: SOCIAL_CONVERSATIONS_QUERY_KEY,
       queryFn: expect.any(Function),
     })
     await prefetchQueryMock.mock.calls[0]?.[0].queryFn()
-    expect(notificationsApi.list).toHaveBeenCalledWith(NOTIFICATIONS_SIDEBAR_LIMIT, {
-      syncRevisionDigests: false,
-    })
-    expect(prefetchQueryMock).toHaveBeenCalledWith({
-      queryKey: SOCIAL_CONVERSATIONS_QUERY_KEY,
-      queryFn: socialApi.listConversations,
+    expect(getMock).toHaveBeenCalledWith("/social/conversations/page", {
+      params: { limit: SOCIAL_CONVERSATIONS_SIDEBAR_LIMIT },
     })
     expect(prefetchQueryMock).toHaveBeenCalledWith({
       queryKey: SOCIAL_RELATIONSHIPS_QUERY_KEY,

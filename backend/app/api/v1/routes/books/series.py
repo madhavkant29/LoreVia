@@ -18,6 +18,7 @@ from app.schemas.books import (
     SeriesMembershipBody,
     SeriesOut,
 )
+from app.services.world_analysis_refresh_service import enqueue_world_analysis_refresh
 from app.utils.billing_utils import require_author_access
 from app.utils.books.notes import (
     get_owned_book,
@@ -52,6 +53,7 @@ async def update_book_series(
         raise HTTPException(400, "Series order must be at least 1")
 
     if not series_name:
+        previous_series_id = book.primary_series_id
         if book.primary_series_id:
             membership = (
                 await db.execute(
@@ -67,6 +69,9 @@ async def update_book_series(
         book.series_name = None
         book.series_order = None
         await db.commit()
+        await enqueue_world_analysis_refresh(scope="book", target_id=book.id)
+        if previous_series_id:
+            await enqueue_world_analysis_refresh(scope="series", target_id=previous_series_id)
         await db.refresh(book)
         return await book_out(db, book, current_user.id)
 
@@ -95,6 +100,8 @@ async def update_book_series(
     book.series_name = series.name
     book.series_order = body.series_order
     await db.commit()
+    await enqueue_world_analysis_refresh(scope="book", target_id=book.id)
+    await enqueue_world_analysis_refresh(scope="series", target_id=series.id)
     await db.refresh(book)
     return await book_out(db, book, current_user.id)
 
@@ -224,6 +231,8 @@ async def add_book_to_series(
     book.series_name = series.name
     book.series_order = body.position
     await db.commit()
+    await enqueue_world_analysis_refresh(scope="book", target_id=book.id)
+    await enqueue_world_analysis_refresh(scope="series", target_id=series.id)
     return await build_single_series_out(db, series=series, user_id=current_user.id)
 
 
@@ -253,6 +262,8 @@ async def remove_book_from_series(
         book.series_name = None
         book.series_order = None
     await db.commit()
+    await enqueue_world_analysis_refresh(scope="book", target_id=book.id)
+    await enqueue_world_analysis_refresh(scope="series", target_id=series.id)
     return await build_single_series_out(db, series=series, user_id=current_user.id)
 
 

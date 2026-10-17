@@ -307,7 +307,7 @@ async def test_friend_request_response_and_cancel_paths(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_direct_conversation_creation_access_send_and_read(monkeypatch):
+async def test_direct_conversation_creation_access_and_send(monkeypatch):
     current = SimpleNamespace(id=uuid.UUID("00000000-0000-0000-0000-000000000001"), username="mira")
     target = SimpleNamespace(
         id=uuid.UUID("00000000-0000-0000-0000-000000000002"),
@@ -382,11 +382,3 @@ async def test_direct_conversation_creation_access_send_and_read(monkeypatch):
     assert existing.last_message_at is not None
     assert send_db.added == [message]
     assert send_db.committed == 1
-
-    unread = SimpleNamespace(recipient_read_at=None)
-    read_db = FakeDb(execute_results=[FakeScalarResult(rows=[unread])])
-    await social_utils.mark_conversation_read(
-        read_db, current_user=current, conversation_id=existing.id
-    )
-    assert unread.recipient_read_at is not None
-    assert read_db.committed == 1

@@ -1,31 +1,22 @@
 "use client"
-
 import { useQuery } from "@tanstack/react-query"
-import { startTransition, useDeferredValue, useEffect, useMemo, useRef, useState } from "react"
+import { startTransition, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react"
 import { useParams } from "next/navigation"
-
 import { booksApi } from "@/lib/api/books"
 import { useBookDetail } from "@/lib/hooks/useBookDetail"
 import { asQueryKey, bookCacheKey } from "@/lib/query/cacheKeys"
 import { countWords, estimateReadingTimeMinutes, formatReadingTimeLabel } from "@/lib/utils/manuscriptEditor"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
-import {
-  buildSceneChapterOptions,
-  extractChapterNumberFromSceneFolder,
-  findWorkspaceStructurePath,
-} from "@/lib/utils/sceneWorkspace"
-import {
-  buildUniqueWorkspacePathFromCandidate,
-  buildWorkspaceFolderTree,
-  normalizeWorkspaceFolderPath,
-} from "@/lib/utils/workspacePaths"
-import type { Book, ManuscriptWorkspaceTree, NovelScene, SceneMetadata } from "@/types/book"
-import type { Character } from "@/types/character"
-import { AddCharacterFromSelection } from "@/components/characters/AddCharacterFromSelection"
+import { buildSceneChapterOptions, extractChapterNumberFromSceneFolder } from "@/lib/utils/sceneWorkspace"
+import { buildUniqueWorkspacePathFromCandidate, buildWorkspaceFolderTree, normalizeWorkspaceFolderPath } from "@/lib/utils/workspacePaths"
+import type { ManuscriptWorkspaceTree, SceneMetadata, WorkspaceScene } from "@/types/book"
+import { AuthorToolsNav } from "@/components/layout/AuthorToolsNav"
 import { usePromptDialog } from "@/components/ui/PromptDialog"
+import { useConfirmDialog } from "@/components/ui/ConfirmDialog"
+import { ErrorCard } from "@/components/ui/ErrorCard"
+import { WorkspaceSidePanel } from "@/components/ui/WorkspaceSidePanel"
 import {
   ActionButton,
-  MetadataPreviewPanel,
   MobilePanelToggles,
   SceneBrowserPanel,
   SceneEditorPanel,
@@ -40,10 +31,12 @@ import {
   defaultSceneFolder,
   emptySceneMetadata,
   loadSceneFolders,
+  normalizeSceneMetadata,
   saveSceneFolders,
   sceneFolder,
 } from "./scenesPage.helpers"
-
+import { SceneSelectionActions, useSceneSelectionMenu } from "./scenesPage.selection"
+import { useSceneNavigationGuard } from "./scenesPage.navigation"
 export default function ScenesPage() {
   const { bookId } = useParams<{ bookId: string }>()
   const { theme } = usePreferencesStore()
@@ -62,17 +55,28 @@ export default function ScenesPage() {
   const [sceneFolderDraft, setSceneFolderDraft] = useState(defaultSceneFolder(null))
   const [saving, setSaving] = useState(false)
   const [status, setStatus] = useState<string | null>(null)
+  const [actionError, setActionError] = useState<string | null>(null)
+  const baselineRef = useRef<string | null>(null)
+  const newDraftRef = useRef(false)
+  const savingRef = useRef(false)
+  savingRef.current = saving
+  const draftSignature = JSON.stringify({ title, description, body, htmlBody, chapterNumber, sceneMetadata, sceneFolderDraft })
+  if (baselineRef.current === null) baselineRef.current = draftSignature
+  const dirty = baselineRef.current !== null && baselineRef.current !== draftSignature
+  const dirtyRef = useRef(dirty)
+  dirtyRef.current = dirty
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({})
   const [browserView, setBrowserView] = useState<BrowserView>("folders")
-  const [showBrowserOnMobile, setShowBrowserOnMobile] = useState(true)
-  const [showInspectorOnMobile, setShowInspectorOnMobile] = useState(false)
+  const [outlineOpen, setOutlineOpen] = useState(false)
+  const [inspectorOpen, setInspectorOpen] = useState(false)
   const [showWritingTools, setShowWritingTools] = useState(false)
   const [firstLineIndent, setFirstLineIndent] = useState(false)
-  const [selectionMenu, setSelectionMenu] = useState<{ text: string; top: number; left: number } | null>(null)
-  const [addCharacterOpen, setAddCharacterOpen] = useState(false)
-  const [addCharacterText, setAddCharacterText] = useState("")
-  const selectionRef = useRef<string>("")
+  const { selectionMenu, addCharacterOpen, addCharacterText, setAddCharacterOpen, openAddCharacterFromSelection, handleCharacterCreated } = useSceneSelectionMenu(setStatus)
+  const selectedSceneIdRef = useRef(selectedSceneId)
+  selectedSceneIdRef.current = selectedSceneId
   const prompt = usePromptDialog()
+  const confirm = useConfirmDialog()
+  useSceneNavigationGuard(dirtyRef, confirm)
 
   const { data: book = null } = useBookDetail(bookId)
   const {
@@ -82,7 +86,7 @@ export default function ScenesPage() {
     refetch: refetchTree,
   } = useQuery<ManuscriptWorkspaceTree | null>({
     queryKey: asQueryKey(bookCacheKey(bookId, "workspace-tree")),
-    queryFn: () => booksApi.getWorkspaceTree(bookId),
+    queryFn: () => booksApi.getWorkspaceTree(bookId, { includeSceneBodies: true }),
   })
 
   const scenes = useMemo(
@@ -113,22 +117,14 @@ export default function ScenesPage() {
       const folderMatches = !selectedFolder || sceneFolder(scene.path) === selectedFolder || sceneFolder(scene.path).startsWith(`${selectedFolder}/`)
       if (!folderMatches) return false
       if (!term) return true
-      return [scene.title, scene.description ?? "", scene.body, scene.path].some((value) => value.toLowerCase().includes(term))
+      return [scene.title, scene.description ?? "", scene.body ?? "", scene.path].some((value) => value.toLowerCase().includes(term))
     })
   }, [deferredSearch, scenes, selectedFolder])
 
-  const metadataRows = useMemo(() => {
-    const metadata = selectedScene?.metadata ?? sceneMetadata ?? {}
-    return Object.entries(metadata).filter(([, value]) => {
-      if (Array.isArray(value)) return value.length > 0
-      return value !== null && value !== undefined && String(value).trim() !== ""
-    })
-  }, [sceneMetadata, selectedScene])
   const sceneWordCount = useMemo(() => countWords(body), [body])
   const sceneReadingTime = useMemo(() => formatReadingTimeLabel(estimateReadingTimeMinutes(sceneWordCount)), [sceneWordCount])
-  const currentScenePath = title.trim() ? buildScenePath(sceneFolderDraft, title.trim()) : null
-  const selectedTagList = sceneMetadata.tags ?? []
-  const selectedMoodList = sceneMetadata.mood ?? []
+  const selectedTagList = (sceneMetadata.tags ?? []).filter(Boolean)
+  const selectedMoodList = (sceneMetadata.mood ?? []).filter(Boolean)
 
   const rememberFolder = (folderPath: string | null | undefined) => {
     const normalized = normalizeWorkspaceFolderPath(folderPath)
@@ -136,9 +132,31 @@ export default function ScenesPage() {
     setCustomFolders((current) => [...new Set([...current, normalized])].sort())
   }
 
-  const syncWorkspaceSelection = (treeData: ManuscriptWorkspaceTree | null, preferredSceneId?: string | null) => {
+  const selectScene = useCallback((scene: WorkspaceScene) => {
+    const inferredChapterNumber = scene.chapter_number ?? extractChapterNumberFromSceneFolder(scene.path)
+    const folderPath = sceneFolder(scene.path) || defaultSceneFolder(inferredChapterNumber)
+    const sceneBody = scene.body ?? ""
+    const sceneHtml = scene.html_body ?? `<p>${sceneBody.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replace(/\n/g, "<br>")}</p>`
+    const metadata = { ...emptySceneMetadata(), ...(scene.metadata ?? {}) }
+    baselineRef.current = JSON.stringify({ title: scene.title, description: scene.description ?? "", body: sceneBody, htmlBody: sceneHtml, chapterNumber: inferredChapterNumber, sceneMetadata: metadata, sceneFolderDraft: folderPath })
+    newDraftRef.current = false
+    setSelectedSceneId(scene.id)
+    setSelectedFolder(sceneFolder(scene.path) || null)
+    setTitle(scene.title)
+    setDescription(scene.description ?? "")
+    setBody(sceneBody)
+    setHtmlBody(sceneHtml)
+    setChapterNumber(inferredChapterNumber)
+    setSceneMetadata(metadata)
+    setSceneFolderDraft(folderPath)
+    if (typeof window !== "undefined" && typeof window.matchMedia === "function" && !window.matchMedia("(min-width: 1280px)").matches) {
+      setOutlineOpen(false)
+    }
+  }, [])
+
+  const syncWorkspaceSelection = useCallback((treeData: ManuscriptWorkspaceTree | null, preferredSceneId?: string | null) => {
     const availableScenes = treeData?.scene_groups.flatMap((group) => group.scenes) ?? []
-    const nextSceneId = preferredSceneId ?? selectedSceneId
+    const nextSceneId = preferredSceneId ?? selectedSceneIdRef.current
     const matchedScene = nextSceneId ? availableScenes.find((scene) => scene.id === nextSceneId) ?? null : null
     const fallbackScene = matchedScene ?? availableScenes[0] ?? null
     if (fallbackScene) {
@@ -146,7 +164,7 @@ export default function ScenesPage() {
       return
     }
     setSelectedSceneId(null)
-  }
+  }, [selectScene])
 
   useEffect(() => {
     setCustomFolders(loadSceneFolders(bookId))
@@ -155,90 +173,49 @@ export default function ScenesPage() {
   useEffect(() => saveSceneFolders(bookId, customFolders), [bookId, customFolders])
 
   useEffect(() => {
-    syncWorkspaceSelection(tree)
-  }, [tree])
+    if (!dirtyRef.current && !newDraftRef.current && !savingRef.current) syncWorkspaceSelection(tree)
+  }, [syncWorkspaceSelection, tree])
 
-  useEffect(() => {
-    const syncSelectionMenu = () => {
-      const selection = window.getSelection()
-      const selectedText = selection?.toString().trim() ?? ""
-      const editor = document.querySelector<HTMLElement>(`[data-editor-key="scene-workspace-editor"]`)
-      const anchorNode = selection?.anchorNode
+  const confirmDraftChange = async () => !dirtyRef.current || await confirm({
+    title: "Discard unsaved scene changes?",
+    body: "Save this scene first to keep your edits, or discard them to continue.",
+    confirmLabel: "Discard changes",
+    cancelLabel: "Keep editing",
+    tone: "danger",
+  })
 
-      if (!selection || !selectedText || !editor || !anchorNode || !editor.contains(anchorNode) || selection.rangeCount === 0) {
-        setSelectionMenu(null)
-        return
-      }
-
-      const rect = selection.getRangeAt(0).getBoundingClientRect()
-      if (!rect.width && !rect.height) {
-        setSelectionMenu(null)
-        return
-      }
-
-      selectionRef.current = selectedText
-      setSelectionMenu({
-        text: selectedText.slice(0, 100),
-        top: rect.top + window.scrollY - 48,
-        left: rect.left + window.scrollX + (rect.width / 2),
-      })
-    }
-
-    document.addEventListener("selectionchange", syncSelectionMenu)
-    window.addEventListener("resize", syncSelectionMenu)
-    window.addEventListener("scroll", syncSelectionMenu, true)
-    return () => {
-      document.removeEventListener("selectionchange", syncSelectionMenu)
-      window.removeEventListener("resize", syncSelectionMenu)
-      window.removeEventListener("scroll", syncSelectionMenu, true)
-    }
-  }, [])
-
-  const openAddCharacterFromSelection = () => {
-    const text = selectionRef.current.trim()
-    if (!text) {
-      setStatus("Select a character name in the scene first.")
-      return
-    }
-    setAddCharacterText(text)
-    setAddCharacterOpen(true)
-    setSelectionMenu(null)
-  }
-
-  const handleCharacterCreated = (character: Character) => {
-    setStatus(`Character "${character.name}" added to the story bible.`)
-  }
-
-  function selectScene(scene: NovelScene) {
-    const inferredChapterNumber = scene.chapter_number ?? extractChapterNumberFromSceneFolder(scene.path)
-    const folderPath = sceneFolder(scene.path) || defaultSceneFolder(inferredChapterNumber)
-    setSelectedSceneId(scene.id)
-    setSelectedFolder(sceneFolder(scene.path) || null)
-    setTitle(scene.title)
-    setDescription(scene.description ?? "")
-    setBody(scene.body)
-    setHtmlBody(scene.html_body ?? `<p>${scene.body.replace(/\n/g, "<br>")}</p>`)
-    setChapterNumber(inferredChapterNumber)
-    setSceneMetadata({ ...emptySceneMetadata(), ...(scene.metadata ?? {}) })
-    setSceneFolderDraft(folderPath)
+  const chooseScene = async (scene: WorkspaceScene) => {
+    if (savingRef.current || scene.id === selectedSceneIdRef.current || !await confirmDraftChange()) return
+    selectScene(scene)
     setStatus(null)
-    setShowBrowserOnMobile(false)
+    setActionError(null)
   }
 
   function newScene(folderOverride?: string | null) {
     const destinationFolder = normalizeWorkspaceFolderPath(folderOverride ?? selectedFolder) || defaultSceneFolder(chapterNumber)
     const inferredChapterNumber = extractChapterNumberFromSceneFolder(destinationFolder)
+    const nextChapter = inferredChapterNumber ?? chapterOptions[0] ?? null
+    const metadata = emptySceneMetadata()
+    baselineRef.current = JSON.stringify({ title: "", description: "", body: "", htmlBody: "<p></p>", chapterNumber: nextChapter, sceneMetadata: metadata, sceneFolderDraft: destinationFolder })
+    newDraftRef.current = true
     rememberFolder(destinationFolder)
     setSelectedSceneId(null)
     setTitle("")
     setDescription("")
     setBody("")
     setHtmlBody("<p></p>")
-    setChapterNumber(inferredChapterNumber ?? chapterOptions[0] ?? null)
-    setSceneMetadata(emptySceneMetadata())
+    setChapterNumber(nextChapter)
+    setSceneMetadata(metadata)
     setSceneFolderDraft(destinationFolder)
     setStatus(null)
-    setShowBrowserOnMobile(false)
+    setActionError(null)
+    if (typeof window !== "undefined" && typeof window.matchMedia === "function" && !window.matchMedia("(min-width: 1280px)").matches) {
+      setOutlineOpen(false)
+    }
+  }
+
+  const startNewScene = async () => {
+    if (!savingRef.current && await confirmDraftChange()) newScene()
   }
 
   const createFolder = async (parentFolder?: string | null) => {
@@ -259,39 +236,49 @@ export default function ScenesPage() {
     }
     rememberFolder(cleanFolder)
     setSelectedFolder(cleanFolder)
-    setChapterNumber((current) => extractChapterNumberFromSceneFolder(cleanFolder) ?? current)
-    setSceneFolderDraft(cleanFolder)
     setCollapsed((current) => ({ ...current, [cleanFolder]: false }))
     setStatus(`Created folder ${cleanFolder}`)
   }
 
   const saveScene = async () => {
-    if (!title.trim() || !body.trim()) return
+    if (savingRef.current || !title.trim() || !body.trim()) return
+    savingRef.current = true
     setSaving(true)
+    setActionError(null)
+    setStatus(null)
     try {
       const destinationFolder = normalizeWorkspaceFolderPath(sceneFolderDraft) || defaultSceneFolder(chapterNumber)
       rememberFolder(destinationFolder)
       const saved = await booksApi.saveScene(bookId, {
-        id: selectedScene?.id,
+        id: selectedSceneId ?? undefined,
         title: title.trim(),
         description: description.trim() || null,
         body,
         html_body: htmlBody,
-        metadata: sceneMetadata,
+        metadata: normalizeSceneMetadata(sceneMetadata),
         path: buildScenePath(destinationFolder, title.trim()),
         chapter_number: chapterNumber,
         status: chapterNumber ? "assigned" : "unassigned",
         sort_order: selectedScene?.sort_order ?? 1,
       })
       setStatus("Scene saved. Metadata refreshed from the scene text.")
+      baselineRef.current = draftSignature
+      newDraftRef.current = false
+      setSelectedSceneId(saved.id)
+      selectedSceneIdRef.current = saved.id
       const { data: nextTree } = await refetchTree()
-      syncWorkspaceSelection(nextTree ?? null, saved.id)
+      const refreshedScene = nextTree?.scene_groups.flatMap((group) => group.scenes).find((scene) => scene.id === saved.id)
+      if (refreshedScene) selectScene(refreshedScene)
+    } catch {
+      setActionError("Could not save this scene. Your edits are still here; try Save scene again.")
     } finally {
+      savingRef.current = false
       setSaving(false)
     }
   }
 
   const moveSceneToFolder = async (sceneId: string, destinationFolder: string | null) => {
+    if (savingRef.current || !await confirmDraftChange()) return
     const scene = sceneMap.get(sceneId)
     if (!scene) return
     const cleanFolder = normalizeWorkspaceFolderPath(destinationFolder) || "scenes"
@@ -304,14 +291,16 @@ export default function ScenesPage() {
       return
     }
 
+    savingRef.current = true
     setSaving(true)
+    setActionError(null)
     try {
       rememberFolder(cleanFolder)
       await booksApi.saveScene(bookId, {
         id: scene.id,
         title: scene.title,
         description: scene.description,
-        body: scene.body,
+        body: scene.body ?? "",
         metadata: scene.metadata,
         html_body: scene.html_body,
         path: nextPath,
@@ -323,50 +312,81 @@ export default function ScenesPage() {
       const { data: nextTree } = await refetchTree()
       syncWorkspaceSelection(nextTree ?? null, scene.id)
     } catch {
-      setStatus("Could not move this scene")
+      setActionError("Could not move this scene. Its folder has not changed; try again.")
     } finally {
+      savingRef.current = false
       setSaving(false)
       setDropTargetFolder(null)
     }
   }
 
   const deleteScene = async () => {
-    if (!selectedScene) return
-    await booksApi.deleteScene(bookId, selectedScene.id)
-    newScene(selectedFolder)
-    setStatus("Scene deleted.")
-    const { data: nextTree } = await refetchTree()
-    syncWorkspaceSelection(nextTree ?? null)
+    if (!selectedScene || savingRef.current) return
+    if (!await confirm({ title: "Delete this scene?", body: `Delete “${selectedScene.title}” and its text? This cannot be undone.`, confirmLabel: "Delete scene", tone: "danger" })) return
+    savingRef.current = true
+    setSaving(true)
+    setActionError(null)
+    try {
+      await booksApi.deleteScene(bookId, selectedScene.id)
+      newScene(selectedFolder)
+      const { data: nextTree } = await refetchTree()
+      syncWorkspaceSelection(nextTree ?? null)
+      setStatus("Scene deleted.")
+    } catch {
+      setActionError("Could not delete this scene. Your scene is still available; try again.")
+    } finally {
+      savingRef.current = false
+      setSaving(false)
+    }
   }
 
+  const workspaceColumns = outlineOpen && inspectorOpen
+    ? "xl:grid-cols-[21rem_minmax(0,1fr)_22rem]"
+    : outlineOpen
+      ? "xl:grid-cols-[21rem_minmax(0,1fr)]"
+      : inspectorOpen
+        ? "xl:grid-cols-[minmax(0,1fr)_22rem]"
+        : "xl:grid-cols-1"
+
   return (
-    <div className={`min-h-screen ${isDark ? "bg-[#071211] text-slate-100" : "bg-stone-50 text-stone-950"}`}>
-      <div className="w-full px-4 pb-12 pt-0 sm:px-5 lg:px-6">
+    <div data-scene-workspace className={`min-h-screen ${isDark ? "bg-[#071211] text-slate-100" : "bg-stone-50 text-stone-950"}`}>
+      <div className="w-full px-4 pb-12 pt-5 sm:px-5 lg:px-6">
         <main className="min-w-0 space-y-6">
-            <WorkspaceHeader
+            <AuthorToolsNav
+              active="scenes"
+              bookData={book}
               bookId={bookId}
+              isDark={isDark}
+              mode={book?.mode ?? "author"}
+              title={book?.title || "Scene workspace"}
+              variant="bar"
+            />
+            <WorkspaceHeader
               book={book}
               isDark={isDark}
-              onNewScene={() => newScene()}
+              disabled={saving || !tree}
+              onNewScene={() => void startNewScene()}
               onNewFolder={() => void createFolder()}
             />
 
             <MobilePanelToggles
               isDark={isDark}
-              showBrowser={showBrowserOnMobile}
-              showInspector={showInspectorOnMobile}
-              onToggleBrowser={() => setShowBrowserOnMobile((current) => !current)}
-              onToggleInspector={() => setShowInspectorOnMobile((current) => !current)}
+              showBrowser={outlineOpen}
+              showInspector={inspectorOpen}
+              onToggleBrowser={() => setOutlineOpen((current) => !current)}
+              onToggleInspector={() => setInspectorOpen((current) => !current)}
             />
 
-            <section className={`overflow-hidden rounded-md border ${isDark ? "border-white/10 bg-[#09121f]/92" : "border-white/70 bg-white/90"}`}>
+            {actionError ? <p role="alert" className={`border-l-2 px-3 py-2 text-sm ${isDark ? "border-rose-400 text-rose-300" : "border-rose-600 text-rose-700"}`}>{actionError}</p> : null}
+            {treeError && tree ? <ErrorCard variant="compact" isDark={isDark} message="Could not refresh the scene list. Your current edits are preserved." onRetry={() => void refetchTree()} /> : null}
+            <section className={`border-y ${isDark ? "border-white/10" : "border-stone-200"}`}>
               {treeLoading && !tree ? (
                 <WorkspaceStateCard
                   isDark={isDark}
                   title="Loading scene workspace"
                   body="Fetching scene files, folders, and structure for this manuscript."
                 />
-              ) : treeError ? (
+              ) : treeError && !tree ? (
                 <WorkspaceStateCard
                   isDark={isDark}
                   title="Scene workspace unavailable"
@@ -374,8 +394,10 @@ export default function ScenesPage() {
                   action={<ActionButton type="button" variant="secondary" isDark={isDark} onClick={() => void refetchTree()}>Retry</ActionButton>}
                 />
               ) : (
-                <div className="grid gap-0 xl:min-h-[44rem] xl:grid-cols-[24rem_minmax(0,1fr)_21rem]">
-                  <div className={`${showBrowserOnMobile ? "block" : "hidden"} min-w-0 xl:block`}>
+                <div className={`grid gap-0 xl:min-h-[44rem] ${workspaceColumns}`}>
+                  {outlineOpen ? (
+                    <WorkspaceSidePanel title="Scene outline" side="left" onClose={() => setOutlineOpen(false)}>
+                    <div inert={saving}>
                     <SceneBrowserPanel
                       isDark={isDark}
                       browserView={browserView}
@@ -394,48 +416,32 @@ export default function ScenesPage() {
                       onDropScene={(sceneId, folderPath) => void moveSceneToFolder(sceneId, folderPath)}
                       dropTargetFolder={dropTargetFolder}
                       onDropTargetChange={setDropTargetFolder}
-                      onSelectScene={selectScene}
-                      onCreateScene={() => newScene(selectedFolder)}
+                      onSelectScene={(scene) => void chooseScene(scene)}
+                      onCreateScene={() => void startNewScene()}
                     />
-                  </div>
+                      </div>
+                    </WorkspaceSidePanel>
+                  ) : null}
 
                   <div className="min-w-0 border-y xl:border-x xl:border-y-0" style={{ borderColor: isDark ? "rgba(255,255,255,0.08)" : "rgba(216, 216, 216, 0.9)" }}>
-                    <div className="min-w-0 p-4 sm:p-5 xl:p-8">
-                      <div className="grid gap-5">
-                        <SceneMetadataForm
-                          isDark={isDark}
-                          title={title}
-                          description={description}
-                          chapterNumber={chapterNumber}
-                          chapterOptions={chapterOptions}
-                          sceneFolderDraft={sceneFolderDraft}
-                          sceneMetadata={sceneMetadata}
-                          selectedTagList={selectedTagList}
-                          selectedMoodList={selectedMoodList}
-                          onTitleChange={setTitle}
-                          onDescriptionChange={setDescription}
-                          onChapterNumberChange={setChapterNumber}
-                          onSceneFolderDraftChange={setSceneFolderDraft}
-                          onSceneMetadataChange={setSceneMetadata}
-                        />
-
-                        <WritingToolsPanel
-                          isDark={isDark}
-                          visible={showWritingTools}
-                          onOpen={() => startTransition(() => setShowWritingTools(true))}
-                          bookId={bookId}
-                        />
-
+                    <div className="mx-auto min-w-0 max-w-[1040px] py-4 sm:px-3 sm:py-5 xl:px-5">
+                      <div className="grid min-w-0 gap-5">
                         <SceneEditorPanel
                           isDark={isDark}
+                          title={title}
+                          chapterNumber={chapterNumber}
+                          chapterOptions={chapterOptions}
                           htmlBody={htmlBody}
                           wordCount={sceneWordCount}
                           readingTime={sceneReadingTime}
                           status={status}
+                          dirty={dirty}
                           saving={saving}
                           canSave={Boolean(title.trim() && body.trim())}
                           hasSelectedScene={Boolean(selectedScene)}
                           firstLineIndent={firstLineIndent}
+                          onTitleChange={setTitle}
+                          onChapterNumberChange={setChapterNumber}
                           onToggleFirstLineIndent={() => setFirstLineIndent((value) => !value)}
                           onHtmlChange={(nextHtml, nextText) => {
                             setHtmlBody(nextHtml)
@@ -444,54 +450,48 @@ export default function ScenesPage() {
                           onDelete={() => void deleteScene()}
                           onSave={() => void saveScene()}
                         />
+
+                        <WritingToolsPanel
+                          isDark={isDark}
+                          visible={showWritingTools}
+                          onOpen={() => startTransition(() => setShowWritingTools(true))}
+                          bookId={bookId}
+                        />
                       </div>
                     </div>
                   </div>
 
-                  <div className={`${showInspectorOnMobile ? "block" : "hidden"} min-w-0 xl:block`}>
-                    <MetadataPreviewPanel
-                      isDark={isDark}
-                      metadataRows={metadataRows}
-                      sceneTitle={title.trim() || "Untitled scene"}
-                      sceneDescription={description.trim()}
-                      chapterNumber={chapterNumber}
-                      wordCount={sceneWordCount}
-                      readingTime={sceneReadingTime}
-                      currentScenePath={currentScenePath}
-                      selectedSceneId={selectedSceneId}
-                      structureTree={tree?.structure_tree ?? []}
-                    />
-                  </div>
+                  {inspectorOpen ? (
+                    <WorkspaceSidePanel title="Scene details" side="right" onClose={() => setInspectorOpen(false)}>
+                        <fieldset disabled={saving} className="min-w-0 p-4">
+                          <SceneMetadataForm
+                            isDark={isDark}
+                            description={description}
+                            sceneFolderDraft={sceneFolderDraft}
+                            sceneMetadata={sceneMetadata}
+                            selectedTagList={selectedTagList}
+                            selectedMoodList={selectedMoodList}
+                            onDescriptionChange={setDescription}
+                            onSceneFolderDraftChange={setSceneFolderDraft}
+                            onSceneMetadataChange={setSceneMetadata}
+                          />
+                        </fieldset>
+                    </WorkspaceSidePanel>
+                  ) : null}
                 </div>
               )}
             </section>
         </main>
 
-        {selectionMenu ? (
-          <div
-            className="pointer-events-none fixed z-50 hidden -translate-x-1/2 xl:block"
-            style={{ top: selectionMenu.top, left: selectionMenu.left }}
-          >
-            <div className={`pointer-events-auto flex items-center gap-2 rounded-full border px-2 py-2 ${isDark ? "border-white/10 bg-[#0f1117]" : "border-stone-200 bg-white"}`}>
-              <button
-                type="button"
-                onMouseDown={(event) => event.preventDefault()}
-                onClick={() => openAddCharacterFromSelection()}
-                className={`rounded-full px-3 py-1.5 text-xs font-medium ${isDark ? "bg-violet-700/30 text-violet-200" : "bg-violet-100 text-violet-800"}`}
-              >
-                Add as character
-              </button>
-            </div>
-          </div>
-        ) : null}
-
-        <AddCharacterFromSelection
+        <SceneSelectionActions
           bookId={bookId}
-          selectedText={addCharacterText}
+          chapterNumber={chapterNumber}
           isDark={isDark}
-          firstChapter={chapterNumber ?? undefined}
-          open={addCharacterOpen}
-          onClose={() => setAddCharacterOpen(false)}
+          menuPosition={selectionMenu}
+          selectedText={addCharacterText}
+          dialogOpen={addCharacterOpen}
+          onOpenDialog={openAddCharacterFromSelection}
+          onCloseDialog={() => setAddCharacterOpen(false)}
           onCreated={handleCharacterCreated}
         />
       </div>

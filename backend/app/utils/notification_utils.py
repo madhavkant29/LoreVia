@@ -16,10 +16,25 @@ from app.models.book import Book, Chapter
 from app.models.character import Character
 from app.models.intelligence import ChapterSummary, CharacterRelationship, Notification, PlotThread
 from app.schemas.books import ChapterConsistencyReport
+from app.schemas.notifications import NotificationOut
 from app.utils.books.continuity import detect_chapter_continuity_flags
 from app.utils.books.revision_service import (
     build_revision_intelligence_payload,
 )
+
+
+def notification_out(notification: Notification) -> NotificationOut:
+    """Serialize notification identities for the API's string-ID contract."""
+    return NotificationOut(
+        id=str(notification.id),
+        book_id=str(notification.book_id) if notification.book_id else None,
+        kind=notification.kind,
+        title=notification.title,
+        body=notification.body,
+        data=notification.data,
+        read_at=notification.read_at,
+        created_at=notification.created_at,
+    )
 
 
 @dataclass(frozen=True)
@@ -400,22 +415,14 @@ def build_upload_processing_notification(
     mode: str,
     file_size_bytes: int,
 ) -> Notification:
-    """Build a notification to inform users about upload processing time."""
-    # Estimate processing time based on file size
+    """Build a notification with measured upload metadata."""
     size_mb = file_size_bytes / (1024 * 1024)
-    if size_mb < 5:
-        estimated_minutes = 10
-    elif size_mb < 20:
-        estimated_minutes = 20
-    else:
-        estimated_minutes = 30
 
     if mode == "author":
         title = "Your novel is being processed"
-        body = f"This will take approximately {estimated_minutes} minute{'s' if isinstance(estimated_minutes, int) and estimated_minutes != 1 else ''}. Sit back and relax!"
     else:
         title = "Your book is being processed"
-        body = f"This will take approximately {estimated_minutes} minute{'s' if isinstance(estimated_minutes, int) and estimated_minutes != 1 else ''}. Sit back and relax!"
+    body = "Parsing and indexing have started. You can leave this page while processing continues in the background."
 
     return Notification(
         user_id=book.user_id,
@@ -426,7 +433,6 @@ def build_upload_processing_notification(
         data={
             "book_title": book.title,
             "mode": mode,
-            "estimated_minutes": estimated_minutes,
             "file_size_mb": round(size_mb, 2),
         },
     )

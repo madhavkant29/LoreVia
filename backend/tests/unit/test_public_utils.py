@@ -41,6 +41,35 @@ from app.utils.public import (
 )
 
 
+@pytest.mark.asyncio
+async def test_public_craft_profile_omits_unavailable_story_health_from_scores(monkeypatch):
+    async def unavailable_story_health(*_args, **_kwargs):
+        return SimpleNamespace(
+            score=0,
+            status="Not available",
+            available=False,
+            metrics=[
+                SimpleNamespace(label="Continuity", score=0, available=False),
+                SimpleNamespace(label="Pacing", score=0, available=False),
+            ],
+        )
+
+    async def sample_text(*_args, **_kwargs):
+        return "A short sentence."
+
+    monkeypatch.setattr(ranking_core, "build_story_health_payload", unavailable_story_health)
+    monkeypatch.setattr(ranking_core, "_sample_public_book_text", sample_text)
+
+    profile = await ranking_core._build_public_book_craft_profile(
+        SimpleNamespace(),
+        book=SimpleNamespace(),
+        visible_character_count=0,
+    )
+
+    assert profile["story_health_score"] is None
+    assert profile["well_written_score"] == 0.0
+
+
 class _Result:
     def __init__(self, *, scalar=None, all_rows=None):
         self._scalar = scalar
@@ -710,18 +739,6 @@ async def test_ensure_public_content_report_not_duplicate_rejects_recent_reporte
         )
 
     assert exc.value.status_code == 409
-
-
-@pytest.mark.asyncio
-async def test_copyright_report_requires_temporary_hold_after_three_distinct_reporters():
-    assert await moderation.copyright_report_requires_temporary_hold(
-        _FakeDB(execute_values=[_Result(scalar=3)]),
-        book_id=uuid.uuid4(),
-    )
-    assert not await moderation.copyright_report_requires_temporary_hold(
-        _FakeDB(execute_values=[_Result(scalar=2)]),
-        book_id=uuid.uuid4(),
-    )
 
 
 @pytest.mark.asyncio

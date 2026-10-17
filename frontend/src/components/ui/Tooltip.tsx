@@ -44,7 +44,7 @@ export function Tooltip({ content, children, className, side = "top", align = "c
         id={tooltipId}
         role="tooltip"
         className={cn(
-          "pointer-events-none absolute z-50 hidden w-max max-w-56 whitespace-normal rounded-md border border-[rgba(var(--border),0.9)] bg-[rgb(var(--surface))] px-2.5 py-1.5 text-xs font-medium text-[rgb(var(--foreground))] shadow-sm group-focus-within/tooltip:block group-hover/tooltip:block",
+          "pointer-events-none absolute z-50 hidden w-max max-w-56 whitespace-normal rounded-none bg-[rgb(var(--surface))] px-2.5 py-1.5 text-xs font-medium text-[rgb(var(--foreground))] shadow-sm group-focus-within/tooltip:block group-hover/tooltip:block",
           sideClasses[side],
           alignClasses[align],
         )}

@@ -1,26 +1,40 @@
-FROM python:3.12-slim
+FROM python:3.12.14-slim-trixie@sha256:f77ac9e44ae96ef2c90b8053ea08c31f8be030f824196b0ae4db6d462c84e51f
 WORKDIR /app
+# Security gate: the pinned base digest can lag Debian point releases. Apply
+# repository security updates so the release image carries patched system
+# packages (checked by the container-image-scan CI job).
+RUN apt-get update \
+    && apt-get upgrade -y \
+    && rm -rf /var/lib/apt/lists/*
 # Run Celery/Flower as non-root (required for production hygiene).
-# Pre-create /app/storage with correct ownership so the named volume
-# inherits permissions on first create.
+# Pre-create writable volume mountpoints with the app user's ownership so new
+# named volumes inherit permissions on first create.
 RUN groupadd -g 10001 app && useradd -m -u 10001 -g 10001 -s /bin/bash app && \
-    mkdir -p /app/storage && chown -R app:app /app
+    mkdir -p /app/storage /var/lib/lorevia-export-spool && \
+    chown -R app:app /app /var/lib/lorevia-export-spool
 COPY backend/requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Optional asset prefetch for network-permitted environments. The app falls
-# back cleanly when the spaCy model is not present, so restricted builders
-# should not fail just because external asset hosts are unreachable.
-ARG PREFETCH_MODEL_ASSETS=0
-RUN if [ "$PREFETCH_MODEL_ASSETS" = "1" ]; then \
-        python -c "import tiktoken; tiktoken.encoding_for_model('gpt-4o-mini')" && \
+# Token accounting must not depend on a first-request network download.
+ENV DATA_GYM_CACHE_DIR=/opt/lorevia/tiktoken
+RUN mkdir -p "$DATA_GYM_CACHE_DIR" \
+    && python -c "import tiktoken; tiktoken.encoding_for_model('gpt-4o-mini')" \
+    && chmod -R a=rX "$DATA_GYM_CACHE_DIR"
+
+# The optional spaCy model has a tested conservative fallback, so builders may
+# opt into the larger language asset without making it a release prerequisite.
+ARG PREFETCH_SPACY_MODEL=0
+RUN if [ "$PREFETCH_SPACY_MODEL" = "1" ]; then \
         python -m spacy download en_core_web_sm; \
     fi
 
 COPY backend/ .
 RUN chmod +x worker-start.sh
-# Start as root so the entrypoint can normalize any mounted local-storage
-# volume before dropping back to the non-root app user.
+
+ARG RELEASE_SHA=unknown
+ENV RELEASE_SHA=$RELEASE_SHA
+LABEL org.opencontainers.image.revision=$RELEASE_SHA
+USER 10001:10001
 ENTRYPOINT ["./worker-start.sh"]
 # CMD overridden per deployment service. Required workers in production:
 #   worker-extraction:   python -m app.workers.worker_launcher extraction

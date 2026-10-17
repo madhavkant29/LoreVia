@@ -8,6 +8,7 @@ import { WhatsTheWordPanel } from "./manuscriptPage.dynamic"
 import { ManuscriptEditorPanel } from "./manuscriptPage.editorPanel"
 import { ManuscriptEditorStatusFooter } from "./manuscriptPage.editorStatusFooter"
 import { ManuscriptHeader } from "./manuscriptPage.header"
+import { WorkspaceSidePanel } from "@/components/ui/WorkspaceSidePanel"
 import { ManuscriptLeftRail } from "./manuscriptPage.leftRail"
 import { ManuscriptNonWriteWorkspaceSection } from "./manuscriptPage.nonWriteWorkspace"
 import { ManuscriptOverlayStack } from "./manuscriptPage.overlayStack"
@@ -69,26 +70,32 @@ export function ManuscriptPageLayout({
   writeRailProps,
 }: ManuscriptPageLayoutProps) {
   return (
-    <div className={`min-h-screen overflow-x-clip ${isDark ? "bg-[#101416] text-slate-100" : "bg-[#f4f5f3] text-stone-950"}`}>
+    <div data-manuscript-workspace className={`min-h-screen overflow-x-clip ${isDark ? "bg-[#101416] text-slate-100" : "bg-[#f4f5f3] text-stone-950"}`}>
       <ManuscriptAnnotationHighlightStyles isDark={isDark} />
       <ManuscriptSelectionMenu {...selectionMenuProps} />
       <div className="pb-10">
         <ManuscriptHeader {...headerProps} />
 
+        <div id="manuscript-workspace-panel" role="tabpanel" aria-labelledby={`manuscript-tab-${workspaceTab}`} tabIndex={0}>
         {workspaceTab === "plan" ? (
           <ManuscriptPlanWorkspaceSection {...planWorkspaceProps} />
         ) : null}
         {workspaceTab !== "plan" ? (
           <div className={`grid min-h-[calc(100vh-8.25rem)] min-w-0 ${desktopLayoutClass}`}>
             {leftRailVisible ? (
-              <ManuscriptLeftRail {...leftRailProps} />
+              <WorkspaceSidePanel title="Manuscript outline" side="left" onClose={() => headerProps.onOutlineOpenChange(false)}>
+                <ManuscriptLeftRail {...leftRailProps} onSelectChapter={(chapterNumber) => {
+                  leftRailProps.onSelectChapter(chapterNumber)
+                  if (!window.matchMedia("(min-width: 1280px)").matches) headerProps.onOutlineOpenChange(false)
+                }} />
+              </WorkspaceSidePanel>
             ) : null}
 
             <section ref={manuscriptSectionRef} className={`min-w-0 border-r p-0 ${!leftRailVisible && !rightRailVisible ? "xl:mx-auto xl:max-w-[1040px]" : ""} ${isDark ? "border-white/10 bg-[#0b1114]" : "border-stone-200 bg-[#faf8f4]"}`}>
               {workspaceTab !== "write" ? (
                 <ManuscriptNonWriteWorkspaceSection {...nonWriteWorkspaceProps} />
               ) : null}
-              <WhatsTheWordPanel bookId={bookId} isDark={isDark} className="mb-4" />
+              <WhatsTheWordPanel bookId={bookId} isDark={isDark} className="mx-auto w-full max-w-[1040px] px-4 py-3" />
 
               <ManuscriptEditorPanel {...editorPanelProps} />
 
@@ -96,16 +103,16 @@ export function ManuscriptPageLayout({
               {statusMessage ? <p role="status" className={`mt-3 text-sm ${isDark ? "text-slate-300" : "text-stone-600"}`}>{statusMessage}</p> : null}
             </section>
 
-            {workspaceTab === "write" && rightRailVisible ? (
-              <ManuscriptWriteRail {...writeRailProps} />
+            {rightRailVisible ? (
+              <WorkspaceSidePanel title={workspaceTab === "write" ? "Writing inspector" : "Analysis inspector"} side="right" onClose={() => headerProps.onInspectorOpenChange(false)}>
+                {workspaceTab === "write" ? <ManuscriptWriteRail {...writeRailProps} /> : <ManuscriptAnalysisRail {...analysisRailProps} />}
+              </WorkspaceSidePanel>
             ) : null}
 
-            {workspaceTab !== "write" && rightRailVisible ? (
-              <ManuscriptAnalysisRail {...analysisRailProps} />
-            ) : null}
           </div>
         ) : null}
 
+        </div>
         <ManuscriptOverlayStack {...overlayStackProps} />
       </div>
     </div>

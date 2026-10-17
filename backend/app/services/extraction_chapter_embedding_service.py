@@ -3,24 +3,32 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from dataclasses import dataclass
+
+from sqlalchemy import delete
 
 from app.core.config import settings
 from app.engine.embeddings.embedder import build_chunk_embedding_text, embed_batch
 from app.models.intelligence import BookChunk
-from app.parsers.chunker import ChunkingConfig, chunk_text
+from app.parsers.chunker import ChunkingConfig, chunk_text, count_tokens
 from app.utils.ingestion_utils import chunked, elapsed_ms
 
 log = logging.getLogger("lorevia.extraction")
 
 
-async def persist_chapter_chunks_with_embeddings(
-    db,
+@dataclass(slots=True)
+class PreparedChapterChunks:
+    texts: list[str]
+    rows: list[BookChunk]
+
+
+async def prepare_chapter_chunks_with_embeddings(
     *,
     book,
     chapter,
     chapter_number: int,
     ch_data: dict,
-) -> list[str]:
+) -> PreparedChapterChunks:
     chunk_started = time.perf_counter()
     chunks = chunk_text(
         ch_data["text"],
@@ -77,6 +85,11 @@ async def persist_chapter_chunks_with_embeddings(
         await asyncio.gather(*embed_tasks, return_exceptions=True)
         raise
     chunk_embeddings = [embedding for batch in embedded_batches for embedding in batch]
+    if len(chunk_embeddings) != len(chunks):
+        raise RuntimeError(
+            "chapter_chunk_embedding_count_mismatch:"
+            f"expected={len(chunks)}:received={len(chunk_embeddings)}"
+        )
     log.info(
         "ingestion_timing stage=embed book_id=%s chapter=%s elapsed_ms=%s batches=%s",
         book.id,
@@ -85,16 +98,21 @@ async def persist_chapter_chunks_with_embeddings(
         len(chunk_batches),
     )
 
-    for index, (chunk_text_val, emb) in enumerate(zip(chunks, chunk_embeddings)):
-        db.add(
-            BookChunk(
-                book_id=book.id,
-                chapter_id=chapter.id,
-                chunk_index=index,
-                text=chunk_text_val,
-                embedding=emb,
-                token_count=len(chunk_text_val.split()),
-            )
+    rows = [
+        BookChunk(
+            book_id=book.id,
+            chapter_id=chapter.id,
+            chunk_index=index,
+            text=chunk_text_val,
+            embedding=emb,
+            token_count=count_tokens(chunk_text_val),
         )
+        for index, (chunk_text_val, emb) in enumerate(zip(chunks, chunk_embeddings))
+    ]
+    return PreparedChapterChunks(texts=chunks, rows=rows)
 
-    return chunks
+
+async def replace_chapter_chunks(db, prepared: PreparedChapterChunks, *, chapter_id) -> None:
+    """Swap a complete prepared chunk set inside the caller's final transaction."""
+    await db.execute(delete(BookChunk).where(BookChunk.chapter_id == chapter_id))
+    db.add_all(prepared.rows)

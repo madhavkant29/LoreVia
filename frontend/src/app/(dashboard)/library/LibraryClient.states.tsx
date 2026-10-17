@@ -8,7 +8,8 @@ export function LibraryAuthLoadingState({
   pageBackground: string
 }) {
   return (
-    <div className={`min-h-screen transition-colors duration-300 ${pageBackground}`}>
+    <div role="status" aria-label="Loading library" aria-busy="true" className={`min-h-screen transition-colors duration-300 ${pageBackground}`}>
+      <span className="sr-only">Loading library</span>
       <div className="w-full pb-20">
         <div className="mx-auto max-w-7xl space-y-7 px-4 pt-8">
           <div className={`h-10 w-48 rounded-sm ${isDark ? "bg-white/5" : "bg-stone-100"}`} />

@@ -70,6 +70,10 @@ def test_paddle_identifier_and_normalization_helpers_cover_nested_and_empty_valu
     assert service._string_or_none(42) == "42"
     assert service._is_service_active("TRIALING") is True
     assert service._is_service_active(None) is False
+    assert service._event_occurred_at({"occurred_at": "2026-09-04T10:30:00Z"}) == datetime(
+        2026, 9, 4, 10, 30, tzinfo=UTC
+    )
+    assert service._event_occurred_at({"occurred_at": "not-a-date"}) is None
 
 
 def test_tier_and_metrics_helpers_preserve_or_change_access_by_event(monkeypatch):

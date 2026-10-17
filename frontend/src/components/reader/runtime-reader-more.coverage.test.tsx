@@ -172,4 +172,35 @@ describe("additional reader runtime component coverage", () => {
     })
     expect(bodyText()).not.toContain("Upload new photo")
   })
+
+  it("surfaces cover upload failures and rejects oversized cover files", async () => {
+    const onCoverUpdated = vi.fn()
+    booksApiMock.updateCover.mockRejectedValueOnce(new Error("network down"))
+    await renderElement(
+      <CoverEditOverlay bookId="book-1" isDark hasCover onCoverUpdated={onCoverUpdated} />,
+    )
+
+    await click("Edit cover photo")
+    await click("Upload new photo")
+    const input = document.body.querySelector('input[type="file"]') as HTMLInputElement
+
+    const file = new File(["cover"], "cover.png", { type: "image/png" })
+    Object.defineProperty(input, "files", { configurable: true, value: [file] })
+    await act(async () => {
+      input.dispatchEvent(new Event("change", { bubbles: true }))
+      await flush()
+    })
+    expect(bodyText()).toContain("could not be updated")
+    expect(onCoverUpdated).not.toHaveBeenCalled()
+
+    const oversized = new File(["cover"], "huge.png", { type: "image/png" })
+    Object.defineProperty(oversized, "size", { configurable: true, value: 6 * 1024 * 1024 })
+    Object.defineProperty(input, "files", { configurable: true, value: [oversized] })
+    await act(async () => {
+      input.dispatchEvent(new Event("change", { bubbles: true }))
+      await flush()
+    })
+    expect(bodyText()).toContain("5 MB")
+    expect(booksApiMock.updateCover).toHaveBeenCalledTimes(1)
+  })
 })

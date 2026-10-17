@@ -182,6 +182,7 @@ async def _build_partition_payload(
     *,
     source: Character,
     book_id: uuid.UUID,
+    user_id: uuid.UUID,
     name: str,
     aliases: list[str],
     evidence: dict[str, Any],
@@ -190,7 +191,9 @@ async def _build_partition_payload(
     if evidence["snippets"]:
         try:
             extracted = await extract_characters_and_relationships(
-                "\n\n".join(evidence["snippets"])[:12000]
+                "\n\n".join(evidence["snippets"])[:12000],
+                user_id=user_id,
+                book_id=book_id,
             )
             entities = [
                 entity
@@ -435,6 +438,7 @@ async def partition_character(
     db: AsyncSession,
     *,
     source: Character,
+    user_id: uuid.UUID,
     partitions: list[dict[str, list[str] | str]],
 ) -> list[Character]:
     cleaned_partitions: list[dict[str, Any]] = []
@@ -480,6 +484,7 @@ async def partition_character(
         payload = await _build_partition_payload(
             source=source,
             book_id=source.book_id,
+            user_id=user_id,
             name=str(partition["name"]),
             aliases=[str(alias) for alias in partition["aliases"]],
             evidence=evidence,

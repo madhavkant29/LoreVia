@@ -1,3 +1,5 @@
-import { MarketingFooterLayout } from "@/components/layout/MarketingFooterLayout"
+import type { ReactNode } from "react"
 
-export default MarketingFooterLayout
+export default function DemoLayout({ children }: { children: ReactNode }) {
+  return children
+}

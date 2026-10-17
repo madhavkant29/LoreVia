@@ -5,7 +5,6 @@ import {
   deleteMock,
   getMock,
   invalidateQueryKeysMock,
-  isAxiosErrorMock,
   patchMock,
   postMock,
   putMock,
@@ -35,6 +34,18 @@ describe("books api", () => {
     expect(getMock).toHaveBeenCalledWith("/books/book-1/pre-writing-check", { params: undefined })
   })
 
+  it("requests workspace scene bodies only when a caller asks for them", async () => {
+    await booksApi.getWorkspaceTree("book-1")
+    await booksApi.getWorkspaceTree("book-1", { includeSceneBodies: true })
+
+    expect(getMock).toHaveBeenNthCalledWith(1, "/books/book-1/workspace/tree", {
+      params: undefined,
+    })
+    expect(getMock).toHaveBeenNthCalledWith(2, "/books/book-1/workspace/tree", {
+      params: { include_scene_bodies: true },
+    })
+  })
+
   it("creates chapter snapshots and invalidates version caches", async () => {
     await booksApi.createChapterSnapshot("book-1", 7, "checkpoint")
 
@@ -42,6 +53,20 @@ describe("books api", () => {
       params: { note: "checkpoint" },
     })
     expect(invalidateQueryKeysMock).toHaveBeenCalledWith("book:book-1:chapter-versions:7:")
+  })
+
+  it("binds Workflow Bridge apply requests to the signed preview", async () => {
+    const file = new File(["draft"], "draft.docx")
+
+    await booksApi.applyWorkflowBridge("book-1", file, "signed-preview-token")
+
+    const [path, payload] = postMock.mock.calls[0]
+    expect(path).toBe("/books/book-1/workflow-bridge/apply")
+    expect(payload).toBeInstanceOf(FormData)
+    expect((payload as FormData).get("file")).toBe(file)
+    expect((payload as FormData).get("preview_token")).toBe("signed-preview-token")
+    expect(invalidateQueryKeysMock).toHaveBeenCalledWith("book:book-1:")
+    expect(invalidateQueryKeysMock).toHaveBeenCalledWith("reader:book-1:")
   })
 
   it("confirms upload charge when reprocessing manuscript", async () => {

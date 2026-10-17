@@ -33,6 +33,16 @@ Do not expose:
 
 The current repo ships with a Cloudflare Origin Certificate for `api.getlorevia.com` in `ops/nginx/certs/`, so if Cloudflare is still proxying the site you do **not** need Certbot for browser traffic.
 
+The proxy runs as the unprivileged Nginx uid/gid `101`. On the VPS, keep the
+private key owned by `root`, grant group `101` read access, and do not make it
+world-readable:
+
+```bash
+sudo chown root:101 ops/nginx/certs/api.getlorevia.com.key
+sudo chmod 640 ops/nginx/certs/api.getlorevia.com.key
+sudo chmod 644 ops/nginx/certs/api.getlorevia.com.pem
+```
+
 If Hetzner is serving the site directly without Cloudflare proxying, replace the origin certificate with a publicly trusted certificate such as Let's Encrypt via Certbot.
 
 If you switch to Certbot, `80/tcp` must be reachable for HTTP-01 validation unless you use DNS-01.

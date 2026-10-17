@@ -19,6 +19,7 @@ from app.api.v1.routes import (
     reader,
     reports,
     social,
+    support,
     webhooks,
     world_building,
 )
@@ -53,6 +54,14 @@ api_router.add_api_route(
     include_in_schema=False,
     dependencies=[Depends(rate_limit_api)],
 )
+api_router.add_api_route(
+    "/books/",
+    books.list_books,
+    methods=["GET"],
+    response_model=list[books.BookOut],
+    include_in_schema=False,
+    dependencies=[Depends(rate_limit_api)],
+)
 
 api_router.include_router(
     collaboration.router,
@@ -75,6 +84,7 @@ api_router.include_router(email.router, prefix="/email", tags=["email"])
 api_router.include_router(
     beta_reads.router, tags=["beta-reads"], dependencies=[Depends(rate_limit_api)]
 )
+api_router.include_router(beta_reads.guest_router, tags=["beta-reads"])
 api_router.include_router(internal.router, prefix="/internal", tags=["internal"])
 api_router.include_router(webhooks.router, prefix="/webhooks", tags=["webhooks"])
 api_router.include_router(
@@ -95,6 +105,7 @@ api_router.include_router(
 api_router.include_router(
     social.router, prefix="/social", tags=["social"], dependencies=[Depends(rate_limit_api)]
 )
+api_router.include_router(support.router, prefix="/support", tags=["support"])
 api_router.include_router(
     intelligence.router,
     prefix="/intelligence",

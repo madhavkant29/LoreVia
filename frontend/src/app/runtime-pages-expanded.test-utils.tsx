@@ -2,7 +2,7 @@
 
 import { act, type ReactElement, type ReactNode } from "react"
 import { createRoot, type Root } from "react-dom/client"
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, vi } from "vitest"
 
 const pushMock = vi.hoisted(() => vi.fn())
 const replaceMock = vi.hoisted(() => vi.fn())
@@ -41,7 +41,7 @@ const saveContextualVaultNoteMock = vi.hoisted(() => vi.fn())
 const useBookDetailMock = vi.hoisted(() => vi.fn())
 
 vi.mock("next/link", () => ({
-  default: ({ children, href, ...props }: { children: ReactNode; href: string }) => <a href={href} {...props}>{children}</a>,
+  default: ({ children, href, prefetch: _prefetch, ...props }: { children: ReactNode; href: string; prefetch?: boolean | null }) => <a href={href} {...props}>{children}</a>,
 }))
 
 vi.mock("next/dynamic", () => ({
@@ -148,7 +148,7 @@ vi.mock("@/components/modals/UploadModal", () => ({
 
 vi.mock("@/lib/api/books", () => ({ booksApi: booksApiMock }))
 vi.mock("@/lib/api/betaReads", () => ({ betaReadsApi: betaReadsApiMock }))
-vi.mock("@/lib/api/intelligence", () => ({ intelligenceApi: intelligenceApiMock }))
+vi.mock("@/lib/api/intelligence", () => ({ intelligenceApi: intelligenceApiMock, MAX_ADVISOR_PASSAGE_CHARS: 12_000 }))
 vi.mock("@/lib/hooks/useBookDetail", () => ({ useBookDetail: useBookDetailMock }))
 vi.mock("@/lib/query/cacheKeys", () => ({
   asQueryKey: (value: unknown) => value,
@@ -166,7 +166,7 @@ vi.mock("@/lib/stores/authStore", () => ({
         username: "Mira",
         tier: "architect",
         daily_word_goal: 1200,
-        today_word_count: 640,
+        today_word_count: 0,
         login_streak_days: 5,
         login_activity_dates: ["2026-06-15", "2026-06-16"],
       },
@@ -247,32 +247,57 @@ const writerWorkspaceFixture = {
   revision_board: { items: [] },
 }
 
+const activeWordLimit = 2_000_000
+const monthlyProcessedWordLimit = 1_000_000
+const sourceStorageLimitBytes = 5 * 1024 ** 3
+
 const statsFixture = {
   public: {
-    total_books_read: 4,
-    total_words_read: 240000,
+    total_books_read: 0,
+    total_words_read: 0,
   },
   private: {
-    total_uploads: 9,
-    llm_request_count: 22,
-    llm_total_tokens: 45000,
-    saved_quotes: 7,
+    total_uploads: 1,
+    manuscript_uploads: 1,
+    worldbuilding_uploads: 0,
+    upload_limit: 5,
+    uploads_remaining: 4,
+    upload_limit_unlimited: false,
+    active_analyzed_words: bookFixture.total_words,
+    active_word_limit: activeWordLimit,
+    active_words_remaining: activeWordLimit - bookFixture.total_words,
+    monthly_processed_words: bookFixture.total_words,
+    monthly_processed_word_limit: monthlyProcessedWordLimit,
+    monthly_processed_words_remaining: monthlyProcessedWordLimit - bookFixture.total_words,
+    source_storage_bytes: 0,
+    source_storage_limit_bytes: sourceStorageLimitBytes,
+    source_storage_remaining_bytes: sourceStorageLimitBytes,
+    allowances_enforced: true,
+    total_token_consumption: bookFixture.total_tokens,
+    llm_request_count: 0,
+    llm_prompt_tokens: 0,
+    llm_completion_tokens: 0,
+    llm_total_tokens: 0,
+    ai_interactive_available: true,
+    ai_processing_available: true,
+    ai_capacity_usage_percent: 0,
+    ai_capacity_resets_at: null,
+    total_chapters_tracked: bookFixture.total_chapters,
+    saved_quotes: 0,
   },
   writing: {
-    today: { words: 640, target_words: 1200, progress_pct: 53 },
-    this_week: { words: 4200, target_words: 8400, progress_pct: 50 },
-    this_month: { words: 18000, target_words: null, progress_pct: null },
-    this_year: { words: 90000, target_words: null, progress_pct: null },
-    last_24_hours: { words: 700, target_words: null, progress_pct: null },
-    last_7_days: { words: 5000, target_words: null, progress_pct: null },
-    last_30_days: { words: 19000, target_words: null, progress_pct: null },
-    last_year: { words: 120000, target_words: null, progress_pct: null },
-    entries_today: [
-      { book_id: "book-1", chapter_number: 3, title: "The Mirror Room", words: 640 },
-    ],
+    today: { words: 0, target_words: 1200, progress_pct: 0 },
+    this_week: { words: 0, target_words: 8400, progress_pct: 0 },
+    this_month: { words: 0, target_words: null, progress_pct: null },
+    this_year: { words: 0, target_words: null, progress_pct: null },
+    last_24_hours: { words: 0, target_words: null, progress_pct: null },
+    last_7_days: { words: 0, target_words: null, progress_pct: null },
+    last_30_days: { words: 0, target_words: null, progress_pct: null },
+    last_year: { words: 0, target_words: null, progress_pct: null },
+    entries_today: [],
     heatmap: Array.from({ length: 21 }, (_, index) => ({
       date: `2026-06-${String(index + 1).padStart(2, "0")}`,
-      words: index % 5 === 0 ? 0 : (index + 1) * 20,
+      words: 0,
     })),
   },
 }
@@ -289,6 +314,7 @@ const overviewFixture = {
   progress: { current_chapter: 3, percent_complete: 72, chapters_left: 2 },
   chapter_list: chapterListFixture,
   summary_collection: { summaries: [] },
+  world_stats: { active_documents: 0, corpus_words: 0, extracted_elements: 0, total_items: 0 },
 }
 
 const characterFixture = {
@@ -445,7 +471,7 @@ beforeEach(() => {
   querySetMock.mockReset()
   queryRefetchMock.mockClear()
   useParamsMock.mockReturnValue({ bookId: "book-1" })
-  useQueryClientMock.mockReturnValue({ setQueryData: querySetMock, clear: vi.fn() })
+  useQueryClientMock.mockReturnValue({ setQueryData: querySetMock, getQueryData: vi.fn(), clear: vi.fn() })
   useBookDetailMock.mockReturnValue(defaultQueryResult(bookFixture))
   booksApiMock.get.mockResolvedValue(bookFixture)
   booksApiMock.getReaderBootstrap.mockResolvedValue({
@@ -490,7 +516,9 @@ beforeEach(() => {
     const key = Array.isArray(queryKey) ? queryKey.join(":") : String(queryKey)
     if (key === "stats") return defaultQueryResult(statsFixture)
     if (key === "book-1:detail") return defaultQueryResult(bookFixture)
-    if (key === "book-1:characters") return defaultQueryResult([characterFixture])
+      if (key === "book-1:characters" || key === "book-1:characters:author-loop") {
+        return defaultQueryResult([characterFixture])
+      }
     if (key === "book-1:chapter-reports:12" || key === "book-1:chapter-reports:6") return defaultQueryResult([chapterReportFixture])
     if (key === "book-1:story-health") return defaultQueryResult({ score: 84 })
     if (key === "book-1:pre-writing:auto") return defaultQueryResult({ alerts: [{ id: "alert-1" }] })

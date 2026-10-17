@@ -1,18 +1,20 @@
 import { apiClient } from "./client"
-import type { PublicBook, PublicBookDetail, PublicChapter } from "@/types/book"
+import type { PublicBook, PublicBookDetail, PublicBookPage, PublicChapter } from "@/types/book"
 import type {
   ContentReportPayload,
   ContentReportResponse,
   PublicUploadsOverview,
   PublicRankedBookListResponse,
   PublicForumComment,
-  PublicForumCommentListResponse,
+  PublicForumCommentCursorPage,
   PublicForumInterest,
-  PublicForumInterestListResponse,
+  PublicForumInterestCursorPage,
   PublicForumPost,
+  PublicForumPostCursorPage,
   PublicForumPostListResponse,
   PublicUserProfile,
 } from "@/types/public"
+import { nestPublicForumComments } from "@/lib/utils/publicForum"
 
 function appendOptionalForumField(formData: FormData, key: string, value: string | number | boolean | null | undefined) {
   if (value === null || typeof value === "undefined") return
@@ -43,25 +45,64 @@ function forumPostFormData(payload: {
   return formData
 }
 
-export const publicApi = {
-  listBooks: (options?: { contentSourceType?: string; catalog?: string; search?: string; page?: number; limit?: number }) =>
-    apiClient.get<PublicBook[]>("/public/books", {
+async function listAllPublicBookPages(options?: {
+  contentSourceType?: string
+  catalog?: string
+  search?: string
+  limit?: number
+}): Promise<PublicBook[]> {
+  const items: PublicBook[] = []
+  let cursor: string | null = null
+  const seen = new Set<string>()
+  do {
+    const page: PublicBookPage = await apiClient.get<PublicBookPage>("/public/books/page", {
       params: {
         ...(options?.contentSourceType ? { content_source_type: options.contentSourceType } : {}),
         ...(options?.catalog ? { catalog: options.catalog } : {}),
         ...(options?.search?.trim() ? { search: options.search.trim() } : {}),
-        ...(options?.page ? { page: options.page } : {}),
+        limit: options?.limit ?? 100,
+        ...(cursor ? { cursor } : {}),
+      },
+    }).then((response) => response.data)
+    items.push(...page.items)
+    cursor = page.next_cursor
+    if (cursor && seen.has(cursor)) break
+    if (cursor) seen.add(cursor)
+  } while (cursor)
+  return items
+}
+
+export const publicApi = {
+  listBooks: (options?: { contentSourceType?: string; catalog?: string; search?: string; page?: number; limit?: number }) =>
+    listAllPublicBookPages(options),
+  listBooksPage: (options?: {
+    contentSourceType?: string
+    catalog?: string
+    search?: string
+    cursor?: string | null
+    limit?: number
+  }) => apiClient.get<PublicBookPage>("/public/books/page", {
+    params: {
+      ...(options?.contentSourceType ? { content_source_type: options.contentSourceType } : {}),
+      ...(options?.catalog ? { catalog: options.catalog } : {}),
+      ...(options?.search?.trim() ? { search: options.search.trim() } : {}),
+      ...(options?.cursor ? { cursor: options.cursor } : {}),
+      ...(options?.limit ? { limit: options.limit } : {}),
+    },
+  }).then((response) => response.data),
+  listSharedBooksPage: (options?: { cursor?: string | null; limit?: number }) =>
+    apiClient.get<PublicBookPage>("/public/shared-books/page", {
+      params: {
+        ...(options?.cursor ? { cursor: options.cursor } : {}),
         ...(options?.limit ? { limit: options.limit } : {}),
       },
     }).then((response) => response.data),
   listCreatorUploads: (options?: { search?: string; page?: number; limit?: number }) =>
-    apiClient.get<PublicBook[]>("/public/uploads", {
-      params: {
-        ...(options?.search?.trim() ? { search: options.search.trim() } : {}),
-        ...(options?.page ? { page: options.page } : {}),
-        ...(options?.limit ? { limit: options.limit } : {}),
-      },
-    }).then((response) => response.data),
+    listAllPublicBookPages({
+      catalog: "creator_uploads",
+      search: options?.search,
+      limit: options?.limit,
+    }),
   listRankedCreatorUploads: (options?: { ranking?: string; timeWindow?: string; search?: string; page?: number; limit?: number }) =>
     apiClient.get<PublicRankedBookListResponse>("/public/rankings/uploads", {
       params: {
@@ -104,8 +145,14 @@ export const publicApi = {
     }).then((response) => response.data),
   getForumPost: (postId: string) =>
     apiClient.get<PublicForumPost>(`/public/forum/posts/${postId}`).then((response) => response.data),
+  listMyForumPostsPage: (cursor?: string | null, limit = 40) =>
+    apiClient.get<PublicForumPostCursorPage>("/public/forum/my-posts/page", {
+      params: { limit, ...(cursor ? { cursor } : {}) },
+    }).then((response) => response.data),
   listMyForumPosts: () =>
-    apiClient.get<PublicForumPost[]>("/public/forum/my-posts").then((response) => response.data),
+    apiClient.get<PublicForumPostCursorPage>("/public/forum/my-posts/page", {
+      params: { limit: 100 },
+    }).then((response) => response.data.items),
   createForumPost: (payload: {
     threadType?: "novel" | "general"
     bookId?: string | null
@@ -152,10 +199,22 @@ export const publicApi = {
             ...(payload.removeImage ? { remove_image: true } : {}),
           },
     ).then((response) => response.data),
+  listForumCommentsPage: (postId: string, cursor?: string | null, limit = 40) =>
+    apiClient.get<PublicForumCommentCursorPage>(`/public/forum/posts/${postId}/comments/page`, {
+      params: { limit, ...(cursor ? { cursor } : {}) },
+    }).then((response) => response.data),
   listForumComments: (postId: string) =>
-    apiClient.get<PublicForumCommentListResponse>(`/public/forum/posts/${postId}/comments`).then((response) => response.data.items),
+    apiClient.get<PublicForumCommentCursorPage>(`/public/forum/posts/${postId}/comments/page`, {
+      params: { limit: 100 },
+    }).then((response) => nestPublicForumComments(response.data.items)),
+  listForumInterestsPage: (postId: string, cursor?: string | null, limit = 40) =>
+    apiClient.get<PublicForumInterestCursorPage>(`/public/forum/posts/${postId}/interests/page`, {
+      params: { limit, ...(cursor ? { cursor } : {}) },
+    }).then((response) => response.data),
   listForumInterests: (postId: string) =>
-    apiClient.get<PublicForumInterestListResponse>(`/public/forum/posts/${postId}/interests`).then((response) => response.data.items),
+    apiClient.get<PublicForumInterestCursorPage>(`/public/forum/posts/${postId}/interests/page`, {
+      params: { limit: 100 },
+    }).then((response) => response.data.items),
   createForumInterest: (postId: string, message: string) =>
     apiClient.post<PublicForumInterest>(`/public/forum/posts/${postId}/interests`, { message }).then((response) => response.data),
   createForumComment: (postId: string, body: string, parentCommentId?: string | null, imageFile?: File | null) => {

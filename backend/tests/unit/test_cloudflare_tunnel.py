@@ -69,3 +69,29 @@ async def test_cloudflare_tunnel_middleware_allows_sanitized_nginx_requests():
 
     assert response.status_code == 200
     assert response.json() == {"ok": True}
+
+
+@pytest.mark.asyncio
+async def test_cloudflare_tunnel_middleware_requires_configured_edge_token(monkeypatch):
+    monkeypatch.setattr("app.core.config.settings.EDGE_PROXY_SECRET", "s" * 48)
+    monkeypatch.setattr("app.core.config.settings.EDGE_PROXY_SECRET_FILE", None)
+    app = _app_with_tunnel_middleware()
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://testserver"
+    ) as client:
+        missing = await client.get(
+            "/api",
+            headers={"CF-Connecting-IP": "203.0.113.11", "X-LoreVia-Edge-Verified": "1"},
+        )
+        valid = await client.get(
+            "/api",
+            headers={
+                "CF-Connecting-IP": "203.0.113.11",
+                "X-LoreVia-Edge-Verified": "1",
+                "X-LoreVia-Edge-Token": "s" * 48,
+            },
+        )
+
+    assert missing.status_code == 403
+    assert valid.status_code == 200

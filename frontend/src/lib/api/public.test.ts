@@ -22,7 +22,7 @@ describe("public api", () => {
     postMock.mockReset()
     putMock.mockReset()
 
-    getMock.mockResolvedValue({ data: { ok: true, items: [] } })
+    getMock.mockResolvedValue({ data: { ok: true, items: [], next_cursor: null } })
     postMock.mockResolvedValue({ data: { ok: true } })
     putMock.mockResolvedValue({ data: { ok: true } })
   })
@@ -46,14 +46,38 @@ describe("public api", () => {
   it("loads public books through the public client", async () => {
     await publicApi.listBooks()
 
-    expect(getMock).toHaveBeenCalledWith("/public/books", { params: {} })
+    expect(getMock).toHaveBeenCalledWith("/public/books/page", { params: { limit: 100 } })
   })
 
   it("passes creator-upload filters and search params for public books", async () => {
     await publicApi.listBooks({ catalog: "creator_uploads", search: " moon harbor " })
 
-    expect(getMock).toHaveBeenCalledWith("/public/books", {
-      params: { catalog: "creator_uploads", search: "moon harbor" },
+    expect(getMock).toHaveBeenCalledWith("/public/books/page", {
+      params: { catalog: "creator_uploads", search: "moon harbor", limit: 100 },
+    })
+  })
+
+  it("uses cursor page contracts for catalog and creator-shared public books", async () => {
+    await publicApi.listBooksPage({
+      contentSourceType: "creator_original",
+      catalog: "creator_uploads",
+      search: " moon harbor ",
+      cursor: "next-page",
+      limit: 24,
+    })
+    await publicApi.listSharedBooksPage({ cursor: "shared-next", limit: 12 })
+
+    expect(getMock).toHaveBeenCalledWith("/public/books/page", {
+      params: {
+        content_source_type: "creator_original",
+        catalog: "creator_uploads",
+        search: "moon harbor",
+        cursor: "next-page",
+        limit: 24,
+      },
+    })
+    expect(getMock).toHaveBeenCalledWith("/public/shared-books/page", {
+      params: { cursor: "shared-next", limit: 12 },
     })
   })
 
@@ -62,8 +86,8 @@ describe("public api", () => {
     await publicApi.listRankedCreatorUploads({ ranking: "top_rated", timeWindow: "weekly", search: " ember ", page: 2, limit: 12 })
     await publicApi.getUploadsAnalytics()
 
-    expect(getMock).toHaveBeenCalledWith("/public/uploads", {
-      params: { search: "ember" },
+    expect(getMock).toHaveBeenCalledWith("/public/books/page", {
+      params: { catalog: "creator_uploads", search: "ember", limit: 100 },
     })
     expect(getMock).toHaveBeenCalledWith("/public/rankings/uploads", {
       params: { ranking: "top_rated", time_window: "weekly", search: "ember", page: 2, limit: 12 },
@@ -118,7 +142,25 @@ describe("public api", () => {
   it("loads the signed-in author's forum posts", async () => {
     await publicApi.listMyForumPosts()
 
-    expect(getMock).toHaveBeenCalledWith("/public/forum/my-posts")
+    expect(getMock).toHaveBeenCalledWith("/public/forum/my-posts/page", {
+      params: { limit: 100 },
+    })
+  })
+
+  it("passes opaque cursors to secondary forum page endpoints", async () => {
+    await publicApi.listMyForumPostsPage("posts-cursor", 25)
+    await publicApi.listForumCommentsPage("post-1", "comments-cursor", 30)
+    await publicApi.listForumInterestsPage("post-1", "interests-cursor", 35)
+
+    expect(getMock).toHaveBeenNthCalledWith(1, "/public/forum/my-posts/page", {
+      params: { limit: 25, cursor: "posts-cursor" },
+    })
+    expect(getMock).toHaveBeenNthCalledWith(2, "/public/forum/posts/post-1/comments/page", {
+      params: { limit: 30, cursor: "comments-cursor" },
+    })
+    expect(getMock).toHaveBeenNthCalledWith(3, "/public/forum/posts/post-1/interests/page", {
+      params: { limit: 35, cursor: "interests-cursor" },
+    })
   })
 
   it("creates a public forum post", async () => {
@@ -198,13 +240,17 @@ describe("public api", () => {
   it("loads forum comments for a post", async () => {
     await publicApi.listForumComments("post-1")
 
-    expect(getMock).toHaveBeenCalledWith("/public/forum/posts/post-1/comments")
+    expect(getMock).toHaveBeenCalledWith("/public/forum/posts/post-1/comments/page", {
+      params: { limit: 100 },
+    })
   })
 
   it("loads forum interests for a post", async () => {
     await publicApi.listForumInterests("post-1")
 
-    expect(getMock).toHaveBeenCalledWith("/public/forum/posts/post-1/interests")
+    expect(getMock).toHaveBeenCalledWith("/public/forum/posts/post-1/interests/page", {
+      params: { limit: 100 },
+    })
   })
 
   it("creates a forum interest message", async () => {

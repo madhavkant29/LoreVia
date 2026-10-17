@@ -55,7 +55,7 @@ describe("Worldbuilding saved cleanup backlog card", () => {
     expect(markup).toContain("Show all")
     expect(markup).toContain("Open Notes")
     expect(markup).toContain("Clarify moon gates")
-    expect(markup).toContain("Suggested fix")
+    expect(markup).toContain("Next step")
     expect(markup).toContain("Addressed Notes")
     expect(markup).toContain("Reopen")
   })

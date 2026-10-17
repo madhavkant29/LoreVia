@@ -1,5 +1,5 @@
 export type BookStatus = "pending" | "processing" | "ready" | "failed"
-export type ProcessingStage = "queued" | "parsing" | "extracting" | "summarizing" | "embedding" | "analyzing" | "ready" | "failed"
+export type ProcessingStage = "queued" | "parsing" | "extracting" | "summarizing" | "embedding" | "analyzing" | "ready" | "failed" | "frozen"
 export type SaveState = "saved" | "saving" | "offline_draft" | "retrying" | "error"
 export type BookFormat = "pdf" | "epub" | "docx" | "doc" | "fountain" | "txt" | "md" | "manual"
 export type BookWorkType = "novel" | "screenplay" | "other"
@@ -73,11 +73,45 @@ export interface Book {
   collaboration_permissions?: CollaborationPermissions | null
 }
 
+/** Lightweight book payload returned by the navigation/picker selector API. */
+export type BookSelector = Pick<
+  Book,
+  | "id"
+  | "title"
+  | "author"
+  | "genre"
+  | "cover_url"
+  | "mode"
+  | "status"
+  | "work_type"
+  | "total_chapters"
+  | "hidden_at"
+  | "archived_at"
+  | "is_public"
+  | "source_kind"
+  | "public_share_status"
+  | "public_description"
+  | "primary_series_id"
+  | "series_name"
+  | "series_order"
+  | "workspace_shell"
+  | "access_class"
+  | "can_switch_workspace_mode"
+  | "collaboration_role"
+  | "collaboration_permissions"
+>
+
 export interface BookOverviewPayload {
   book: Book
   progress: ReadingProgress
   chapter_list: ChapterListResponse
   summary_collection: SummaryCollectionResponse
+  world_stats?: {
+    active_documents: number
+    corpus_words: number
+    extracted_elements: number
+    total_items: number
+  } | null
 }
 
 export interface ReaderBootstrapPayload {
@@ -284,6 +318,12 @@ export interface PublicBook {
   public_updated_at?: string | null
 }
 
+export interface PublicBookPage {
+  items: PublicBook[]
+  next_cursor: string | null
+  has_more: boolean
+}
+
 export interface PublicBookDetail extends PublicBook {
   chapters: PublicChapterMeta[]
   visibility_notice?: string | null
@@ -297,6 +337,7 @@ export interface PublicChapter {
   chapter_title: string | null
   chapter_description: string | null
   total_chapters: number | null
+  content_url?: string | null
   text_url: string | null
   text_content?: string | null
   html_content?: string | null
@@ -325,6 +366,16 @@ export interface BookNote {
   tags?: string[]
   created_at: string
   updated_at: string
+}
+
+export interface BookNotePageItem extends Omit<BookNote, "body"> {
+  body: string | null
+}
+
+export interface BookNotePage {
+  items: BookNotePageItem[]
+  next_cursor: string | null
+  has_more: boolean
 }
 
 export interface RevisionTagSet {
@@ -407,6 +458,12 @@ export interface VaultNoteLink {
   created_at: string
 }
 
+export interface SavedQuotePage {
+  items: SavedQuote[]
+  next_cursor: string | null
+  has_more: boolean
+}
+
 export interface VaultNoteTag {
   id: string
   book_id: string
@@ -472,6 +529,10 @@ export interface UserStats {
     llm_prompt_tokens?: number
     llm_completion_tokens?: number
     llm_total_tokens?: number
+    ai_interactive_available?: boolean
+    ai_processing_available?: boolean
+    ai_capacity_usage_percent?: number
+    ai_capacity_resets_at?: string | null
     total_chapters_tracked: number
     saved_quotes: number
     active_analyzed_words: number
@@ -536,12 +597,15 @@ export interface ChapterConsistencyReport {
   plot_threads_opened: string[]
   plot_threads_resolved: string[]
   continuity_flags: string[]
+  editorial_concerns?: { issue: string; evidence: string; suggestion: string }[] | null
+  revision_question?: { question: string; evidence: string } | null
 }
 
 export interface StoryHealthMetric {
   label: string
   score: number
   detail: string
+  available?: boolean
 }
 
 export interface StoryHealth {
@@ -549,6 +613,7 @@ export interface StoryHealth {
   status: string
   summary: string
   metrics: StoryHealthMetric[]
+  available?: boolean
 }
 
 export interface PreWritingCharacter {
@@ -744,6 +809,23 @@ export interface RevisionBoard {
   last_generated_at?: string | null
 }
 
+export interface FirstImpressionState {
+  status: "not_started" | "queued" | "running" | "complete" | "failed"
+  job_id?: string | null
+  report_id?: string | null
+  request_hash?: string | null
+  source_fingerprint?: string | null
+  started_at?: string | null
+  completed_at?: string | null
+  error_code?: string | null
+}
+
+export interface WorkspaceActivationState {
+  completed_at?: string | null
+  completion_action?: string | null
+  completed_finding_id?: string | null
+}
+
 export interface GoalCalendarItem {
   id: string
   title: string
@@ -764,11 +846,14 @@ export interface WriterWorkspace {
   novel_front_matter?: NovelFrontMatter
   novel_epub_metadata?: NovelEpubMetadata
   revision_board: RevisionBoard
+  activation?: WorkspaceActivationState
+  first_impression?: FirstImpressionState
   editor_preferences?: EditorPreferences
   reading_themes?: ReadingThemes
   typewriter_mode?: TypewriterModeSettings
   manuscript_layout?: ManuscriptLayoutSettings
   structure_tree?: WorkspaceStructureNode[]
+  revision_rounds?: RevisionRound[]
   reprocess?: ReprocessMetadata
   processing?: BookProcessing | null
   index_format?: string
@@ -899,6 +984,7 @@ export interface RevisionIntelligence {
   scene_advice: RevisionActionItem[]
   confusion_map: RevisionActionItem[]
   voice_alerts: RevisionActionItem[]
+  external_signals?: RevisionActionItem[]
   priority_findings?: RevisionActionItem[]
   activation?: RevisionActivation
   analysis_complete?: boolean
@@ -909,6 +995,59 @@ export interface RevisionIntelligence {
   coverage?: Record<string, unknown>
   stale_finding_count?: number
   analysis_limitations?: string[]
+}
+
+export interface RevisionRound {
+  id: string
+  label: string
+  note?: string | null
+  created_at: string
+  chapters: Array<{
+    number: number
+    title: string
+    version_id?: string | null
+    content_version: number
+    word_count: number
+  }>
+  summary: {
+    chapter_count: number
+    word_count: number
+    scene_count: number
+    open_finding_count: number
+    high_severity_count: number
+    open_beta_feedback_count: number
+  }
+}
+
+export interface RevisionRoundComparison {
+  base_round_id: string
+  target_round_id?: string | null
+  changed_chapters: number[]
+  added_chapters: number[]
+  removed_chapters: number[]
+  chapter_delta: number
+  word_count_delta: number
+  scene_count_delta: number
+  open_finding_delta: number
+  open_beta_feedback_delta: number
+}
+
+export interface WorkflowBridgePreview {
+  format: string
+  preview_token: string
+  incoming_chapter_count: number
+  new_count: number
+  changed_count: number
+  unchanged_count: number
+  chapters: Array<{
+    incoming_number: number
+    incoming_title: string
+    matched_chapter_number?: number | null
+    status: "new" | "changed" | "unchanged"
+    incoming_word_count: number
+    current_word_count?: number | null
+  }>
+  preserved_chapter_numbers: number[]
 }
 
 export interface ContinuityEvidence {
@@ -1012,6 +1151,32 @@ export interface NovelScene {
   updated_at: string
 }
 
+export interface VaultNotePageItem extends Omit<VaultNote, "content"> {
+  content: string | null
+}
+
+export interface VaultNotePage {
+  items: VaultNotePageItem[]
+  next_cursor: string | null
+  has_more: boolean
+}
+
+export interface NovelScenePageItem extends Omit<NovelScene, "body" | "html_body"> {
+  body: string | null
+  html_body: string | null
+}
+
+export interface NovelScenePage {
+  items: NovelScenePageItem[]
+  next_cursor: string | null
+  has_more: boolean
+}
+
+export interface WorkspaceScene extends Omit<NovelScene, "body" | "html_body"> {
+  body?: string | null
+  html_body?: string | null
+}
+
 export interface WorkspaceChapterNode {
   chapter_number: number
   title?: string | null
@@ -1026,7 +1191,7 @@ export interface WorkspaceSceneGroup {
   chapter_number?: number | null
   structure_version?: number | null
   collapsed_by_default: boolean
-  scenes: NovelScene[]
+  scenes: WorkspaceScene[]
 }
 
 export interface ManuscriptWorkspaceTree {
@@ -1054,6 +1219,13 @@ export interface WorkspaceSearchResult {
   scene_id?: string | null
   note_path?: string | null
   rank: number
+}
+
+export interface WorkspaceSearchPage {
+  items: WorkspaceSearchResult[]
+  next_cursor: string | null
+  has_more: boolean
+  index_status: "ready" | "building" | "not_requested"
 }
 
 export interface ChapterSceneOrder {
@@ -1085,10 +1257,23 @@ export interface BookProcessing {
   retry_available?: boolean
   processing_run_id?: string | null
   pause_reason?: string | null
+  auto_resume?: boolean
   resume_available?: boolean
-  resume_blockers?: Array<{ kind?: string; detail?: string }>
+  resume_blockers?: Array<{
+    kind?: string
+    detail?: string
+    window?: string | null
+    windows?: string[]
+    next_resume_at?: string | null
+    auto_resume?: boolean
+    permanent?: boolean
+  }>
   next_chapter_number?: number | null
   next_resume_at?: string | null
+  frozen?: boolean
+  freeze_reason?: string | null
+  freeze_message?: string | null
+  frozen_at?: string | null
   pipeline?: {
     extraction?: ProcessingPipelineStage | null
     analysis?: ProcessingPipelineStage | null
@@ -1200,7 +1385,7 @@ export type SectionType =
   | "title_page" | "copyright" | "dedication" | "toc" | "foreword"
   | "preface" | "acknowledgements" | "prologue" | "part" | "chapter"
   | "interlude" | "epilogue" | "afterword" | "appendix" | "glossary"
-  | "notes" | "unknown"
+  | "notes" | "chronology" | "part_opening" | "unknown"
 
 export interface SectionMeta {
   id: string
@@ -1211,11 +1396,21 @@ export interface SectionMeta {
   end_page: number | null
   confidence: number
   include_in_analysis: boolean
+  parent_id?: string | null
+  source_label?: string | null
+  source_location?: string | null
+  start_block?: number
+  end_block?: number
+  word_count?: number
+  opening_excerpt?: string
+  closing_excerpt?: string
+  warnings?: string[]
 }
 
 export interface ImportWarning {
   message: string
   severity: "info" | "warning" | "error"
+  section_id?: string | null
 }
 
 export interface ImportPreview {
@@ -1224,6 +1419,14 @@ export interface ImportPreview {
   title: string
   author: string
   sections: SectionMeta[]
+  source_sha256?: string | null
+  content_sha256?: string | null
+  parser_version?: string | null
+  block_count?: number
+  block_word_counts?: number[]
+  block_openings?: string[]
+  block_closings?: string[]
+  block_locations?: Array<string | null>
   chapter_count: number
   toc_detected: boolean
   front_matter_count: number

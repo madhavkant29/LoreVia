@@ -29,6 +29,16 @@ def cookie_auth_headers(*cookies: str, csrf_token: str | None = None) -> dict[st
 
 
 @pytest.mark.asyncio
+async def test_csrf_bootstrap_sets_a_browser_readable_cookie(client):
+    response = await client.get("/api/v1/auth/csrf")
+
+    assert response.status_code == 204
+    assert any(
+        header.startswith("lorevia_csrf=") for header in response.headers.get_list("set-cookie")
+    )
+
+
+@pytest.mark.asyncio
 async def test_register_requires_email_verification_before_login(client):
     r = await client.post(
         "/api/v1/auth/register",
@@ -182,6 +192,84 @@ async def test_supabase_oauth_rejects_new_users_without_account(client, monkeypa
     assert "Register page" in response.json()["detail"]
 
 
+@pytest.mark.parametrize(
+    ("case_name", "confirmation_payload"),
+    [
+        pytest.param("missing", {}, id="missing-confirmation"),
+        pytest.param(
+            "unconfirmed",
+            {"email_confirmed_at": None},
+            id="null-confirmation",
+        ),
+    ],
+)
+@pytest.mark.asyncio
+async def test_supabase_oauth_rejects_unconfirmed_email_before_linking_existing_account(
+    client, db, monkeypatch, case_name, confirmation_payload
+):
+    supabase_auth_id = uuid.uuid4()
+    email = f"oauth-{case_name}-victim@lorevia.app"
+
+    class FakeResponse:
+        status_code = 200
+
+        @staticmethod
+        def json():
+            return {
+                "id": str(supabase_auth_id),
+                "email": email,
+                **confirmation_payload,
+            }
+
+    class FakeAsyncClient:
+        def __init__(self, timeout):
+            self.timeout = timeout
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def get(self, url, headers):
+            return FakeResponse()
+
+    existing_user = User(
+        email=email,
+        username=f"oauth-{case_name}-victim",
+        password_hash=hash_password("SafePass123!@#"),
+        legal_accepted_at=datetime.now(UTC),
+        legal_version="2026-04",
+    )
+    db.add(existing_user)
+    await db.commit()
+
+    monkeypatch.setattr(
+        "app.api.v1.routes.auth.settings.SUPABASE_URL",
+        "https://supabase.example.com",
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "app.api.v1.routes.auth.settings.SUPABASE_SERVICE_KEY", "service-key", raising=False
+    )
+    monkeypatch.setattr("app.api.v1.routes.auth.httpx.AsyncClient", FakeAsyncClient)
+
+    response = await client.post(
+        "/api/v1/auth/oauth/supabase",
+        json={
+            "token": "oauth-token",
+            "accepted_terms": True,
+            "device_id": f"oauth-{case_name}-device01",
+        },
+    )
+
+    assert response.status_code == 401
+    assert "verify your email" in response.json()["detail"].lower()
+    await db.refresh(existing_user)
+    assert existing_user.supabase_auth_id is None
+    assert existing_user.email_verified_at is None
+
+
 @pytest.mark.asyncio
 async def test_supabase_oauth_allows_existing_user_without_terms(client, db, monkeypatch):
     supabase_auth_id = uuid.uuid4()
@@ -306,6 +394,8 @@ async def test_supabase_oauth_creates_account_with_accepted_terms(client, db, mo
     assert created_user is not None
     assert created_user.supabase_auth_id == supabase_auth_id
     assert created_user.email_verified_at is not None
+    assert created_user.legal_accepted_at is not None
+    assert created_user.legal_version == "2026-04"
 
     # Verify device was linked
     device_trial = (
@@ -1558,6 +1648,22 @@ async def test_tier_limits_reflect_strict_free_plan(client, auth_headers):
 
 
 @pytest.mark.asyncio
+async def test_tier_limits_expose_architect_daily_advisor_and_scan_limits(client, auth_headers):
+    response = await client.get("/api/v1/auth/tier-limits", headers=auth_headers)
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["author_advisor_per_day"] == 30
+    assert payload["architect_advisor_per_day"] == 60
+    assert payload["author_high_cost_turns_per_day"] == 30
+    assert payload["architect_high_cost_turns_per_day"] == 60
+    assert payload["author_prediction_per_day"] == 30
+    assert payload["architect_prediction_per_day"] == 60
+    assert payload["architect_advisor_per_week"] == 420
+    assert payload["architect_advisor_per_month"] == 1800
+
+
+@pytest.mark.asyncio
 async def test_daily_word_goal_can_be_updated(client, auth_headers):
     response = await client.patch(
         "/api/v1/auth/me/daily-word-goal",
@@ -1676,7 +1782,11 @@ async def test_supabase_oauth_creates_user_and_links_existing_email(client, db, 
 
         @staticmethod
         def json():
-            return {"id": str(supabase_id), "email": "oauth-user@example.com"}
+            return {
+                "id": str(supabase_id),
+                "email": "oauth-user@example.com",
+                "email_confirmed_at": "2026-05-01T00:00:00Z",
+            }
 
     class FakeHttpClient:
         def __init__(self, **_kwargs):

@@ -27,7 +27,7 @@ export function MobileActionBar({
   }))
 
   return (
-    <nav aria-label="Primary actions" className="fixed inset-x-0 bottom-0 z-40 border-t border-[rgba(var(--border),0.9)] bg-[rgb(var(--card))]/95 px-4 py-3 backdrop-blur md:hidden">
+    <nav data-lorevia-bottom-floating aria-label="Primary actions" className="fixed inset-x-0 bottom-0 z-40 border-t border-[rgba(var(--border),0.9)] bg-[rgb(var(--card))]/95 px-4 py-3 backdrop-blur md:hidden">
       <div className="mx-auto flex max-w-xl gap-2">
         {primaryActions.map((action) => {
           const variant = action.tone === "danger" ? "danger" : action.tone === "secondary" ? "secondary" : "primary"

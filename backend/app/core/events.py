@@ -13,8 +13,18 @@ async def on_startup() -> None:
 
 async def on_shutdown() -> None:
     from app.core.database import engine
+    from app.core.llm import close_openai_clients
     from app.core.redis import close_all_redis_clients
+    from app.engine.embeddings.embedder import close_embedding_client
 
-    await close_all_redis_clients()
-    await engine.dispose()
+    try:
+        await close_openai_clients()
+    finally:
+        try:
+            await close_embedding_client()
+        finally:
+            try:
+                await close_all_redis_clients()
+            finally:
+                await engine.dispose()
     log.info("LoreVia shut down")

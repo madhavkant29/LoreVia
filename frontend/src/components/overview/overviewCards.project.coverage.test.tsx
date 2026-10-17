@@ -31,7 +31,7 @@ describe("overview cards", () => {
           created_at: "2026-01-02T00:00:00Z",
           cover_url: null,
           work_type: "novel",
-        } as any}
+        } as never}
         isDark={false}
         canOpenManuscript
         currentWords={42000}
@@ -40,7 +40,7 @@ describe("overview cards", () => {
         chapters={[
           { number: 1, title: "Ash", read: true },
           { number: 2, title: "Gate", read: false },
-        ] as any}
+        ] as never}
         unitTitle="Chapter"
         unitPrefix="Ch."
         onOpenManuscript={onOpenManuscript}
@@ -73,7 +73,7 @@ describe("overview cards", () => {
               { label: "Continuity", score: 80, detail: "Minor drift." },
               { label: "Pacing", score: 60, detail: "Middle slows." },
             ],
-          } as any}
+          } as never}
           onRetryStoryHealth={retry}
         />
         <ActiveIssuesCard
@@ -91,7 +91,7 @@ describe("overview cards", () => {
     expect(getContainer().textContent).toContain("Goal reached today.")
     expect(getContainer().textContent).toContain("Story Health")
     expect(getContainer().textContent).toContain("Continuity is mostly intact.")
-    expect(getContainer().textContent).toContain("Character Inconsistencies")
+    expect(getContainer().textContent).toContain("Continuity Flags")
     expect(getContainer().textContent).toContain("Manuscript Editor")
 
     clickByText("World Gaps")
@@ -124,7 +124,7 @@ describe("overview cards", () => {
 
     expect(getContainer().textContent).toContain("Project Overview")
     expect(getContainer().textContent).toContain("12,500")
-    expect(getContainer().textContent).toContain("Writing streak")
+    expect(getContainer().textContent).toContain("Sign-in streak")
     expect(getContainer().textContent).toContain("9 days")
 
     await clickByTextAsync("Create")
@@ -155,5 +155,27 @@ describe("overview cards", () => {
     expect(getContainer().textContent).toContain("Failed to load story health")
     clickByText("Retry")
     expect(retry).toHaveBeenCalledTimes(1)
+  })
+
+  it("labels story health dimensions without evidence as unavailable", async () => {
+    await renderElement(
+      <StoryHealthCard
+        bookId="book-1"
+        isDark={false}
+        storyHealth={{
+          score: 0,
+          status: "Not available",
+          summary: "Story health needs analyzed manuscript evidence before a score can be calculated.",
+          available: false,
+          metrics: [
+            { label: "Pacing", score: 0, detail: "At least two chapters are required.", available: false },
+          ],
+        }}
+      />,
+    )
+
+    expect(getContainer().textContent).toContain("Not enough data")
+    expect(getContainer().textContent).toContain("Unavailable")
+    expect(getContainer().textContent).not.toContain("0%")
   })
 })

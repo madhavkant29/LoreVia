@@ -180,9 +180,12 @@ async def build_story_health_payload(db: AsyncSession, book: Book) -> StoryHealt
         minimum=0,
         maximum=100,
     )
+    character_available = bool(visible_characters)
     character_detail = (
         f"{len(visible_characters)} visible profiles scored from role, arc, trait, motive, growth, and relationship coverage; "
-        f"{major_with_states}/{len(major_characters) or 1} major characters have tracked state snapshots."
+        f"{major_with_states}/{len(major_characters)} major characters have tracked state snapshots."
+        if character_available
+        else "No visible character profiles are available for consistency scoring."
     )
 
     chapter_reports = await list_chapter_consistency_reports(db, book, limit=6)
@@ -246,8 +249,8 @@ async def build_story_health_payload(db: AsyncSession, book: Book) -> StoryHealt
     if latest_continuity_scan is None:
         continuity_score = 0
         continuity_detail = (
-            "No verified continuity scan is available yet. Coverage, findings, and data gaps "
-            "will replace this placeholder after the first scan."
+            "No verified continuity scan is available yet. Run a continuity scan to measure "
+            "coverage, findings, and data gaps."
         )
     else:
         continuity_score = _clamp_score(
@@ -264,6 +267,7 @@ async def build_story_health_payload(db: AsyncSession, book: Book) -> StoryHealt
             f"{review_needed_findings}; stale: {stale_findings}; data gaps: {data_gap_count}. "
             f"Scan result: {latest_continuity_scan.continuity_status}."
         )
+    continuity_available = latest_continuity_scan is not None
 
     plot_threads = (
         (await db.execute(select(PlotThread).where(PlotThread.book_id == book.id))).scalars().all()
@@ -330,42 +334,63 @@ async def build_story_health_payload(db: AsyncSession, book: Book) -> StoryHealt
         and (book.total_chapters or 0) - int(thread.last_mentioned_at or thread.introduced_at or 0)
         >= 8
     )
-    timeline_score = _clamp_score(
-        58
-        + (((anchored_threads / total_threads) if total_threads else 1.0) * 22)
-        + (
-            (
-                ((book.total_chapters or 0) - min(continuity_issue_count, book.total_chapters or 0))
-                / (book.total_chapters or 1)
+    timeline_available = bool(total_threads or chapter_reports or latest_continuity_scan)
+    timeline_score = (
+        _clamp_score(
+            58
+            + (((anchored_threads / total_threads) if total_threads else 0.0) * 22)
+            + (
+                (
+                    (
+                        (book.total_chapters or 0)
+                        - min(continuity_issue_count, book.total_chapters or 0)
+                    )
+                    / (book.total_chapters or 1)
+                )
+                * 20
+                if (book.total_chapters or 0) > 0
+                else 0
             )
-            * 20
-            if (book.total_chapters or 0) > 0
-            else 10
+            - (continuity_issue_count * 4)
+            - (chronology_conflicts * 12),
+            minimum=0,
+            maximum=96,
         )
-        - (continuity_issue_count * 4)
-        - (chronology_conflicts * 12),
-        minimum=0,
-        maximum=96,
+        if timeline_available
+        else 0
     )
     timeline_detail = (
-        f"{anchored_threads}/{total_threads or 1} plot threads have chapter anchors, with {chronology_conflicts} chronology conflicts "
+        f"{anchored_threads}/{total_threads} plot threads have chapter anchors, with {chronology_conflicts} chronology conflicts "
         f"and {continuity_issue_count} recent continuity flags. "
         "Timeline clarity should still be stress-tested for implied travel time, off-page gaps, and stale open beats."
+        if timeline_available and total_threads
+        else (
+            f"No plot threads are recorded; {continuity_issue_count} recent continuity flags provide the available timeline evidence."
+            if timeline_available
+            else "No plot-thread or continuity evidence is available for timeline scoring."
+        )
     )
 
-    plot_score = _clamp_score(
-        52
-        + (((resolved_threads / total_threads) if total_threads else 1.0) * 30)
-        + min(total_threads * 2, 12)
-        - (stale_open_threads * 7)
-        - (abandoned_threads * 5)
-        - max(0, open_threads - resolved_threads) * 2,
-        minimum=0,
-        maximum=96,
+    plot_available = total_threads > 0
+    plot_score = (
+        _clamp_score(
+            52
+            + ((resolved_threads / total_threads) * 30)
+            + min(total_threads * 2, 12)
+            - (stale_open_threads * 7)
+            - (abandoned_threads * 5)
+            - max(0, open_threads - resolved_threads) * 2,
+            minimum=0,
+            maximum=96,
+        )
+        if plot_available
+        else 0
     )
     plot_detail = (
-        f"{resolved_threads}/{total_threads or 1} plot threads resolved, {open_threads} still open, "
+        f"{resolved_threads}/{total_threads} plot threads resolved, {open_threads} still open, "
         f"and {stale_open_threads} have been hanging open for 8+ chapters."
+        if plot_available
+        else "No plot threads are available for closure scoring."
     )
 
     wiki_count = (
@@ -394,25 +419,33 @@ async def build_story_health_payload(db: AsyncSession, book: Book) -> StoryHealt
     consistency_flags = (
         len(latest_world_gap_analysis.consistency_flags or []) if latest_world_gap_analysis else 0
     )
-    world_score = _clamp_score(
-        58
-        + min(world_document_count * 8, 24)
-        + min(wiki_count * 2, 18)
-        - (priority_gaps * 7)
-        - (consistency_flags * 6),
-        minimum=0,
-        maximum=96,
+    world_available = latest_world_gap_analysis is not None
+    world_score = (
+        _clamp_score(
+            58
+            + min(world_document_count * 8, 24)
+            + min(wiki_count * 2, 18)
+            - (priority_gaps * 7)
+            - (consistency_flags * 6),
+            minimum=0,
+            maximum=96,
+        )
+        if world_available
+        else 0
     )
     world_issue_count = priority_gaps + consistency_flags
-    world_detail = (
-        f"{world_document_count} active world documents and {wiki_count} wiki entries. "
-        + (
+    world_detail = f"{world_document_count} active world documents and {wiki_count} wiki entries. "
+    if world_available:
+        world_detail += (
             f"{world_issue_count} cached world-analysis issue{'s' if world_issue_count != 1 else ''} are already on the board. "
             if world_issue_count
-            else "The world-analysis review queue still needs a fresh pass so LoreVia can surface more contradiction and coverage targets. "
+            else "No issues are recorded in the latest world-analysis pass. "
         )
-        + "Lore coverage still benefits from ongoing contradiction hunts and missing-rule checks."
-    )
+        world_detail += (
+            "Lore coverage still benefits from ongoing contradiction hunts and missing-rule checks."
+        )
+    else:
+        world_detail += "No world-gap analysis is available to measure consistency."
 
     voice_profiles = (
         (
@@ -440,18 +473,29 @@ async def build_story_health_payload(db: AsyncSession, book: Book) -> StoryHealt
         if (profile.signature_phrases and len(profile.signature_phrases) > 0)
         or (profile.dominant_markers and len(profile.dominant_markers) > 0)
     )
-    dialogue_score = _clamp_score(
-        44
-        + (((major_with_voice / len(major_characters)) if major_characters else 0.0) * 36)
-        + (((voice_marker_profiles / len(voice_profiles)) if voice_profiles else 0.0) * 20)
-        + min(sum(profile.sample_dialogue_count for profile in voice_profiles), 20),
-        minimum=0,
-        maximum=96,
+    dialogue_available = bool(voice_profiles)
+    dialogue_score = (
+        _clamp_score(
+            44
+            + (((major_with_voice / len(major_characters)) if major_characters else 0.0) * 36)
+            + ((voice_marker_profiles / len(voice_profiles)) * 20)
+            + min(sum(profile.sample_dialogue_count for profile in voice_profiles), 20),
+            minimum=0,
+            maximum=96,
+        )
+        if dialogue_available
+        else 0
     )
     dialogue_detail = (
-        f"{major_with_voice}/{len(major_characters) or 1} major characters have reusable voice samples; "
-        f"{voice_marker_profiles}/{len(voice_profiles) or 1} voice profiles include markers or signature phrases. "
+        f"{major_with_voice}/{len(major_characters)} major characters have reusable voice samples; "
+        f"{voice_marker_profiles}/{len(voice_profiles)} voice profiles include markers or signature phrases. "
         "Voice review should still keep looking for flattening, over-shared phrasing, and missing contrast."
+        if dialogue_available and major_characters
+        else (
+            f"{voice_marker_profiles}/{len(voice_profiles)} voice profiles include markers or signature phrases."
+            if dialogue_available
+            else "No character voice profiles are available for dialogue scoring."
+        )
     )
 
     chapter_word_counts = [
@@ -489,48 +533,89 @@ async def build_story_health_payload(db: AsyncSession, book: Book) -> StoryHealt
             maximum=96,
         )
         pacing_detail = f"{len(chapter_word_counts)} chapter word counts measured; {outlier_count} pacing outliers against a {int(round(median_word_count))}-word median."
+        pacing_available = True
     elif len(chapter_word_counts) == 1:
-        pacing_score = 65
-        pacing_detail = "Only one chapter has a persisted word count, so pacing is based on limited manuscript data."
+        pacing_score = 0
+        pacing_available = False
+        pacing_detail = "Only one chapter has a persisted word count; at least two are required to measure pacing variation."
     else:
         pacing_score = 0
+        pacing_available = False
         pacing_detail = "No persisted chapter word counts are available yet for pacing analysis."
 
-    overall_score = _clamp_score(
-        statistics.fmean(
-            [
-                continuity_score,
-                character_score,
-                timeline_score,
-                plot_score,
-                world_score,
-                pacing_score,
-                dialogue_score,
-            ]
-        ),
-        minimum=0,
-        maximum=94,
+    scored_metrics = [
+        score
+        for score, available in [
+            (continuity_score, continuity_available),
+            (character_score, character_available),
+            (timeline_score, timeline_available),
+            (plot_score, plot_available),
+            (world_score, world_available),
+            (pacing_score, pacing_available),
+            (dialogue_score, dialogue_available),
+        ]
+        if available
+    ]
+    health_available = bool(scored_metrics)
+    overall_score = (
+        _clamp_score(statistics.fmean(scored_metrics), minimum=0, maximum=94)
+        if health_available
+        else 0
     )
-    status, summary = _story_health_status(overall_score)
+    if health_available:
+        status, summary = _story_health_status(overall_score)
+    else:
+        status = "Not available"
+        summary = (
+            "Story health needs analyzed manuscript evidence before a score can be calculated."
+        )
     return StoryHealthOut(
         score=overall_score,
         status=status,
         summary=summary,
+        available=health_available,
         metrics=[
-            {"label": "Continuity", "score": continuity_score, "detail": continuity_detail},
+            {
+                "label": "Continuity",
+                "score": continuity_score,
+                "detail": continuity_detail,
+                "available": continuity_available,
+            },
             {
                 "label": "Character consistency",
                 "score": character_score,
                 "detail": character_detail,
+                "available": character_available,
             },
-            {"label": "Timeline clarity", "score": timeline_score, "detail": timeline_detail},
-            {"label": "Plot thread closure", "score": plot_score, "detail": plot_detail},
-            {"label": "Worldbuilding consistency", "score": world_score, "detail": world_detail},
-            {"label": "Pacing", "score": pacing_score, "detail": pacing_detail},
+            {
+                "label": "Timeline clarity",
+                "score": timeline_score,
+                "detail": timeline_detail,
+                "available": timeline_available,
+            },
+            {
+                "label": "Plot thread closure",
+                "score": plot_score,
+                "detail": plot_detail,
+                "available": plot_available,
+            },
+            {
+                "label": "Worldbuilding consistency",
+                "score": world_score,
+                "detail": world_detail,
+                "available": world_available,
+            },
+            {
+                "label": "Pacing",
+                "score": pacing_score,
+                "detail": pacing_detail,
+                "available": pacing_available,
+            },
             {
                 "label": "Dialogue/voice consistency",
                 "score": dialogue_score,
                 "detail": dialogue_detail,
+                "available": dialogue_available,
             },
         ],
     )

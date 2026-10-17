@@ -1,4 +1,5 @@
 import type { Dispatch, MutableRefObject, SetStateAction } from "react"
+import type { Route } from "next"
 
 import { booksApi } from "@/lib/api/books"
 import { intelligenceApi } from "@/lib/api/intelligence"
@@ -10,9 +11,10 @@ import type { AdvisorSuggestion, EditorialReview, EditorialReviewPassage, Manusc
 import type { PlotThread } from "@/types/reader"
 import type { BookDraftMap } from "./manuscriptPage.helpers"
 
-type ManuscriptRouter = {
-  replace: (href: string) => void
-}
+type ManuscriptRouter = Pick<
+  ReturnType<(typeof import("next/navigation"))["useRouter"]>,
+  "replace"
+>
 
 type ManuscriptSearchParams = {
   get: (name: string) => string | null
@@ -178,7 +180,7 @@ export function useManuscriptIntelligenceActions({
         finding_id: completed.findingId,
         action: "manuscript_edit",
       })
-      router.replace(`/${bookId}/manuscript`)
+      router.replace(`/${bookId}/manuscript` as Route)
     } catch {
       // The manuscript save succeeded; attribution must not turn it into a failed save.
     }

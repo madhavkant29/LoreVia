@@ -1,6 +1,7 @@
 """Unit tests for book_utils functions."""
 
 import io
+import json
 import uuid
 from contextlib import nullcontext
 from datetime import UTC, datetime
@@ -21,7 +22,9 @@ from app.models.intelligence import (
 )
 from app.models.user import User
 from app.utils.advisor_scan_utils import build_advisor_suggestions_payload
+from app.utils.books import manuscript
 from app.utils.books import revision_analysis as revision_analysis_module
+from app.utils.books import workspace_search as workspace_search_module
 from app.utils.books.chapter_titles import (
     build_chapter_title_from_summary,
     chapter_title_is_placeholder,
@@ -40,6 +43,7 @@ from app.utils.books.imports import (
     parse_book_upload_for_ingestion,
     parse_import_upload,
     parse_screenplay_upload,
+    require_extractable_manuscript_text,
 )
 from app.utils.books.manuscript import (
     clean_manuscript_html,
@@ -102,11 +106,13 @@ from app.utils.books.serialization import (
     chapter_word_count,
     compute_words_read_for_books,
     ensure_book_cover,
+    preload_book_render_context,
 )
 from app.utils.books.story_health import estimate_readability
 from app.utils.books.workspace_search import (
     build_manuscript_workspace_tree,
     search_author_workspace,
+    search_author_workspace_page,
 )
 from app.utils.books.writer_workspace import (
     build_book_processing_payload,
@@ -245,17 +251,17 @@ async def test_revision_analysis_chapter_text_loading_only_swallows_storage_io(m
     def _storage_missing(_key: str) -> bytes:
         raise OSError("object unavailable")
 
-    monkeypatch.setattr(revision_analysis_module, "download_book", _storage_missing)
+    monkeypatch.setattr(manuscript, "download_book", _storage_missing)
 
-    assert await revision_analysis_module._load_chapter_texts([chapter]) == {3: ""}
+    assert await manuscript.load_chapter_texts([chapter]) == {3: ""}
 
     def _unexpected_bug(_key: str) -> bytes:
         raise RuntimeError("download wrapper bug")
 
-    monkeypatch.setattr(revision_analysis_module, "download_book", _unexpected_bug)
+    monkeypatch.setattr(manuscript, "download_book", _unexpected_bug)
 
     with pytest.raises(RuntimeError, match="download wrapper bug"):
-        await revision_analysis_module._load_chapter_texts([chapter])
+        await manuscript.load_chapter_texts([chapter])
 
 
 def test_build_revision_change_summary_falls_back_when_only_noise_terms_changed():
@@ -695,6 +701,35 @@ async def test_compute_words_read_for_books_uses_preloaded_word_counts_without_c
     totals = await compute_words_read_for_books(db, books=[book], progress_rows=[progress])
 
     assert totals[book_id] == 2200
+
+
+@pytest.mark.asyncio
+async def test_preload_book_render_context_does_not_generate_missing_covers(monkeypatch):
+    calls: list[uuid.UUID] = []
+
+    async def _generate_cover(_db, book):
+        calls.append(book.id)
+
+    monkeypatch.setattr("app.utils.books.serialization.ensure_book_cover", _generate_cover)
+
+    book = Book(
+        id=uuid.uuid4(),
+        user_id=uuid.uuid4(),
+        title="No Cover Yet",
+        author="A. Writer",
+        format="txt",
+        work_type="novel",
+        s3_key="books/user/story.txt",
+        cover_s3_key=None,
+        status="ready",
+        is_public=False,
+    )
+    db = _FakeExecuteDB(execute_values=[_ScalarsResult([]), _RowResult([])])
+
+    context = await preload_book_render_context(db, books=[book], user_id=book.user_id)
+
+    assert calls == []
+    assert context.cover_url_by_book_id[book.id] is None
 
 
 @pytest.mark.asyncio
@@ -1315,6 +1350,8 @@ def test_normalize_chapter_title_accepts_one_to_four_words():
     assert normalize_chapter_title("  Ember Gate  ") == "Ember Gate"
     assert normalize_chapter_title("Ash") == "Ash"
     assert normalize_chapter_title("The Last Ember Gate") == "The Last Ember Gate"
+    assert normalize_chapter_title("Winter's End") == "Winter's End"
+    assert normalize_chapter_title("Winter’s End") == "Winter’s End"
 
 
 def test_normalize_chapter_title_rejects_more_than_four_words():
@@ -1623,6 +1660,15 @@ def test_finding_excerpt_returns_only_real_source_text_and_match_strength():
     assert matched is True
     assert _finding_excerpt("", {"title": "Anything"}) == ("", False)
 
+    clipped, clipped_matched = _finding_excerpt(
+        f"{'Opening context. ' * 12}The silver key was missing. {'Closing context. ' * 12}",
+        {"title": "Missing silver key", "description": "The silver key disappears."},
+        max_chars=80,
+    )
+    assert clipped.startswith("...")
+    assert clipped.endswith("...")
+    assert clipped_matched is True
+
 
 def test_apply_revision_finding_decision_persists_snapshot_and_activation():
     book = Book(
@@ -1688,7 +1734,7 @@ def test_normalize_scene_metadata_preserves_structured_fields_and_cleans_lists()
 
 
 @pytest.mark.asyncio
-async def test_search_author_workspace_returns_scoped_results(monkeypatch):
+async def test_search_author_workspace_uses_bounded_persisted_search_results():
     book = Book(
         id=uuid.uuid4(),
         user_id=uuid.uuid4(),
@@ -1700,81 +1746,73 @@ async def test_search_author_workspace_returns_scoped_results(monkeypatch):
         mode="author",
     )
 
-    class _ScalarRows:
+    scene_id = uuid.uuid4()
+    note_id = uuid.uuid4()
+    chapter_id = uuid.uuid4()
+
+    class _Rows:
         def __init__(self, rows):
             self._rows = rows
-
-        def scalars(self):
-            return self
 
         def all(self):
             return self._rows
 
     class _FakeSearchDB:
+        def __init__(self):
+            self.statements = []
+
         async def execute(self, *_args, **_kwargs):
-            chapter = Chapter(
-                id=uuid.uuid4(),
-                book_id=book.id,
-                number=4,
-                title="The Gate",
-                s3_key="chapter-4.txt",
-                content_version=1,
-            )
-            return _ScalarRows([chapter])
+            self.statements.append(_args[0])
+            rows = [
+                [
+                    (
+                        scene_id,
+                        "Gate Approach",
+                        "Mira heads to the harbor gate.",
+                        "Mira reaches the silver gate with the dagger hidden in her sleeve.",
+                        4,
+                        0.7,
+                    )
+                ],
+                [
+                    (
+                        note_id,
+                        "Plot Threads/Silver Gate.md",
+                        "# Silver Gate\n\nMira hides the dagger near the gate.",
+                        0.5,
+                    )
+                ],
+                [
+                    (
+                        chapter_id,
+                        4,
+                        "The Gate",
+                        "The silver gate loomed over the harbor.",
+                        0.3,
+                    )
+                ],
+            ]
+            return _Rows(rows[len(self.statements) - 1])
 
-    async def _fake_list_novel_scenes(*_args, **_kwargs):
-        return [
-            {
-                "id": "scene-1",
-                "title": "Gate Approach",
-                "description": "Mira heads to the harbor gate.",
-                "body": "Mira reaches the silver gate with the dagger hidden in her sleeve.",
-                "chapter_number": 4,
-                "metadata": {"pov": "Mira", "location": "Harbor", "tags": ["dagger", "reveal"]},
-                "tags": ["dagger", "reveal"],
-            }
-        ]
-
-    async def _fake_list_vault_notes(*_args, **_kwargs):
-        return [
-            {
-                "path": "Plot Threads/Silver Gate.md",
-                "content": "# Silver Gate\n\nMira hides the dagger near the gate.",
-            }
-        ]
-
-    monkeypatch.setattr(
-        "app.utils.books.workspace_search.list_novel_scenes", _fake_list_novel_scenes
-    )
-    monkeypatch.setattr(
-        "app.utils.books.workspace_search.vault_storage.list_vault_notes",
-        _fake_list_vault_notes,
-    )
-    monkeypatch.setattr(
-        "app.utils.books.workspace_search.download_book",
-        lambda _key: serialize_manuscript_content(
-            "The silver gate loomed over the harbor.",
-            "<p>The silver gate loomed over the harbor.</p>",
-        ).encode("utf-8"),
-    )
-
+    db = _FakeSearchDB()
     results = await search_author_workspace(
-        _FakeSearchDB(),
+        db,
         book=book,
         user_id=book.user_id,
         query="silver gate",
         scopes=["manuscript", "scenes", "notes"],
-        filters={"pov": "Mira", "location": "Harbor", "tags": ["dagger"]},
     )
 
     assert [item["scope"] for item in results] == ["scenes", "notes", "manuscript"]
-    assert results[0]["scene_id"] == "scene-1"
+    assert results[0]["scene_id"] == str(scene_id)
     assert results[1]["note_path"] == "Plot Threads/Silver Gate.md"
     assert results[2]["chapter_number"] == 4
+    assert len(db.statements) == 3
+    assert all("LIMIT" in str(statement) for statement in db.statements)
 
 
 @pytest.mark.asyncio
-async def test_search_author_workspace_only_swallows_manuscript_storage_io(monkeypatch):
+async def test_search_author_workspace_does_not_download_manuscript_objects():
     book = Book(
         id=uuid.uuid4(),
         user_id=uuid.uuid4(),
@@ -1785,39 +1823,14 @@ async def test_search_author_workspace_only_swallows_manuscript_storage_io(monke
         status="ready",
         mode="author",
     )
-    chapter = Chapter(
-        id=uuid.uuid4(),
-        book_id=book.id,
-        number=4,
-        title="The Gate",
-        s3_key="chapter-4.txt",
-        content_version=1,
-    )
 
-    class _ScalarRows:
-        def scalars(self):
-            return self
-
+    class _Rows:
         def all(self):
-            return [chapter]
+            return []
 
     class _FakeSearchDB:
         async def execute(self, *_args, **_kwargs):
-            return _ScalarRows()
-
-    async def _no_scenes(*_args, **_kwargs):
-        return []
-
-    monkeypatch.setattr("app.utils.books.workspace_search.list_novel_scenes", _no_scenes)
-    monkeypatch.setattr(
-        "app.utils.books.workspace_search.vault_storage.list_vault_notes",
-        _no_scenes,
-    )
-
-    def _storage_missing(_key: str) -> bytes:
-        raise OSError("object unavailable")
-
-    monkeypatch.setattr("app.utils.books.workspace_search.download_book", _storage_missing)
+            return _Rows()
 
     assert (
         await search_author_workspace(
@@ -1829,25 +1842,76 @@ async def test_search_author_workspace_only_swallows_manuscript_storage_io(monke
         )
         == []
     )
+    assert "download_book" not in workspace_search_module.__dict__
+    assert "deserialize_manuscript_content" not in workspace_search_module.__dict__
 
-    monkeypatch.setattr("app.utils.books.workspace_search.download_book", lambda _key: b"{}")
 
-    def _deserialize_bug(_raw: bytes) -> dict:
-        raise RuntimeError("deserializer bug")
+@pytest.mark.asyncio
+async def test_workspace_search_page_uses_stable_cursor_and_reports_partial_index():
+    book = Book(
+        id=uuid.uuid4(),
+        user_id=uuid.uuid4(),
+        title="Atlas",
+        format="txt",
+        work_type="novel",
+        s3_key="atlas.txt",
+        status="processing",
+        mode="author",
+    )
+    first_chapter_id = uuid.uuid4()
+    second_chapter_id = uuid.uuid4()
 
-    monkeypatch.setattr(
-        "app.utils.books.workspace_search.manuscript.deserialize_manuscript_content",
-        _deserialize_bug,
+    class _Rows:
+        def __init__(self, rows):
+            self._rows = rows
+
+        def all(self):
+            return self._rows
+
+    class _FakeSearchDB:
+        def __init__(self):
+            self.statements = []
+            self.scalar_statements = []
+            self.scalar_values = [2, 1, 2, 1]
+
+        async def execute(self, statement):
+            self.statements.append(statement)
+            return _Rows(
+                [
+                    (first_chapter_id, 1, "One", "The silver gate opens.", 0.8),
+                    (second_chapter_id, 2, "Two", "The silver gate closes.", 0.6),
+                ]
+            )
+
+        async def scalar(self, statement):
+            self.scalar_statements.append(statement)
+            return self.scalar_values.pop(0)
+
+    db = _FakeSearchDB()
+    first_page = await search_author_workspace_page(
+        db,
+        book=book,
+        user_id=book.user_id,
+        query="silver gate",
+        scopes=["manuscript"],
+        limit=1,
+    )
+    second_page = await search_author_workspace_page(
+        db,
+        book=book,
+        user_id=book.user_id,
+        query="silver gate",
+        scopes=["manuscript"],
+        limit=1,
+        cursor=first_page["next_cursor"],
     )
 
-    with pytest.raises(RuntimeError, match="deserializer bug"):
-        await search_author_workspace(
-            _FakeSearchDB(),
-            book=book,
-            user_id=book.user_id,
-            query="silver gate",
-            scopes=["manuscript"],
-        )
+    assert first_page["items"][0]["chapter_number"] == 1
+    assert first_page["has_more"] is True
+    assert first_page["index_status"] == "building"
+    assert second_page["items"][0]["chapter_number"] == 2
+    assert second_page["has_more"] is False
+    assert len(db.scalar_statements) == 4
 
 
 @pytest.mark.asyncio
@@ -1919,10 +1983,15 @@ We have to go now.
 async def test_parse_book_upload_for_ingestion_returns_pdf_parser_diagnostics(monkeypatch):
     chapters = [{"number": 1, "title": "Chapter 1", "text": "Opening text."}]
     diagnostics = {"source": "pdf", "chapter_count": 1, "fallback_strategy": None}
+    parse_calls: list[str] = []
+
+    def _fake_parse_pdf(raw, *, language=None):
+        parse_calls.append("structured")
+        return chapters, diagnostics
 
     monkeypatch.setattr(
-        "app.parsers.pdf_parser.parse_pdf_with_diagnostics",
-        lambda raw, *, split_large_chapters=True, language=None: (chapters, diagnostics),
+        "app.parsers.pdf_parser.parse_pdf_structure",
+        _fake_parse_pdf,
     )
 
     payload = await parse_book_upload_for_ingestion(
@@ -1933,24 +2002,28 @@ async def test_parse_book_upload_for_ingestion_returns_pdf_parser_diagnostics(mo
         preserve_source_chapters=False,
     )
 
-    assert payload["chapters"] == chapters
+    assert [(chapter["title"], chapter["text"]) for chapter in payload["chapters"]] == [
+        ("Chapter 1", "Opening text.")
+    ]
+    assert payload["structure_plan"]["parser_version"]
     assert payload["parser_diagnostics"] == diagnostics
+    assert parse_calls == ["structured"]
 
 
 @pytest.mark.asyncio
 async def test_parse_book_upload_for_ingestion_disables_large_split_for_exact_source_preservation(
     monkeypatch,
 ):
-    parse_calls: list[bool] = []
+    parse_calls: list[str] = []
 
-    def _fake_parse_pdf(raw, *, split_large_chapters=True, language=None):
-        parse_calls.append(split_large_chapters)
+    def _fake_parse_pdf(raw, *, language=None):
+        parse_calls.append("structured")
         return (
             [{"number": 1, "title": "Chapter 7", "text": "Original full chapter"}],
             {"source": "pdf"},
         )
 
-    monkeypatch.setattr("app.parsers.pdf_parser.parse_pdf_with_diagnostics", _fake_parse_pdf)
+    monkeypatch.setattr("app.parsers.pdf_parser.parse_pdf_structure", _fake_parse_pdf)
 
     payload = await parse_book_upload_for_ingestion(
         format_name="pdf",
@@ -1960,8 +2033,32 @@ async def test_parse_book_upload_for_ingestion_disables_large_split_for_exact_so
         preserve_source_chapters=True,
     )
 
-    assert parse_calls == [False]
+    assert parse_calls == ["structured"]
     assert payload["chapters"][0]["title"] == "Chapter 7"
+
+
+def test_require_extractable_manuscript_text_rejects_image_only_documents():
+    with pytest.raises(HTTPException, match="No extractable text") as error:
+        require_extractable_manuscript_text([{"text": "[[IMAGE:cover]]"}], "pdf")
+    assert error.value.status_code == 400
+    require_extractable_manuscript_text([{"text": "[[IMAGE:cover]]\nMara opens the gate."}], "pdf")
+
+
+@pytest.mark.asyncio
+async def test_pdf_ingestion_rejects_a_parser_result_without_manuscript_text(monkeypatch):
+    monkeypatch.setattr(
+        "app.parsers.pdf_parser.parse_pdf_structure",
+        lambda *_args, **_kwargs: ([{"title": "Full Text", "text": ""}], {"source": "pdf"}),
+    )
+    with pytest.raises(HTTPException, match="No extractable text") as error:
+        await parse_book_upload_for_ingestion(
+            format_name="pdf",
+            work_type="novel",
+            raw=b"%PDF-1.4 mock",
+            preserve_chapter_numbers=False,
+            preserve_source_chapters=True,
+        )
+    assert error.value.status_code == 400
 
 
 @pytest.mark.asyncio
@@ -2015,6 +2112,19 @@ async def test_chapter_consistency_reports_load_full_context(db):
         [
             ChapterSummary(
                 chapter_id=chapters[1].id, mode="short", content="Mara confronts Jon at the gate."
+            ),
+            ChapterSummary(
+                chapter_id=chapters[1].id,
+                mode="editorial_note",
+                content=json.dumps(
+                    [
+                        {
+                            "issue": "The reconciliation is abrupt.",
+                            "evidence": "Mara confronts Jon.",
+                            "suggestion": "Show what changes Mara's mind.",
+                        }
+                    ]
+                ),
             ),
             CharacterRelationship(
                 book_id=book.id,
@@ -2093,10 +2203,14 @@ async def test_chapter_consistency_reports_load_full_context(db):
     assert latest.chapter_title == "Reckoning"
     assert latest.new_characters[0].name == "Jon"
     assert len(latest.relationship_changes) == 1
-    assert latest.relationship_changes[0].startswith("Mara and Jon: uneasy allies")
-    assert latest.relationship_changes[0].endswith("They agree to cooperate.")
+    assert (
+        latest.relationship_changes[0] == "Mara and Jon: uneasy allies - They agree to cooperate."
+    )
     assert latest.plot_threads_resolved == ["The sealed gate"]
     assert "Mara confronts Jon" in latest.summary
+    assert latest.editorial_concerns is not None
+    assert latest.editorial_concerns[0].issue == "The reconciliation is abrupt."
+    assert reports[1].editorial_concerns is None
 
     prewriting = await build_prewriting_check(db, book, upcoming_chapter=3)
     assert prewriting["upcoming_chapter"] == 3
@@ -2107,7 +2221,16 @@ async def test_chapter_consistency_reports_load_full_context(db):
     assert [chapter["chapter_number"] for chapter in tree["chapters"]] == [1, 2]
     assert tree["scene_groups"][0]["label"] == "Unassigned Scenes"
     assert tree["scene_groups"][2]["scenes"][0]["title"] == "Gate confrontation"
+    assert "body" not in tree["scene_groups"][2]["scenes"][0]
     assert tree["scene_breadcrumbs"]
+
+    full_tree = await build_manuscript_workspace_tree(
+        db,
+        book=book,
+        user_id=user.id,
+        include_scene_bodies=True,
+    )
+    assert full_tree["scene_groups"][2]["scenes"][0]["body"] == "Mara confronts Jon."
 
     book.total_chapters = 50
     revision = await build_revision_intelligence_payload(db, book)
@@ -2224,14 +2347,14 @@ async def test_parse_import_upload_covers_text_markdown_pdf_epub_and_unsupported
 
     monkeypatch.setattr(
         "app.parsers.pdf_parser.parse_pdf",
-        lambda _raw: [
+        lambda _raw, **_kwargs: [
             {"number": 1, "title": "One", "text": "First"},
             {"number": 2, "title": "Two", "text": "Second"},
         ],
     )
     monkeypatch.setattr(
         "app.parsers.epub_parser.parse_epub",
-        lambda _raw: [{"number": 1, "title": "EPUB", "text": "Book text"}],
+        lambda _raw, **_kwargs: [{"number": 1, "title": "EPUB", "text": "Book text"}],
     )
     merged_pdf = await parse_import_upload("book.pdf", b"pdf", False)
     split_pdf = await parse_import_upload("book.pdf", b"pdf", True)

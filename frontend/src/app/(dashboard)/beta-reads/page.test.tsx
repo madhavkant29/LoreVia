@@ -10,16 +10,21 @@ import type { BetaReadAssignmentDetail } from "@/types/betaRead"
 
 const mockPush = vi.fn()
 let mockItems: BetaReadAssignment[] = []
-let mockDetails: Array<{ data: BetaReadAssignmentDetail | null; isLoading: boolean }> = []
+let mockDetails: Array<{ data: BetaReadAssignmentDetail | null; isLoading: boolean; isError?: boolean }> = []
+let mockListError = false
+const mockListRefetch = vi.fn()
+const mockDetailRefetch = vi.fn()
+const mockStartBetaRead = vi.fn()
 
 vi.mock("@tanstack/react-query", () => ({
   useQuery: () => ({
-    data: mockItems,
-    isLoading: false,
-    isError: false,
-    refetch: vi.fn(),
+    data: mockDetails[0]?.data ?? null,
+    isLoading: mockDetails[0]?.isLoading ?? false,
+    isFetching: mockDetails[0]?.isLoading ?? false,
+    isError: mockDetails[0]?.isError ?? false,
+    refetch: mockDetailRefetch,
   }),
-  useQueries: () => mockDetails,
+  useQueries: () => [{ data: mockItems, isLoading: false, isError: mockListError, refetch: mockListRefetch }],
 }))
 
 vi.mock("next/navigation", () => ({
@@ -48,7 +53,7 @@ vi.mock("@/components/ui/Workspace", () => ({
 vi.mock("@/lib/api/reader", () => ({
   readerApi: {
     listBetaReads: vi.fn(),
-    startBetaRead: vi.fn(),
+    startBetaRead: mockStartBetaRead,
   },
 }))
 
@@ -69,6 +74,10 @@ beforeEach(() => {
   mockPush.mockClear()
   mockItems = []
   mockDetails = []
+  mockListError = false
+  mockListRefetch.mockReset()
+  mockDetailRefetch.mockReset()
+  mockStartBetaRead.mockReset()
 })
 
 afterEach(() => {
@@ -179,9 +188,81 @@ describe("BetaReadsPage", () => {
 
     await renderPage()
 
+    const detailsButton = Array.from(document.body.querySelectorAll("button")).find((button) => button.textContent === "View details")
+    expect(detailsButton).toBeTruthy()
+    await act(async () => {
+      detailsButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }))
+    })
+
     expect(container?.textContent).toContain("Author questions")
     expect(container?.textContent).toContain("What confused you most?")
     expect(container?.textContent).toContain("Which moment landed best?")
     expect(container?.textContent).toContain("Require final feedback before completion")
+  })
+
+  it("does not present a failed assignment request as an empty list and offers retry", async () => {
+    mockListError = true
+
+    await renderPage()
+
+    expect(container?.textContent).toContain("We could not load your beta reads right now.")
+    expect(container?.textContent).toContain("Assignments unavailable")
+    expect(container?.textContent).not.toContain("No in progress assignments")
+
+    const retryButton = Array.from(document.body.querySelectorAll("button")).find((button) => button.textContent?.trim() === "Retry assignments")
+    expect(retryButton).toBeTruthy()
+    await act(async () => retryButton?.dispatchEvent(new MouseEvent("click", { bubbles: true })))
+    expect(mockListRefetch).toHaveBeenCalledTimes(1)
+  })
+
+  it("shows detail failure and retries questions instead of claiming none exist", async () => {
+    mockItems = [{
+      id: "assignment-1",
+      book_id: "book-1",
+      view_bucket: "active",
+      task_label: "First pass",
+      book_title: "Sky of Ash",
+      author_name: "Author One",
+      starts_at: "2026-06-06T00:00:00Z",
+      expires_at: "2026-06-09T00:00:00Z",
+      progress_pct: 42,
+      status_label: "Active",
+      primary_action: "Continue",
+    } as BetaReadAssignment]
+    mockDetails = [{ data: null, isLoading: false, isError: true }]
+
+    await renderPage()
+
+    const detailsButton = Array.from(document.body.querySelectorAll("button")).find((button) => button.textContent === "View details")
+    await act(async () => detailsButton?.dispatchEvent(new MouseEvent("click", { bubbles: true })))
+    expect(container?.textContent).toContain("We could not load the author questions.")
+    expect(container?.textContent).not.toContain("No additional questions.")
+
+    const retryButton = Array.from(document.body.querySelectorAll("button")).find((button) => button.textContent?.trim() === "Retry questions")
+    await act(async () => retryButton?.dispatchEvent(new MouseEvent("click", { bubbles: true })))
+    expect(mockDetailRefetch).toHaveBeenCalledTimes(1)
+  })
+
+  it("explains when starting an assignment cannot be confirmed", async () => {
+    mockItems = [{
+      id: "assignment-start",
+      book_id: "book-1",
+      view_bucket: "active",
+      task_label: "First pass",
+      book_title: "Sky of Ash",
+      author_name: "Author One",
+      expires_at: "2026-06-09T00:00:00Z",
+      progress_pct: 0,
+      status_label: "Not started",
+      primary_action: "Start",
+      current_chapter: 1,
+    } as BetaReadAssignment]
+    mockStartBetaRead.mockRejectedValueOnce(new Error("Temporary failure"))
+
+    await renderPage()
+
+    const startButton = Array.from(document.body.querySelectorAll("button")).find((button) => button.textContent?.trim() === "Start")
+    await act(async () => startButton?.dispatchEvent(new MouseEvent("click", { bubbles: true })))
+    expect(container?.textContent).toContain("We could not confirm that action. Refresh assignments before trying again.")
   })
 })

@@ -3,7 +3,7 @@ import type { SceneOrderSaveState } from "@/components/reader/ManuscriptSceneOrd
 import type {
   ChapterVersion,
   ChapterVersionDetail,
-  NovelScene,
+  WorkspaceScene,
   WorkspaceSceneGroup,
 } from "@/types/book"
 
@@ -56,12 +56,12 @@ type ManuscriptLeftRailProps = {
   onCreateChapterSnapshot: () => void
   onCreateScene: () => void
   onDragSceneStart: (chapterNumber: number, sceneId: string, index: number) => void
-  onInsertSceneIntoDraft: (scene: NovelScene) => void
-  onOpenSceneEditor: (scene: NovelScene | null) => void
+  onInsertSceneIntoDraft: (scene: WorkspaceScene) => void
+  onOpenSceneEditor: (scene: WorkspaceScene | null) => void
   onPrefetchChapter: (chapterNumber: number) => void
   onPreviewChapterSnapshot: (versionId: string) => void
   onRemoveChapter: (chapterNumber: number) => void
-  onRemoveScene: (scene: NovelScene) => void
+  onRemoveScene: (scene: WorkspaceScene) => void
   onReorderScenesInChapter: (chapterNumber: number, sceneId: string, targetIndex: number) => void
   onReprocessChapter: (chapterNumber: number) => void
   onResetSceneDragState: () => void

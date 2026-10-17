@@ -86,10 +86,8 @@ function VerifyEmailInner() {
 
   return (
     <main>
-      <div className={`rounded-lg border p-8 ${
-        isDark ? "border-white/10 bg-white/5" : "border-white/80 bg-white/92"
-      }`}>
-        <div className="mb-6 text-center">
+      <div className={`border-y py-8 ${isDark ? "border-white/10" : "border-stone-200"}`}>
+        <div className="mb-6">
           <h1 className={`text-3xl font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>Verify your email</h1>
           <p className={`mt-2 text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>
             {token

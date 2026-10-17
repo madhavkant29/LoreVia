@@ -17,19 +17,34 @@ def _trusted_base_url() -> str:
 
 
 @pytest.mark.asyncio
-async def test_health_response_includes_hardened_security_headers():
+async def test_health_response_includes_hardened_security_headers(monkeypatch):
+    monkeypatch.setattr("app.main.settings.RELEASE_SHA", "A" * 40, raising=False)
     async with AsyncClient(
         transport=ASGITransport(app=app), base_url=_trusted_base_url()
     ) as client:
         response = await client.get("/health")
 
     assert response.status_code == 200
+    assert response.json()["release_sha"] == "a" * 40
     assert response.headers["x-frame-options"] == "DENY"
     assert response.headers["x-content-type-options"] == "nosniff"
     assert response.headers["referrer-policy"] == "strict-origin-when-cross-origin"
     assert response.headers["permissions-policy"] == PERMISSIONS_POLICY
     assert response.headers["content-security-policy"] == API_CONTENT_SECURITY_POLICY
     assert response.headers["strict-transport-security"] == HSTS_POLICY
+
+
+@pytest.mark.asyncio
+async def test_private_api_errors_are_not_shared_cacheable():
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url=_trusted_base_url()
+    ) as client:
+        response = await client.get("/api/v1/books")
+
+    assert response.status_code == 401
+    assert response.headers["cache-control"] == (
+        "private, no-store, no-cache, max-age=0, must-revalidate"
+    )
     assert response.headers["x-request-id"]
 
 

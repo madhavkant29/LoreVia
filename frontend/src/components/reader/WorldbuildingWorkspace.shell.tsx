@@ -1,6 +1,5 @@
 import { Skeleton } from "@/components/ui/Skeleton"
 
-import { MetricCard } from "./WorldbuildingWorkspace.components"
 import { panelClass } from "./WorldbuildingWorkspace.helpers"
 
 export function WorldbuildingMetricsStrip({
@@ -17,12 +16,19 @@ export function WorldbuildingMetricsStrip({
   openNoteCount: number
 }) {
   return (
-    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-      <MetricCard label="Active Docs" value={String(documentCount)} note="Separate from story chapters" accent="teal" isDark={isDark} />
-      <MetricCard label="Corpus Words" value={totalWorldWords.toLocaleString()} note="Live reference material" accent="blue" isDark={isDark} />
-      <MetricCard label="Extracted Lore" value={String(extractedElementCount)} note="Typed world elements" accent="violet" isDark={isDark} />
-      <MetricCard label="Open Notes" value={String(openNoteCount)} note="Saved cleanup backlog" accent="amber" isDark={isDark} />
-    </div>
+    <dl className={`flex flex-wrap border-y ${isDark ? "border-white/10" : "border-stone-200"}`}>
+      {[
+        ["Canon sources", String(documentCount)],
+        ["Source words", totalWorldWords.toLocaleString()],
+        ["Lore facts", String(extractedElementCount)],
+        ["Open cleanup", String(openNoteCount)],
+      ].map(([label, value], index) => (
+        <div key={label} className={`flex shrink-0 items-baseline gap-2 px-4 py-3 first:pl-0 ${index > 0 ? (isDark ? "border-l border-white/10" : "border-l border-stone-200") : ""}`}>
+          <dt className={`text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>{label}</dt>
+          <dd className={`text-sm font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>{value}</dd>
+        </div>
+      ))}
+    </dl>
   )
 }
 
@@ -36,7 +42,7 @@ export function WorldbuildingStatusMessage({
   if (!message) return null
 
   return (
-    <div className={`rounded-md border px-4 py-3 text-sm ${isDark ? "border-teal-400/20 bg-teal-500/10 text-teal-100" : "border-teal-200 bg-teal-50 text-teal-800"}`}>
+    <div role="status" className={`border-y px-1 py-3 text-sm ${isDark ? "border-white/10 text-slate-200" : "border-stone-200 text-stone-800"}`}>
       {message}
     </div>
   )

@@ -6,6 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps.auth import get_current_user
+from app.api.deps.feature_flags import require_reader_events_v2_enabled
 from app.core.database import get_db
 from app.core.redis import (
     get_book_cache_version,
@@ -18,6 +19,11 @@ from app.models.character import Character
 from app.models.intelligence import ChapterSummary
 from app.models.progress import ReadingProgress
 from app.schemas.books import BookEventsOut, CharacterEventOut, MajorEventOut
+from app.schemas.reader import ReaderEventPageOut
+from app.services.reader_event_service import (
+    InvalidReaderEventCursor,
+    list_reader_event_page,
+)
 from app.utils.billing_utils import require_author_access
 from app.utils.books.collaboration_access import (
     collaboration_allows_chapter,
@@ -193,6 +199,52 @@ async def get_reader_events(
     )
     all_events = _build_combined_events(major_events, character_events)
     return _paginated_events_response(all_events, limit, offset)
+
+
+@router.get(
+    "/{book_id}/events/v2",
+    response_model=ReaderEventPageOut,
+    dependencies=[Depends(require_reader_events_v2_enabled)],
+)
+async def get_reader_events_v2(
+    book_id: uuid.UUID,
+    chapter: int | None = Query(None),
+    limit: int = Query(50, ge=1, le=100),
+    cursor: str | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Read materialized reader events with a stable keyset cursor.
+
+    The v1 endpoint remains available while clients migrate; this path never
+    loads chapter summaries or character JSON into Python to page the result.
+    """
+
+    book = await db.get(Book, book_id)
+    if not book or book.user_id != current_user.id:
+        raise HTTPException(404)
+    require_author_access(current_user)
+
+    progress = await db.scalar(
+        select(ReadingProgress).where(
+            ReadingProgress.user_id == current_user.id,
+            ReadingProgress.book_id == book_id,
+        )
+    )
+    read_set = set(progress.chapters_read or []) if progress else set()
+    max_visible_chapter = chapter or (
+        max(read_set) if read_set else (progress.current_chapter if progress else 1)
+    )
+    try:
+        return await list_reader_event_page(
+            db,
+            book_id=book.id,
+            max_visible_chapter=int(max_visible_chapter),
+            limit=limit,
+            cursor=cursor,
+        )
+    except InvalidReaderEventCursor as exc:
+        raise HTTPException(400, str(exc)) from exc
 
 
 @router.get("/{book_id}/foreshadowing")

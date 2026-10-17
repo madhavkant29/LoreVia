@@ -78,7 +78,7 @@ describe("PublicUploadsPageClient", () => {
             public_slug: "ember-harbor",
             published_at: "2026-05-20T00:00:00Z",
             ranking: { surface: "creator_uploads", ranking_key: "most_popular", time_window: "monthly", position: 1, score: 90, label: "Most popular this month", supporting_note: "Weighted by recent reader activity, views, discussion, and interest.", primary_timestamp: "2026-05-20T00:00:00Z" },
-          } as any,
+          } as never,
         ]}
         initialRankingData={{
           items: [
@@ -96,7 +96,7 @@ describe("PublicUploadsPageClient", () => {
               public_slug: "ember-harbor",
               published_at: "2026-05-20T00:00:00Z",
               ranking: { surface: "creator_uploads", ranking_key: "most_popular", time_window: "monthly", position: 1, score: 90, label: "Most popular this month", supporting_note: "Weighted by recent reader activity, views, discussion, and interest.", primary_timestamp: "2026-05-20T00:00:00Z" },
-            } as any,
+            } as never,
           ],
           total: 1,
           page: 1,

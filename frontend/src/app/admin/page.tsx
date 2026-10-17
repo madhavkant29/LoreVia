@@ -7,10 +7,8 @@ import type {
   AdminAuditEvent,
   AdminBillingStatus,
   AdminContentReport,
-  AdminCreatorStrike,
   AdminMetrics,
   AdminPrincipal,
-  AdminPublicBookCreateOut,
   AdminPublicShare,
   AdminQueueDepth,
   AdminRateLimitState,
@@ -24,11 +22,20 @@ import type {
   AdminContributionMargin,
   AdminSupportIncident,
 } from "@/types/admin"
+import { AdminMetric, QueueDepthPanel, SubscriptionMetricsPanel } from "./adminPage.metrics"
 
 const SCOPE_OPTIONS: AdminScope[] = ["moderation_admin", "billing_admin", "super_admin"]
+type AdminArea = "overview" | "moderation" | "billing" | "reliability" | "access"
 
 function hasScope(session: AdminSession | null, scope: AdminScope) {
   return Boolean(session?.is_owner || session?.scopes.includes(scope))
+}
+
+function defaultAdminArea(session: AdminSession): AdminArea {
+  if (hasScope(session, "super_admin")) return "overview"
+  if (hasScope(session, "moderation_admin")) return "moderation"
+  if (hasScope(session, "billing_admin")) return "billing"
+  return session.is_owner ? "access" : "overview"
 }
 
 function formatDate(value?: string | null) {
@@ -71,29 +78,32 @@ export default function AdminPage() {
   const [incidents, setIncidents] = useState<AdminSupportIncident[]>([])
   const [message, setMessage] = useState<string | null>(null)
   const [notFound, setNotFound] = useState(false)
+  const [activeArea, setActiveArea] = useState<AdminArea>("overview")
   const [isPending, startTransition] = useTransition()
 
-  async function refreshAdminData(currentSession: AdminSession) {
+  async function loadAdminArea(currentSession: AdminSession, area: AdminArea) {
     const tasks: Promise<unknown>[] = []
-    if (hasScope(currentSession, "moderation_admin")) {
+    if (area === "moderation" && hasScope(currentSession, "moderation_admin")) {
       tasks.push(adminApi.publicShares().then(setPublicShares))
       tasks.push(adminApi.reports().then(setReports))
     }
-    if (hasScope(currentSession, "billing_admin")) {
+    if (area === "billing" && hasScope(currentSession, "billing_admin")) {
       tasks.push(adminApi.billingStatus().then(setBillingStatus))
       tasks.push(adminApi.refunds().then(setRefunds))
       tasks.push(adminApi.subscriptionMetrics().then(setSubscriptionMetrics))
     }
-    if (hasScope(currentSession, "super_admin")) {
+    if (area === "overview" && hasScope(currentSession, "super_admin")) {
       tasks.push(adminApi.metrics().then(setMetrics))
       tasks.push(adminApi.queueDepth().then(setQueueDepth))
+    }
+    if (area === "reliability" && hasScope(currentSession, "super_admin")) {
       tasks.push(adminApi.taskExecutions().then(setTaskExecutions))
       tasks.push(adminApi.operationsMetrics().then(setOperations))
       tasks.push(adminApi.aiQuality().then(setQuality))
       tasks.push(adminApi.contributionMargin().then(setMargin))
       tasks.push(adminApi.supportIncidents().then(setIncidents))
     }
-    if (currentSession.is_owner) {
+    if (area === "access" && currentSession.is_owner) {
       tasks.push(adminApi.access().then(setPrincipals))
       tasks.push(adminApi.audit().then(setAudit))
     }
@@ -107,7 +117,7 @@ export default function AdminPage() {
       .then(async (nextSession) => {
         if (cancelled) return
         setSession(nextSession)
-        await refreshAdminData(nextSession)
+        setActiveArea(defaultAdminArea(nextSession))
       })
       .catch(() => {
         if (!cancelled) setNotFound(true)
@@ -117,12 +127,19 @@ export default function AdminPage() {
     }
   }, [])
 
+  useEffect(() => {
+    if (!session) return
+    void loadAdminArea(session, activeArea).catch(() => {
+      setMessage("This admin area could not be refreshed.")
+    })
+  }, [activeArea, session])
+
   function runAction(action: () => Promise<unknown>, success: string) {
     startTransition(() => {
       action()
         .then(async () => {
           setMessage(success)
-          if (session) await refreshAdminData(session)
+          if (session) await loadAdminArea(session, activeArea)
         })
         .catch((error) => {
           setMessage(error?.response?.data?.detail ?? "Admin action failed.")
@@ -147,10 +164,10 @@ export default function AdminPage() {
 
   return (
     <main className="min-h-screen bg-[#f6f7f4] text-[#1c261f]">
-      <div className="mx-auto flex max-w-7xl flex-col gap-8 px-5 py-8">
+      <div className="mx-auto flex min-w-0 max-w-7xl flex-col gap-8 overflow-x-hidden px-5 py-8">
         <header className="flex flex-col gap-3 border-b border-[#d9dfd6] pb-6 md:flex-row md:items-end md:justify-between">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#657166]">LoreVia Admin</p>
+            <p className="text-sm font-semibold text-[#526056]">LoreVia administration</p>
             <h1 className="mt-2 text-3xl font-semibold">Operations Console</h1>
             <p className="mt-2 max-w-2xl text-sm leading-6 text-[#617065]">Moderation, billing, access, and audit review for protected operational workflows.</p>
           </div>
@@ -160,21 +177,34 @@ export default function AdminPage() {
           </div>
         </header>
 
-        <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <AdminMetric label="Publish reviews" value={String(publicShares.length)} />
-          <AdminMetric label="Content reports" value={String(reports.length)} />
-          <AdminMetric label="Refund reviews" value={String(refunds.length)} />
-          <AdminMetric label="Admin principals" value={String(principals.length)} />
-        </section>
+        <nav aria-label="Admin areas" className="flex min-w-0 max-w-full gap-1 overflow-x-auto border-b border-[#d9dfd6]">
+          {([
+            { id: "overview" as const, label: "Overview", visible: hasScope(session, "super_admin") },
+            { id: "moderation" as const, label: "Moderation", visible: hasScope(session, "moderation_admin") },
+            { id: "billing" as const, label: "Billing", visible: hasScope(session, "billing_admin") },
+            { id: "reliability" as const, label: "Reliability", visible: hasScope(session, "super_admin") },
+            { id: "access" as const, label: "Access & audit", visible: session.is_owner },
+          ]).filter((area) => area.visible).map((area) => (
+            <button
+              key={area.id}
+              type="button"
+              aria-current={activeArea === area.id ? "page" : undefined}
+              onClick={() => setActiveArea(area.id)}
+              className={`whitespace-nowrap border-b-2 px-4 py-3 text-sm font-semibold ${activeArea === area.id ? "border-[#1f615d] text-[#1f615d]" : "border-transparent text-[#617065] hover:text-[#1c261f]"}`}
+            >
+              {area.label}
+            </button>
+          ))}
+        </nav>
 
-        {hasScope(session, "super_admin") ? (
-          <section className="grid gap-6 lg:grid-cols-2">
+        {activeArea === "overview" && hasScope(session, "super_admin") ? (
+          <section className="grid min-w-0 gap-6 lg:grid-cols-2">
             <PlatformMetricsPanel metrics={metrics} />
             <QueueDepthPanel queueDepth={queueDepth} />
           </section>
         ) : null}
 
-        {hasScope(session, "super_admin") ? (
+        {activeArea === "reliability" && hasScope(session, "super_admin") ? (
           <RateLimitPanel
             disabled={isPending || session.requires_step_up}
             onLookup={(userId) => adminApi.getRateLimit(userId)}
@@ -184,7 +214,7 @@ export default function AdminPage() {
           />
         ) : null}
 
-        {hasScope(session, "super_admin") ? (
+        {activeArea === "reliability" && hasScope(session, "super_admin") ? (
           <ReliabilityPanel
             operations={operations}
             quality={quality}
@@ -205,29 +235,8 @@ export default function AdminPage() {
           <StepUpPanel onSubmit={(password) => runAction(() => adminApi.stepUp(password).then(() => adminApi.session().then(setSession)), "Admin verification complete.")} />
         ) : null}
 
-        {hasScope(session, "moderation_admin") && !session.requires_step_up ? (
-          <CreatorStrikePanel
-            disabled={isPending}
-            onSubmit={(userId, body) =>
-              runAction(() => adminApi.addStrike(userId, body), "Creator strike applied.")
-            }
-          />
-        ) : null}
-
-        {hasScope(session, "moderation_admin") && !session.requires_step_up ? (
-          <PublicDemoBookPanel
-            disabled={isPending}
-            onCreate={(body) =>
-              runAction(() => adminApi.createPublicDemoBook(body), "Public demo book created.")
-            }
-            onAppend={(bookId, body) =>
-              runAction(() => adminApi.appendPublicDemoChapter(bookId, body), "Chapter appended to demo book.")
-            }
-          />
-        ) : null}
-
-        <section className="grid gap-6 lg:grid-cols-[1.2fr_0.8fr]">
-          {hasScope(session, "moderation_admin") ? (
+        <section className="grid min-w-0 gap-6">
+          {activeArea === "moderation" && hasScope(session, "moderation_admin") ? (
             <ModerationPanel
               publicShares={publicShares}
               reports={reports}
@@ -241,7 +250,7 @@ export default function AdminPage() {
             />
           ) : null}
 
-          {hasScope(session, "billing_admin") ? (
+          {activeArea === "billing" && hasScope(session, "billing_admin") ? (
             <RefundPanel
               billingStatus={billingStatus}
               refunds={refunds}
@@ -257,7 +266,31 @@ export default function AdminPage() {
           ) : null}
         </section>
 
-        {hasScope(session, "billing_admin") ? (
+        {activeArea === "moderation" && hasScope(session, "moderation_admin") && !session.requires_step_up ? (
+          <div className="grid min-w-0 gap-3">
+            <details className="border border-[#d9dfd6] bg-white">
+              <summary className="cursor-pointer px-5 py-4 text-sm font-semibold">Creator enforcement action</summary>
+              <div className="border-t border-[#d9dfd6]">
+                <CreatorStrikePanel
+                  disabled={isPending}
+                  onSubmit={(userId, body) => runAction(() => adminApi.addStrike(userId, body), "Creator strike applied.")}
+                />
+              </div>
+            </details>
+            <details className="border border-[#d9dfd6] bg-white">
+              <summary className="cursor-pointer px-5 py-4 text-sm font-semibold">Public demo book editor</summary>
+              <div className="border-t border-[#d9dfd6]">
+                <PublicDemoBookPanel
+                  disabled={isPending}
+                  onCreate={(body) => runAction(() => adminApi.createPublicDemoBook(body), "Public demo book created.")}
+                  onAppend={(bookId, body) => runAction(() => adminApi.appendPublicDemoChapter(bookId, body), "Chapter appended to demo book.")}
+                />
+              </div>
+            </details>
+          </div>
+        ) : null}
+
+        {activeArea === "billing" && hasScope(session, "billing_admin") ? (
           <SubscriptionMetricsPanel
             metrics={subscriptionMetrics}
             disabled={isPending}
@@ -270,8 +303,8 @@ export default function AdminPage() {
           />
         ) : null}
 
-        {session.is_owner ? (
-          <section className="grid gap-6 lg:grid-cols-2">
+        {activeArea === "access" && session.is_owner ? (
+          <section className="grid min-w-0 gap-6 lg:grid-cols-2">
             <AccessPanel
               principals={principals}
               disabled={isPending || session.requires_step_up}
@@ -283,15 +316,6 @@ export default function AdminPage() {
         ) : null}
       </div>
     </main>
-  )
-}
-
-function AdminMetric({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-lg border border-[#d9dfd6] bg-white px-4 py-4">
-      <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#657166]">{label}</p>
-      <p className="mt-2 text-2xl font-semibold text-[#1c261f]">{value}</p>
-    </div>
   )
 }
 
@@ -332,65 +356,101 @@ function ModerationPanel({
 }) {
   const [bookId, setBookId] = useState("")
   const [reason, setReason] = useState("")
+  const [selectedShare, setSelectedShare] = useState<AdminPublicShare | null>(null)
+  const [selectedReport, setSelectedReport] = useState<AdminContentReport | null>(null)
+  const [showBookAction, setShowBookAction] = useState(false)
   return (
-    <section className="rounded-lg border border-[#d9dfd6] bg-white p-5">
-      <div className="flex items-center justify-between gap-3">
-        <h2 className="text-xl font-semibold">Moderation</h2>
-        <StatusBadge tone={publicShares.length || reports.length ? "warning" : "success"}>
-          {publicShares.length + reports.length} queued
-        </StatusBadge>
-      </div>
-      <div className="mt-4 space-y-3">
-        {publicShares.slice(0, 6).map((share) => (
-          <div key={share.book_id} className="rounded-md border border-[#edf0eb] bg-[#fbfcfa] p-3">
-            <div className="flex flex-wrap items-start justify-between gap-2">
-              <p className="font-medium">{share.title}</p>
-              <StatusBadge tone={share.copyright_warning ? "warning" : "neutral"}>
-                {share.copyright_warning ? "Copyright warning" : "Pending review"}
-              </StatusBadge>
-            </div>
-            <p className="mt-1 text-sm text-[#617065]">{share.author_username ?? share.user_id} / {formatDate(share.requested_at)}</p>
-            <p className="mt-1 text-xs text-[#7b877e]">Book ID: {share.book_id}</p>
-            <div className="mt-2 flex gap-2">
-              <button disabled={disabled} className="rounded-md border border-[#bdd5c1] bg-[#eff8f0] px-3 py-1 text-sm text-[#1f6b3a]" onClick={() => onReview(share.book_id, true)}>Approve</button>
-              <button disabled={disabled} className="rounded-md border border-[#e8c4c0] bg-[#fff3f1] px-3 py-1 text-sm text-[#a2382b]" onClick={() => onReview(share.book_id, false, "Rejected after moderation review.")}>Reject</button>
-            </div>
-          </div>
-        ))}
-        {publicShares.length === 0 ? <p className="text-sm text-[#617065]">No pending public shares.</p> : null}
-      </div>
-      <div className="mt-6 grid gap-3">
-        <label className="grid gap-1.5 text-sm font-medium text-[#46534a]">
-          Book ID
-          <input className="rounded-md border border-[#c9d2c8] px-3 py-2 text-sm font-normal text-[#1f2a22]" value={bookId} onChange={(event) => setBookId(event.target.value)} />
-        </label>
-        <label className="grid gap-1.5 text-sm font-medium text-[#46534a]">
-          Required reason
-          <textarea className="min-h-20 rounded-md border border-[#c9d2c8] px-3 py-2 text-sm font-normal text-[#1f2a22]" value={reason} onChange={(event) => setReason(event.target.value)} />
-        </label>
-        <div className="flex flex-wrap gap-2">
-          {(["hideBook", "removeBook", "restoreBook"] as const).map((action) => (
-            <button key={action} disabled={disabled || !bookId || !reason} className="rounded-md border border-[#d9dfd6] px-3 py-2 text-sm disabled:opacity-50" onClick={() => onBookAction(bookId, action, reason)}>
-              {action.replace("Book", "")}
-            </button>
-          ))}
+    <section className="min-w-0 overflow-hidden border border-[#d9dfd6] bg-white">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#d9dfd6] px-5 py-4">
+        <div>
+          <h2 className="text-xl font-semibold">Moderation</h2>
+          <p className="mt-1 text-sm text-[#617065]">Select a queued item to review its evidence and actions.</p>
+        </div>
+        <div className="flex items-center gap-3">
+          <StatusBadge tone={publicShares.length || reports.length ? "warning" : "success"}>{publicShares.length + reports.length} queued</StatusBadge>
+          <button type="button" className="border border-[#c9d2c8] px-3 py-2 text-sm font-semibold" onClick={() => setShowBookAction((value) => !value)}>
+            {showBookAction ? "Close manual action" : "Manual book action"}
+          </button>
         </div>
       </div>
-      <div className="mt-6">
-        <h3 className="text-sm font-semibold uppercase tracking-[0.12em] text-[#617065]">Reports</h3>
-        {reports.slice(0, 6).map((report) => (
-          <article key={report.id} className="mt-3 rounded-md border border-[#edf0eb] bg-[#fbfcfa] p-3 text-sm">
-            <div className="flex flex-wrap items-start justify-between gap-2">
-              <p className="font-medium">{report.report_type}: {report.reason}</p>
-              <StatusBadge tone={report.status === "open" ? "warning" : "neutral"}>{report.status}</StatusBadge>
+
+      {showBookAction ? (
+        <div className="grid gap-3 border-b border-[#d9dfd6] bg-[#fbfcfa] p-5 md:grid-cols-[1fr_2fr_auto] md:items-end">
+          <label className="grid gap-1.5 text-sm font-medium text-[#46534a]">Book ID
+            <input className="rounded-md border border-[#c9d2c8] px-3 py-2 text-sm font-normal text-[#1f2a22]" value={bookId} onChange={(event) => setBookId(event.target.value)} />
+          </label>
+          <label className="grid gap-1.5 text-sm font-medium text-[#46534a]">Required reason
+            <input className="rounded-md border border-[#c9d2c8] px-3 py-2 text-sm font-normal text-[#1f2a22]" value={reason} onChange={(event) => setReason(event.target.value)} />
+          </label>
+          <div className="flex flex-wrap gap-2">
+            {(["hideBook", "removeBook", "restoreBook"] as const).map((action) => (
+              <button key={action} disabled={disabled || !bookId || !reason} className="border border-[#d9dfd6] px-3 py-2 text-sm disabled:opacity-50" onClick={() => onBookAction(bookId, action, reason)}>{action.replace("Book", "")}</button>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
+      <div className="grid min-h-[20rem] lg:grid-cols-[minmax(0,1fr)_22rem]">
+        <div className="min-w-0">
+          <h3 className="border-b border-[#edf0eb] px-5 py-3 text-sm font-semibold">Public share requests</h3>
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[42rem] text-left text-sm">
+              <thead className="bg-[#f8faf7] text-xs text-[#617065]"><tr><th className="px-5 py-2 font-semibold">Title</th><th className="px-3 py-2 font-semibold">Author</th><th className="px-3 py-2 font-semibold">Requested</th><th className="px-3 py-2 font-semibold">Risk</th><th className="px-5 py-2 text-right font-semibold">Action</th></tr></thead>
+              <tbody className="divide-y divide-[#edf0eb]">
+                {publicShares.slice(0, 20).map((share) => (
+                  <tr key={share.book_id} className={selectedShare?.book_id === share.book_id ? "bg-[#f2f7f5]" : undefined}>
+                    <td className="px-5 py-3 font-medium">{share.title}<span className="block text-xs font-normal text-[#7b877e]">{share.book_id}</span></td>
+                    <td className="px-3 py-3 text-[#526056]">{share.author_username ?? share.user_id}</td>
+                    <td className="px-3 py-3 text-[#526056]">{formatDate(share.requested_at)}</td>
+                    <td className="px-3 py-3">{share.copyright_warning ? "Copyright warning" : "Standard review"}</td>
+                    <td className="px-5 py-3 text-right"><button type="button" className="font-semibold text-[#1f615d] underline underline-offset-4" onClick={() => { setSelectedShare(share); setSelectedReport(null) }}>Review</button></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {publicShares.length === 0 ? <p className="px-5 py-5 text-sm text-[#617065]">No pending public shares.</p> : null}
+
+          <h3 className="border-y border-[#edf0eb] px-5 py-3 text-sm font-semibold">Content reports</h3>
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[42rem] text-left text-sm">
+              <thead className="bg-[#f8faf7] text-xs text-[#617065]"><tr><th className="px-5 py-2 font-semibold">Report</th><th className="px-3 py-2 font-semibold">Book</th><th className="px-3 py-2 font-semibold">Reporter</th><th className="px-3 py-2 font-semibold">Status</th><th className="px-5 py-2 text-right font-semibold">Action</th></tr></thead>
+              <tbody className="divide-y divide-[#edf0eb]">
+                {reports.slice(0, 20).map((report) => (
+                  <tr key={report.id} className={selectedReport?.id === report.id ? "bg-[#f2f7f5]" : undefined}>
+                    <td className="px-5 py-3 font-medium">{report.report_type}: {report.reason}</td>
+                    <td className="px-3 py-3 text-[#526056]">{report.reported_book_id}</td>
+                    <td className="px-3 py-3 text-[#526056]">{report.reporter_email ?? report.reporter_user_id ?? "anonymous"}</td>
+                    <td className="px-3 py-3">{report.status}</td>
+                    <td className="px-5 py-3 text-right"><button type="button" className="font-semibold text-[#1f615d] underline underline-offset-4" onClick={() => { setSelectedReport(report); setSelectedShare(null) }}>View details</button></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {reports.length === 0 ? <p className="px-5 py-5 text-sm text-[#617065]">No open content reports.</p> : null}
+        </div>
+
+        <aside aria-label="Moderation review details" className="border-t border-[#d9dfd6] bg-[#fbfcfa] p-5 lg:border-l lg:border-t-0">
+          {selectedShare ? (
+            <div>
+              <p className="text-xs font-semibold text-[#617065]">Public share review</p>
+              <h3 className="mt-2 text-lg font-semibold">{selectedShare.title}</h3>
+              <p className="mt-3 text-sm leading-6 text-[#617065]">{selectedShare.public_description || "No public description supplied."}</p>
+              <dl className="mt-4 space-y-2 text-sm"><div><dt className="text-[#7b877e]">Author</dt><dd>{selectedShare.author_username ?? selectedShare.user_id}</dd></div><div><dt className="text-[#7b877e]">Book ID</dt><dd className="break-all">{selectedShare.book_id}</dd></div></dl>
+              <div className="mt-5 flex gap-2"><button disabled={disabled} className="border border-[#bdd5c1] px-3 py-2 text-sm font-semibold text-[#1f6b3a]" onClick={() => onReview(selectedShare.book_id, true)}>Approve</button><button disabled={disabled} className="border border-[#e8c4c0] px-3 py-2 text-sm font-semibold text-[#a2382b]" onClick={() => onReview(selectedShare.book_id, false, "Rejected after moderation review.")}>Reject</button></div>
             </div>
-            {report.details ? <p className="mt-2 leading-6 text-[#617065]">{report.details}</p> : null}
-            <p className="mt-2 text-xs text-[#7b877e]">
-              Book ID: {report.reported_book_id} / Reporter: {report.reporter_email ?? report.reporter_user_id ?? "anonymous"} / {formatDate(report.created_at)}
-            </p>
-          </article>
-        ))}
-        {reports.length === 0 ? <p className="mt-2 text-sm text-[#617065]">No open content reports.</p> : null}
+          ) : selectedReport ? (
+            <div>
+              <p className="text-xs font-semibold text-[#617065]">Content report</p>
+              <h3 className="mt-2 text-lg font-semibold">{selectedReport.reason}</h3>
+              <p className="mt-3 text-sm leading-6 text-[#617065]">{selectedReport.details ?? "No further details supplied."}</p>
+              <p className="mt-4 text-xs text-[#7b877e]">Filed {formatDate(selectedReport.created_at)}</p>
+            </div>
+          ) : (
+            <div><h3 className="font-semibold">Review details</h3><p className="mt-2 text-sm leading-6 text-[#617065]">Select a share request or report from the table.</p></div>
+          )}
+        </aside>
       </div>
     </section>
   )
@@ -409,15 +469,39 @@ function RefundPanel({
   onApprove: (reviewId: string, reason: string, providerFollowupOnly: boolean) => void
   onDeny: (reviewId: string, reason: string) => void
 }) {
+  const [selectedReview, setSelectedReview] = useState<AdminRefundReview | null>(null)
   return (
-    <section className="rounded-lg border border-[#d9dfd6] bg-white p-5">
-      <h2 className="text-xl font-semibold">Refunds</h2>
+    <section className="min-w-0 overflow-hidden border border-[#d9dfd6] bg-white">
+      <div className="border-b border-[#d9dfd6] px-5 py-4">
+        <h2 className="text-xl font-semibold">Refunds</h2>
+        <p className="mt-1 text-sm text-[#617065]">Review transaction history before recording a decision.</p>
+      </div>
       {billingStatus ? <BillingStatusPanel status={billingStatus} /> : null}
-      <div className="mt-4 space-y-4">
-        {refunds.slice(0, 8).map((review) => (
-          <RefundRow key={review.id} review={review} disabled={disabled} onApprove={onApprove} onDeny={onDeny} />
-        ))}
-        {refunds.length === 0 ? <p className="text-sm text-[#617065]">No refund reviews.</p> : null}
+      <div className="grid min-h-[18rem] lg:grid-cols-[minmax(0,1fr)_22rem]">
+        <div className="min-w-0 overflow-x-auto">
+          <table className="w-full min-w-[44rem] text-left text-sm">
+            <thead className="bg-[#f8faf7] text-xs text-[#617065]"><tr><th className="px-5 py-2 font-semibold">Transaction</th><th className="px-3 py-2 font-semibold">Plan</th><th className="px-3 py-2 font-semibold">Charged</th><th className="px-3 py-2 font-semibold">Status</th><th className="px-5 py-2 text-right font-semibold">Action</th></tr></thead>
+            <tbody className="divide-y divide-[#edf0eb]">
+              {refunds.slice(0, 30).map((review) => (
+                <tr key={review.id} className={selectedReview?.id === review.id ? "bg-[#f2f7f5]" : undefined}>
+                  <td className="px-5 py-3 font-medium">{review.paddle_transaction_id}<span className="block text-xs font-normal text-[#7b877e]">{review.id}</span></td>
+                  <td className="px-3 py-3 text-[#526056]">{review.plan_code} / {review.billing_interval}</td>
+                  <td className="px-3 py-3 text-[#526056]">{formatDate(review.charge_at)}</td>
+                  <td className="px-3 py-3">{review.status}</td>
+                  <td className="px-5 py-3 text-right"><button type="button" className="font-semibold text-[#1f615d] underline underline-offset-4" onClick={() => setSelectedReview(review)}>Review</button></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {refunds.length === 0 ? <p className="px-5 py-5 text-sm text-[#617065]">No refund reviews.</p> : null}
+        </div>
+        <aside aria-label="Refund review details" className="border-t border-[#d9dfd6] bg-[#fbfcfa] p-5 lg:border-l lg:border-t-0">
+          {selectedReview ? (
+            <RefundRow review={selectedReview} disabled={disabled} onApprove={onApprove} onDeny={onDeny} />
+          ) : (
+            <div><h3 className="font-semibold">Decision details</h3><p className="mt-2 text-sm leading-6 text-[#617065]">Select a refund request from the table.</p></div>
+          )}
+        </aside>
       </div>
     </section>
   )
@@ -425,37 +509,19 @@ function RefundPanel({
 
 function BillingStatusPanel({ status }: { status: AdminBillingStatus }) {
   return (
-    <div className="mt-4 rounded-md border border-[#edf0eb] bg-[#f8faf7] p-4 text-sm">
-      <div className="flex flex-wrap items-center gap-3">
-        <h3 className="font-semibold">Billing setup</h3>
+    <details className="border-b border-[#d9dfd6] bg-[#fbfcfa] text-sm">
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-4 px-5 py-3 font-semibold">
+        <span>Billing configuration · {status.fully_configured_plan_count} plans</span>
         <StatusBadge tone={status.payments_ready ? "success" : "warning"}>{status.payments_ready ? "Ready" : "Action required"}</StatusBadge>
+      </summary>
+      <div className="border-t border-[#edf0eb] px-5 py-4">
+        <p className="text-[#617065]">Recommended checkout URL: {status.recommended_default_checkout_url}</p>
+        {status.missing_configuration.length > 0 ? <p className="mt-2 text-[#9a3412]">Missing: {status.missing_configuration.join(", ")}</p> : <p className="mt-2 text-[#1f6b3a]">All required billing configuration values are present.</p>}
+        <div className="mt-4 overflow-x-auto">
+          <table className="w-full min-w-[36rem] text-left"><thead className="text-xs text-[#617065]"><tr><th className="py-2 pr-3">Plan</th><th className="px-3 py-2">Code</th><th className="px-3 py-2">Price</th><th className="py-2 pl-3">Configuration</th></tr></thead><tbody className="divide-y divide-[#e3e8e1]">{status.plans.map((plan) => <tr key={plan.code}><td className="py-2 pr-3 font-medium">{plan.display_name} {plan.billing_interval === "annual" ? "Annual" : "Monthly"}</td><td className="px-3 py-2 text-[#617065]">{plan.code}</td><td className="px-3 py-2">${plan.price_usd}/{plan.billing_interval === "annual" ? "year" : "mo"}</td><td className="py-2 pl-3">{plan.configured ? "Configured" : "Missing price ID"}</td></tr>)}</tbody></table>
+        </div>
       </div>
-      <p className="mt-2 text-[#617065]">
-        {status.fully_configured_plan_count} configured plans. Recommended checkout URL: {status.recommended_default_checkout_url}
-      </p>
-      {status.missing_configuration.length > 0 ? (
-        <p className="mt-2 text-[#9a3412]">Missing: {status.missing_configuration.join(", ")}</p>
-      ) : (
-        <p className="mt-2 text-[#1f6b3a]">All required billing configuration values are present.</p>
-      )}
-      <div className="mt-4 grid gap-2 sm:grid-cols-2">
-        {status.plans.map((plan) => (
-          <div key={plan.code} className="rounded-md border border-[#e3e8e1] bg-white px-3 py-2">
-            <div className="flex items-center justify-between gap-3">
-              <p className="font-medium">
-                {plan.display_name} {plan.billing_interval === "annual" ? "Annual" : "Monthly"}
-              </p>
-              <StatusBadge tone={plan.configured ? "success" : "warning"}>
-                {plan.configured ? "Configured" : "Missing price ID"}
-              </StatusBadge>
-            </div>
-            <p className="mt-1 text-[#617065]">
-              ${plan.price_usd}/{plan.billing_interval === "annual" ? "year" : "mo"} · {plan.code}
-            </p>
-          </div>
-        ))}
-      </div>
-    </div>
+    </details>
   )
 }
 
@@ -473,7 +539,8 @@ function RefundRow({
   const [reason, setReason] = useState("")
   const [providerFollowupOnly, setProviderFollowupOnly] = useState(false)
   return (
-    <div className="border-t border-[#edf0eb] pt-3">
+    <div>
+      <p className="text-xs font-semibold text-[#617065]">Refund decision</p>
       <p className="font-medium">{review.paddle_transaction_id}</p>
       <p className="text-sm text-[#617065]">{review.status} / {review.billing_interval} / {formatDate(review.charge_at)}</p>
       <label className="mt-2 grid gap-1.5 text-sm font-medium text-[#46534a]">
@@ -507,10 +574,14 @@ function AccessPanel({
   const [reason, setReason] = useState("")
   const [isOwner, setIsOwner] = useState(false)
   const [scopes, setScopes] = useState<AdminScope[]>(["moderation_admin"])
+  const [showGrantForm, setShowGrantForm] = useState(false)
   return (
-    <section className="rounded-lg border border-[#d9dfd6] bg-white p-5">
-      <h2 className="text-xl font-semibold">Admin Access</h2>
-      <div className="mt-4 grid gap-3">
+    <section className="min-w-0 overflow-hidden border border-[#d9dfd6] bg-white">
+      <div className="flex items-center justify-between gap-4 border-b border-[#d9dfd6] px-5 py-4">
+        <div><h2 className="text-xl font-semibold">Admin Access</h2><p className="mt-1 text-sm text-[#617065]">Active principals and scoped operational permissions.</p></div>
+        <button type="button" className="border border-[#1f615d] px-3 py-2 text-sm font-semibold text-[#1f615d]" onClick={() => setShowGrantForm((value) => !value)}>{showGrantForm ? "Close access form" : "Grant access"}</button>
+      </div>
+      {showGrantForm ? <div className="grid gap-3 border-b border-[#d9dfd6] bg-[#fbfcfa] p-5">
         <label className="grid gap-1.5 text-sm font-medium text-[#46534a]">
           User ID
           <input className="rounded-md border border-[#c9d2c8] px-3 py-2 text-sm font-normal text-[#1f2a22]" value={userId} onChange={(event) => setUserId(event.target.value)} />
@@ -538,17 +609,10 @@ function AccessPanel({
         <button disabled={disabled || !userId || !reason} className="rounded-md border border-[#1f615d] bg-[#1f615d] px-3 py-2 text-sm font-semibold text-white" onClick={() => onGrant({ user_id: userId, scopes, is_owner: isOwner, reason })}>
           Grant or update access
         </button>
-      </div>
-      <div className="mt-5 space-y-3">
-        {principals.map((principal) => (
-          <div key={principal.id} className="border-t border-[#edf0eb] pt-3 text-sm">
-            <p className="font-medium">{principal.user_id}</p>
-            <p className="text-[#617065]">{principal.status} / {principal.is_owner ? "owner" : principal.scopes.join(", ")}</p>
-            {principal.status === "active" ? (
-              <button disabled={disabled} className="mt-2 rounded-md border border-[#e8c4c0] bg-[#fff3f1] px-3 py-1 text-[#a2382b]" onClick={() => onRevoke(principal.id, "Owner revoked admin access.")}>Revoke</button>
-            ) : null}
-          </div>
-        ))}
+      </div> : null}
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[40rem] text-left text-sm"><thead className="bg-[#f8faf7] text-xs text-[#617065]"><tr><th className="px-5 py-2 font-semibold">Principal</th><th className="px-3 py-2 font-semibold">Access</th><th className="px-3 py-2 font-semibold">Status</th><th className="px-5 py-2 text-right font-semibold">Action</th></tr></thead><tbody className="divide-y divide-[#edf0eb]">{principals.map((principal) => <tr key={principal.id}><td className="px-5 py-3 font-medium">{principal.user_id}<span className="block text-xs font-normal text-[#7b877e]">{principal.id}</span></td><td className="px-3 py-3 text-[#526056]">{principal.is_owner ? "Owner" : principal.scopes.join(", ")}</td><td className="px-3 py-3">{principal.status}</td><td className="px-5 py-3 text-right">{principal.status === "active" ? <button disabled={disabled} className="font-semibold text-[#a2382b] underline underline-offset-4 disabled:opacity-50" onClick={() => onRevoke(principal.id, "Owner revoked admin access.")}>Revoke</button> : null}</td></tr>)}</tbody></table>
+        {principals.length === 0 ? <p className="px-5 py-5 text-sm text-[#617065]">No admin principals.</p> : null}
       </div>
     </section>
   )
@@ -556,15 +620,11 @@ function AccessPanel({
 
 function AuditPanel({ events }: { events: AdminAuditEvent[] }) {
   return (
-    <section className="rounded-lg border border-[#d9dfd6] bg-white p-5">
-      <h2 className="text-xl font-semibold">Audit</h2>
-      <div className="mt-4 space-y-3">
-        {events.map((event) => (
-          <div key={event.id} className="border-t border-[#edf0eb] pt-3 text-sm">
-            <p className="font-medium">{event.action_type} / {event.result}</p>
-            <p className="text-[#617065]">{event.reason ?? "No reason"} / {formatDate(event.created_at)}</p>
-          </div>
-        ))}
+    <section className="min-w-0 overflow-hidden border border-[#d9dfd6] bg-white">
+      <div className="border-b border-[#d9dfd6] px-5 py-4"><h2 className="text-xl font-semibold">Audit</h2><p className="mt-1 text-sm text-[#617065]">Recent protected operations and recorded reasons.</p></div>
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[40rem] text-left text-sm"><thead className="bg-[#f8faf7] text-xs text-[#617065]"><tr><th className="px-5 py-2 font-semibold">Action</th><th className="px-3 py-2 font-semibold">Result</th><th className="px-3 py-2 font-semibold">Reason</th><th className="px-5 py-2 font-semibold">Time</th></tr></thead><tbody className="divide-y divide-[#edf0eb]">{events.map((event) => <tr key={event.id}><td className="px-5 py-3 font-medium">{event.action_type}</td><td className="px-3 py-3">{event.result}</td><td className="px-3 py-3 text-[#526056]">{event.reason ?? "No reason"}</td><td className="px-5 py-3 text-[#526056]">{formatDate(event.created_at)}</td></tr>)}</tbody></table>
+        {events.length === 0 ? <p className="px-5 py-5 text-sm text-[#617065]">No audit events.</p> : null}
       </div>
     </section>
   )
@@ -1147,118 +1207,6 @@ function ReliabilityPanel({
           </div>
         ))}
       </div>
-    </section>
-  )
-}
-
-function QueueDepthPanel({ queueDepth }: { queueDepth: AdminQueueDepth | null }) {
-  if (!queueDepth) return null
-  const queues: { label: string; value: number }[] = [
-    { label: "Extraction", value: queueDepth.extraction },
-    { label: "Analysis", value: queueDepth.analysis },
-    { label: "Embedding", value: queueDepth.embedding },
-    { label: "Intelligence", value: queueDepth.intelligence },
-  ]
-  const max = Math.max(...queues.map((q) => q.value), 1)
-  return (
-    <section className="rounded-lg border border-[#d9dfd6] bg-white p-5">
-      <h2 className="text-xl font-semibold">Worker Queues</h2>
-      <div className="mt-4 space-y-3">
-        {queues.map((queue) => (
-          <div key={queue.label}>
-            <div className="flex items-center justify-between text-sm">
-              <span className="font-medium text-[#46534a]">{queue.label}</span>
-              <span className="text-[#617065]">{queue.value.toLocaleString()}</span>
-            </div>
-            <div className="mt-1 h-3 rounded-full bg-[#edf0eb]">
-              <div
-                className="h-3 rounded-full bg-[#1f615d] transition-all"
-                style={{ width: `${Math.min((queue.value / max) * 100, 100).toFixed(0)}%` }}
-              />
-            </div>
-          </div>
-        ))}
-      </div>
-    </section>
-  )
-}
-
-function SubscriptionMetricsPanel({
-  metrics,
-  disabled,
-  onRefresh,
-}: {
-  metrics: AdminSubscriptionMetrics | null
-  disabled: boolean
-  onRefresh: (startDate: string, endDate: string, reactivationWindow: number) => void
-}) {
-  const today = new Date().toISOString().slice(0, 10)
-  const thirtyDaysAgo = new Date(Date.now() - 29 * 86400000).toISOString().slice(0, 10)
-  const [startDate, setStartDate] = useState(thirtyDaysAgo)
-  const [endDate, setEndDate] = useState(today)
-  const [reactivationWindow, setReactivationWindow] = useState(30)
-
-  function formatRate(value: number | null | undefined): string {
-    if (value == null) return "—"
-    return `${(value * 100).toFixed(1)}%`
-  }
-
-  return (
-    <section className="rounded-lg border border-[#d9dfd6] bg-white p-5">
-      <h2 className="text-xl font-semibold">Subscription Metrics</h2>
-      <div className="mt-4 flex flex-wrap gap-3">
-        <label className="grid gap-1 text-sm font-medium text-[#46534a]">
-          Start
-          <input
-            type="date"
-            className="rounded-md border border-[#c9d2c8] px-3 py-2 text-sm font-normal text-[#1f2a22]"
-            value={startDate}
-            onChange={(event) => setStartDate(event.target.value)}
-          />
-        </label>
-        <label className="grid gap-1 text-sm font-medium text-[#46534a]">
-          End
-          <input
-            type="date"
-            className="rounded-md border border-[#c9d2c8] px-3 py-2 text-sm font-normal text-[#1f2a22]"
-            value={endDate}
-            onChange={(event) => setEndDate(event.target.value)}
-          />
-        </label>
-        <label className="grid gap-1 text-sm font-medium text-[#46534a]">
-          Reactivation window (days)
-          <input
-            type="number"
-            className="w-24 rounded-md border border-[#c9d2c8] px-3 py-2 text-sm font-normal text-[#1f2a22]"
-            value={reactivationWindow}
-            min={1}
-            max={365}
-            onChange={(event) => setReactivationWindow(Number(event.target.value))}
-          />
-        </label>
-        <button
-          disabled={disabled || !startDate || !endDate}
-          className="self-end rounded-md border border-[#1f615d] bg-[#1f615d] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
-          onClick={() => onRefresh(startDate, endDate, reactivationWindow)}
-        >
-          Refresh
-        </button>
-      </div>
-      {metrics ? (
-        <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          <AdminMetric label="Cohort" value={`${metrics.cohort_start} → ${metrics.cohort_end}`} />
-          <AdminMetric label="Trial Starts" value={metrics.trial_starts.toLocaleString()} />
-          <AdminMetric label="Trial → Paid" value={`${metrics.trial_to_paid_conversions.toLocaleString()} (${formatRate(metrics.trial_to_paid_rate)})`} />
-          <AdminMetric label="Cancellations" value={metrics.cancellation_events.toLocaleString()} />
-          <AdminMetric label="Resolved" value={metrics.resolved_cancellation_events.toLocaleString()} />
-          <AdminMetric label="Unresolved" value={metrics.unresolved_cancellation_events.toLocaleString()} />
-          <AdminMetric label="Reactivated" value={metrics.reactivated_after_cancellation.toLocaleString()} />
-          <AdminMetric label="Churned" value={metrics.churned_after_cancellation.toLocaleString()} />
-          <AdminMetric label="Churn Rate" value={formatRate(metrics.post_cancel_churn_rate)} />
-        </div>
-      ) : (
-        <p className="mt-4 text-sm text-[#617065]">Select a date range and refresh to load metrics.</p>
-      )}
     </section>
   )
 }

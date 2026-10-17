@@ -112,6 +112,9 @@ describe("PublicBookPageClient", () => {
     expect(view.textContent).toContain("1,234")
     expect(view.textContent).toContain("15,000")
     expect(view.textContent).toContain("This book has an active public discussion.")
+    expect(view.querySelector("[data-testid='public-book-masthead']")).not.toBeNull()
+    expect(view.querySelector('a[href="/public/atlas-rising/chapter/1"]')?.textContent).toContain("Start reading")
+    expect((view.querySelector("[data-testid='public-book-activity']") as HTMLDetailsElement).open).toBe(false)
     expect(view.querySelector('a[href="/public/atlas-rising/chapter/1"]')).not.toBeNull()
     expect(view.querySelector('a[href="/public/atlas-rising/chapter/2"]')?.textContent).toContain("Chapter 2")
     expect(view.querySelector("main")?.className).toContain("bg-[#0a0f14]")
@@ -142,7 +145,7 @@ describe("PublicBookPageClient", () => {
   })
 
   it("switches to a non-copyright report and closes the modal", async () => {
-    const view = await renderElement(<PublicBookPageClient bookId="book-1" />)
+    await renderElement(<PublicBookPageClient bookId="book-1" />)
     await clickButton("Report this book")
     const select = document.body.querySelector("select") as HTMLSelectElement
     await act(async () => {

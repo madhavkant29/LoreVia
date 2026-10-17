@@ -18,6 +18,7 @@ from app.models.intelligence import (
 from app.models.user import User
 from app.utils.characters import partitioning as character_partitioning
 from app.utils.characters.extraction import (
+    _entity_mentions_linked_in_text,
     cluster_character_entities,
     resolve_character_reference_from_roster,
 )
@@ -41,6 +42,14 @@ def test_name_similarity_scores_shared_surname_high():
 
 def test_name_similarity_rejects_unrelated_names():
     assert name_similarity("Meme Oshino", "Akane Kurokawa") < 0.5
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["Mara's sister met Jon at the gate.", "Mara’s sister met Jon at the gate."],
+)
+def test_family_role_relationship_evidence_accepts_straight_and_curly_apostrophes(text):
+    assert _entity_mentions_linked_in_text("Mara sister", "Jon", text) is True
 
 
 def test_name_similarity_does_not_collapse_conflicting_honorifics():
@@ -131,7 +140,7 @@ async def test_partition_payload_enrichment_only_swallows_expected_extractor_fai
         "mention_count": 1,
     }
 
-    async def _expected_extractor_failure(_text: str):
+    async def _expected_extractor_failure(_text: str, **_kwargs):
         raise RuntimeError("llm unavailable")
 
     monkeypatch.setattr(
@@ -143,6 +152,7 @@ async def test_partition_payload_enrichment_only_swallows_expected_extractor_fai
     payload = await character_partitioning._build_partition_payload(
         source=source,
         book_id=uuid.uuid4(),
+        user_id=uuid.uuid4(),
         name="Gregor",
         aliases=[],
         evidence=evidence,
@@ -151,7 +161,7 @@ async def test_partition_payload_enrichment_only_swallows_expected_extractor_fai
     assert payload["name"] == "Gregor"
     assert payload["personality_tags"] == []
 
-    async def _unexpected_extractor_bug(_text: str):
+    async def _unexpected_extractor_bug(_text: str, **_kwargs):
         raise AssertionError("extractor invariant")
 
     monkeypatch.setattr(
@@ -164,6 +174,7 @@ async def test_partition_payload_enrichment_only_swallows_expected_extractor_fai
         await character_partitioning._build_partition_payload(
             source=source,
             book_id=uuid.uuid4(),
+            user_id=uuid.uuid4(),
             name="Gregor",
             aliases=[],
             evidence=evidence,
@@ -794,6 +805,7 @@ async def test_partition_character_splits_record_and_reassigns_references(db, mo
     created = await partition_character(
         db,
         source=source,
+        user_id=user.id,
         partitions=[
             {"name": "Mr. Samsa", "aliases": []},
             {"name": "Mrs. Samsa", "aliases": []},

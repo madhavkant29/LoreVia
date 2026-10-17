@@ -2,187 +2,104 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
-import { useParams } from "next/navigation"
-
+import { useParams, useRouter } from "next/navigation"
+import Link from "next/link"
 import { booksApi } from "@/lib/api/books"
 import { intelligenceApi } from "@/lib/api/intelligence"
-import { buildDailyCapEventDetail } from "@/lib/limits/dailyCap"
 import { readerApi } from "@/lib/api/reader"
 import { asQueryKey, bookCacheKey, readerCacheKey } from "@/lib/query/cacheKeys"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
+import { normalizeBookRouteId } from "@/lib/utils/bookRoutes"
 import { capture } from "@/lib/analytics/posthog"
 import { AskLoreViaWorkspace } from "@/components/reader/AskLoreViaWorkspace"
-import { getAskLoreViaScopeLabel } from "@/lib/utils/askLoreVia"
-import type { Book } from "@/types/book"
-import type { GroundedCitation } from "@/types/intelligence"
-import type { ChapterListResponse, ReadingProgress } from "@/types/reader"
+import { getAskFailureMessage, getAskLoreViaScopeLabel, isAskChapter, parseRecentQuestions, type AskEntry } from "@/lib/utils/askLoreVia"
 
-const QUICK_PROMPTS = [
-  "When did this character last appear?",
-  "What is the relationship between Arthur and Guinevere?",
-  "Has this character used magic before?",
-  "Where was this plot thread introduced?",
-]
+const QUICK_PROMPTS = ["When did this character last appear?", "How has the relationship between these characters changed?", "Has this character used this ability before?", "Where was this plot thread introduced?"]
 const SAVED_QUESTIONS_KEY_PREFIX = "lorevia-ask-recent-questions:v1:"
-const SAVED_QUESTION_LIMIT = 6
-
-interface QAEntry {
-  question: string
-  answer: string
-  citations: GroundedCitation[]
-}
 
 export default function AskPage() {
   const { bookId } = useParams<{ bookId: string }>()
-  const { theme } = usePreferencesStore()
-  const isDark = theme === "dark"
+  return <AskWorkspace key={bookId} bookId={bookId} />
+}
 
+function AskWorkspace({ bookId }: { bookId: string }) {
+  const router = useRouter()
+  const { theme } = usePreferencesStore()
   const [input, setInput] = useState("")
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [history, setHistory] = useState<QAEntry[]>([])
+  const [history, setHistory] = useState<AskEntry[]>([])
   const [savedQuestions, setSavedQuestions] = useState<string[]>([])
-
+  const [storageError, setStorageError] = useState(false)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
-
-  const { data: book = null } = useQuery<Book>({
-    queryKey: asQueryKey(bookCacheKey(bookId, "detail")),
-    queryFn: () => booksApi.get(bookId),
-    staleTime: 20_000,
-  })
-  const { data: progress = null } = useQuery<ReadingProgress>({
-    queryKey: asQueryKey(readerCacheKey(bookId, "progress")),
-    queryFn: () => readerApi.getProgress(bookId),
-    staleTime: 12_000,
-  })
-  const { data: chapterList = null } = useQuery<ChapterListResponse>({
-    queryKey: asQueryKey(readerCacheKey(bookId, "chapters")),
-    queryFn: () => readerApi.getChapterList(bookId),
-    staleTime: 30_000,
-  })
-
-  const currentChapter = (() => {
-    if (book?.mode === "author") {
-      const processedChapters = (chapterList?.chapters ?? [])
-        .filter((chapter) => chapter.processed && chapter.intelligence_available !== false)
-        .map((chapter) => chapter.number)
-      return Math.max(1, ...(processedChapters.length > 0 ? processedChapters : [book.total_chapters ?? 1]))
-    }
-    return Math.max(1, progress?.current_chapter ?? 1)
-  })()
-
-  const scopeLabel = getAskLoreViaScopeLabel(book?.mode, currentChapter)
+  const activeRequest = useRef<AbortController | null>(null)
+  const storageKey = `${SAVED_QUESTIONS_KEY_PREFIX}${normalizeBookRouteId(bookId)}`
+  const book = useQuery({ queryKey: asQueryKey(bookCacheKey(bookId, "detail")), queryFn: () => booksApi.get(bookId), staleTime: 20_000 })
+  const progress = useQuery({ queryKey: asQueryKey(readerCacheKey(bookId, "progress")), queryFn: () => readerApi.getProgress(bookId), staleTime: 12_000, enabled: book.data?.mode === "reader" })
+  const currentChapter = isAskChapter(progress.data?.current_chapter) ? progress.data!.current_chapter : 0
+  const ready = book.data?.mode === "reader" && !!progress.data && currentChapter > 0 && !book.isError && !progress.isError
+  const scopeLabel = ready ? getAskLoreViaScopeLabel(book.data?.mode, currentChapter) : "Chapter context unavailable"
 
   useEffect(() => {
-    try {
-      const raw = window.localStorage.getItem(`${SAVED_QUESTIONS_KEY_PREFIX}${bookId}`)
-      const parsed = raw ? JSON.parse(raw) : []
-      setSavedQuestions(Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : [])
-    } catch {
-      setSavedQuestions([])
-    }
-  }, [bookId])
-
+    try { setSavedQuestions(parseRecentQuestions(window.localStorage.getItem(storageKey) ?? window.localStorage.getItem(`${SAVED_QUESTIONS_KEY_PREFIX}${bookId}`))) }
+    catch { setStorageError(true) }
+  }, [storageKey, bookId])
+  useEffect(() => () => { activeRequest.current?.abort(); activeRequest.current = null }, [])
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" })
-  }, [history, loading])
+    if (!input.trim() && !loading) return
+    const unload = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = "" }
+    const navigate = (event: MouseEvent) => {
+      if (event.target instanceof Element && event.target.closest("a[href]") && !window.confirm("Leave this question workspace? Your draft and any unfinished answer will be lost.")) { event.preventDefault(); event.stopPropagation() }
+    }
+    window.addEventListener("beforeunload", unload)
+    document.addEventListener("click", navigate, true)
+    return () => { window.removeEventListener("beforeunload", unload); document.removeEventListener("click", navigate, true) }
+  }, [input, loading])
+  useEffect(() => { if (book.data?.mode === "author") router.replace(`/${bookId}/advisor?mode=ask`) }, [book.data?.mode, bookId, router])
 
   const ask = useCallback(async (text: string) => {
     const question = text.trim()
-    if (!question || loading) return
-    setInput("")
-    setError(null)
-    setLoading(true)
-    setHistory((previous) => [
-      ...previous,
-      {
-        question,
-        answer: "",
-        citations: [],
-      },
-    ])
-    capture("ask_submitted", { book_id: bookId, chapter: currentChapter, question_len: question.length, mode: book?.mode ?? "reader" })
+    if (!question || activeRequest.current || !ready) return
+    if (input.trim() && input.trim() !== question && !window.confirm("Replace the question you are drafting with this retry?")) return
+    const controller = new AbortController()
+    activeRequest.current = controller
+    setInput(""); setError(null); setLoading(true)
+    setHistory((previous) => [...previous, { question, answer: "", citations: [], chapter: currentChapter, status: "streaming" }])
+    capture("ask_submitted", { book_id: bookId, chapter: currentChapter, question_len: question.length, mode: "reader" })
+    const update = (changes: Partial<AskEntry>, delta?: string) => {
+      if (activeRequest.current !== controller) return
+      setHistory((previous) => previous.map((entry, index) => index === previous.length - 1 ? { ...entry, ...changes, ...(delta ? { answer: entry.answer + delta } : {}) } : entry))
+    }
     try {
-      const response = await intelligenceApi.answerStream(bookId, question, currentChapter, {
-        onDelta: (content) => {
-          if (!content) return
-          setHistory((previous) => {
-            if (previous.length === 0) return previous
-            const last = previous[previous.length - 1]
-            return [
-              ...previous.slice(0, -1),
-              {
-                ...last,
-                answer: `${last.answer}${content}`,
-              },
-            ]
-          })
-        },
-      })
-      setHistory((previous) => {
-        if (previous.length === 0) return previous
-        const last = previous[previous.length - 1]
-        return [
-          ...previous.slice(0, -1),
-          {
-            ...last,
-            answer: response.answer,
-            citations: response.citations ?? [],
-          },
-        ]
-      })
-      setSavedQuestions((current) => {
-        const next = [question, ...current.filter((item) => item !== question)].slice(0, SAVED_QUESTION_LIMIT)
-        try {
-          window.localStorage.setItem(`${SAVED_QUESTIONS_KEY_PREFIX}${bookId}`, JSON.stringify(next))
-        } catch {
-          // Ignore unavailable localStorage.
-        }
+      const response = await intelligenceApi.answerStream(bookId, question, currentChapter, { signal: controller.signal, onDelta: (content) => { if (!controller.signal.aborted) update({}, content) } })
+      if (controller.signal.aborted) throw new Error("Stopped")
+      if (!response.answer?.trim()) throw new Error("Empty answer")
+      update({ answer: response.answer, citations: response.citations ?? [], status: "complete" })
+      if (activeRequest.current === controller) setSavedQuestions((current) => {
+        const next = [question, ...current.filter((item) => item !== question)].slice(0, 6)
+        try { window.localStorage.setItem(storageKey, JSON.stringify(next)) } catch { setStorageError(true) }
         return next
       })
     } catch (err: unknown) {
-      setHistory((previous) => previous.slice(0, -1))
-      const dailyCap = buildDailyCapEventDetail(err)
-      const message = err instanceof Error ? err.message : ""
-      if (dailyCap) {
-        setError("You reached today's question limit. Upgrade for more daily capacity or continue tomorrow.")
-      } else if (message.includes("429")) {
-        setError("Too many questions right now. Please try again in a bit.")
-      } else {
-        setError("Couldn't get an answer right now. Try again.")
-      }
+      if (activeRequest.current !== controller) return
+      const failure = getAskFailureMessage(err, controller.signal.aborted)
+      update({ status: controller.signal.aborted ? "stopped" : "failed", error: failure })
+      setInput(question); setError(failure)
     } finally {
-      setLoading(false)
-      setTimeout(() => inputRef.current?.focus(), 80)
+      if (activeRequest.current === controller) { activeRequest.current = null; setLoading(false) }
     }
-  }, [book?.mode, bookId, currentChapter, loading])
+  }, [bookId, currentChapter, ready, storageKey, input])
 
   const handleKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (event.key === "Enter" && !event.shiftKey) {
-      event.preventDefault()
-      ask(input)
-    }
+    if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void ask(input) }
   }
+  const clearRecent = () => {
+    try { window.localStorage.removeItem(storageKey); window.localStorage.removeItem(`${SAVED_QUESTIONS_KEY_PREFIX}${bookId}`); setSavedQuestions([]); setStorageError(false) }
+    catch { setStorageError(true) }
+  }
+  if (book.data?.mode === "author") return <main className="grid min-h-[50vh] place-items-center px-6" role="status"><p className="text-sm">Opening the manuscript question view in Story Advisor…</p></main>
 
-  return (
-    <AskLoreViaWorkspace
-      bookId={bookId}
-      bookTitle={book?.title}
-      mode={book?.mode}
-      currentChapter={currentChapter}
-      scopeLabel={scopeLabel}
-      history={history}
-      input={input}
-      loading={loading}
-      error={error}
-      isDark={isDark}
-      inputRef={inputRef}
-      bottomRef={bottomRef}
-      onInputChange={setInput}
-      onSubmit={ask}
-      onKeyDown={handleKeyDown}
-      quickPrompts={[...savedQuestions, ...QUICK_PROMPTS.filter((prompt) => !savedQuestions.includes(prompt))].slice(0, 6)}
-    />
-  )
+  const contextNotice = !book.data ? book.isError ? <div role="alert">Manuscript details could not be loaded. <button type="button" className="underline" disabled={book.isFetching} onClick={() => void book.refetch()}>Retry manuscript</button></div> : <p role="status">Loading manuscript context…</p> : book.isError ? <div role="alert">Manuscript access could not be refreshed. <button type="button" className="underline" disabled={book.isFetching} onClick={() => void book.refetch()}>Retry manuscript</button></div> : progress.isError ? <div role="alert">Reading progress could not be loaded. <button type="button" className="underline" disabled={progress.isFetching} onClick={() => void progress.refetch()}>Retry reading progress</button></div> : !progress.data ? <p role="status">Loading reading progress…</p> : !currentChapter ? <p>No reading chapter is available yet. <Link className="underline" href={`/${bookId}/chapters`}>Choose a chapter</Link> to establish your question context.</p> : null
+  return <AskLoreViaWorkspace bookId={bookId} bookTitle={book.data?.title} mode={book.data?.mode} currentChapter={currentChapter} scopeLabel={scopeLabel} history={history} input={input} loading={loading} error={error} isDark={theme === "dark"} inputRef={inputRef} bottomRef={bottomRef} onInputChange={setInput} onSubmit={ask} onKeyDown={handleKeyDown} quickPrompts={QUICK_PROMPTS} recentQuestions={savedQuestions} onClearRecent={clearRecent} storageError={storageError} contextNotice={contextNotice} disabled={!ready} onStop={() => activeRequest.current?.abort()} />
 }

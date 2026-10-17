@@ -17,6 +17,7 @@ from app.core.redis import (
     key_public_books,
     key_public_chapter,
     key_public_forum_cache_version,
+    mark_public_catalog_cache_dirty,
     mark_public_profile_cache_dirty,
 )
 from app.models.book import (
@@ -291,22 +292,9 @@ async def ensure_public_content_report_not_duplicate(
         )
 
 
-async def copyright_report_requires_temporary_hold(db: AsyncSession, *, book_id: uuid.UUID) -> bool:
-    distinct_reporters = (
-        await db.execute(
-            select(func.count(func.distinct(ContentReport.reporter_ip_hash))).where(
-                ContentReport.reported_book_id == book_id,
-                ContentReport.report_type == REPORT_TYPE_COPYRIGHT,
-                ContentReport.reporter_ip_hash.is_not(None),
-                ContentReport.created_at >= datetime.now(UTC) - timedelta(hours=24),
-            )
-        )
-    ).scalar_one()
-    return int(distinct_reporters or 0) >= 3
-
-
 async def invalidate_public_book_caches(book: Book) -> None:
     await cache_del(key_public_books())
+    await mark_public_catalog_cache_dirty()
     await cache_del(key_public_book_detail(str(book.id)))
     for chapter_number in range(1, int(getattr(book, "total_chapters", 0) or 0) + 1):
         await cache_del(key_public_chapter(str(book.id), chapter_number))

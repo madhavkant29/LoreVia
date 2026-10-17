@@ -11,19 +11,14 @@ describe("LibraryClient controls", () => {
         isDark={false}
         searchInputRef={createRef<HTMLInputElement>()}
         search="glass"
-        filterSummary="Filtered"
-        filterOpen
         modeFilter="author"
         statusFilter="ready"
         showArchived={false}
         sortBy="recent"
         viewMode="grid"
-        surfaceClass="surface"
         controlClass="control"
         mutedText="muted"
-        headingText="heading"
         onSearchChange={vi.fn()}
-        onFilterToggle={vi.fn()}
         onModeFilterChange={vi.fn()}
         onStatusFilterChange={vi.fn()}
         onShowArchivedToggle={vi.fn()}
@@ -33,11 +28,10 @@ describe("LibraryClient controls", () => {
     )
 
     expect(markup).toContain("Search projects")
-    expect(markup).toContain("Filtered")
     expect(markup).toContain("Project mode")
     expect(markup).toContain("Ready")
     expect(markup).toContain("Recently updated")
-    expect(markup).toContain("Grid")
-    expect(markup).toContain("List")
+    expect(markup).toContain("Grid view")
+    expect(markup).toContain("List view")
   })
 })

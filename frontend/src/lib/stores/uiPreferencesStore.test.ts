@@ -53,6 +53,23 @@ beforeEach(() => {
 })
 
 describe("ui preferences store isolation and replay", () => {
+  it("reports an unavailable book load when no account is active", async () => {
+    expect(await useUiPreferencesStore.getState().hydrateBook("book-1")).toBe(false)
+    expect(api.getBook).not.toHaveBeenCalled()
+  })
+
+  it("does not confirm a book load belonging to a previous account", async () => {
+    api.getGlobal.mockResolvedValue(defaultUserUiPreference("standard"))
+    await useUiPreferencesStore.getState().hydrateForUser("user-a")
+    const request = deferred<ReturnType<typeof defaultBookUiPreference>>()
+    api.getBook.mockReturnValue(request.promise)
+    const pending = useUiPreferencesStore.getState().hydrateBook("book-1")
+    useUiPreferencesStore.getState().clearActiveUser()
+    request.resolve(defaultBookUiPreference("book-1"))
+    expect(await pending).toBe(false)
+    expect(useUiPreferencesStore.getState().bookPreferences).toEqual({})
+  })
+
   it("rejects malformed caches and canonicalizes valid book keys", () => {
     expect(parseUiPreferenceCache("{broken")).toBeNull()
     expect(parseUiPreferenceCache(JSON.stringify({ preferences: { schema_version: 99 } }))).toBeNull()
@@ -95,11 +112,30 @@ describe("ui preferences store isolation and replay", () => {
       revision: 3,
     })
     await useUiPreferencesStore.getState().hydrateForUser("user-a")
-    await useUiPreferencesStore.getState().hydrateBook("draft--11111111-1111-4111-8111-111111111111")
+    expect(await useUiPreferencesStore.getState().hydrateBook("draft--11111111-1111-4111-8111-111111111111")).toBe(true)
 
     expect(api.getBook).toHaveBeenCalledWith("11111111-1111-4111-8111-111111111111")
     expect(useUiPreferencesStore.getState().bookPreferences["11111111-1111-4111-8111-111111111111"]?.revision).toBe(3)
     expect(useUiPreferencesStore.getState().bookPreferences["draft--11111111-1111-4111-8111-111111111111"]).toBeUndefined()
+  })
+
+  it("falls back to focused book preferences when uncached preference hydration fails", async () => {
+    const global = deferred<ReturnType<typeof defaultUserUiPreference>>()
+    api.getGlobal.mockReturnValueOnce(global.promise)
+    api.getBook.mockRejectedValueOnce(new Error("offline"))
+
+    const userHydration = useUiPreferencesStore.getState().hydrateForUser("user-a")
+    expect(await useUiPreferencesStore.getState().hydrateBook("book-1")).toBe(false)
+
+    expect(useUiPreferencesStore.getState().bookPreferences["book-1"]?.book_preset).toBe("draft")
+
+    global.reject(new Error("offline"))
+    await userHydration
+
+    expect(useUiPreferencesStore.getState().preferences.complexity_mode).toBe("focused")
+    expect(useUiPreferencesStore.getState().bookPreferences["book-1"]?.book_preset).toBe("draft")
+    expect(useUiPreferencesStore.getState().syncState).toBe("api_unavailable")
+    expect(useUiPreferencesStore.getState().syncMessage).toBe("Using the focused layout until preferences load.")
   })
 
   it("retains failed offline operations and clears them only after retry succeeds", async () => {

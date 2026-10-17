@@ -23,10 +23,13 @@ from app.core.events import on_shutdown, on_startup
 from app.utils.exception_boundaries import HTTP_LAST_RESORT_EXCEPTIONS
 from app.utils.logging.errors import (
     public_error_message,
+    redact_sensitive_text,
     request_log_context,
     sanitize_validation_errors,
     scrub_sentry_event,
 )
+from app.utils.observability_metrics import begin_operation_metrics, finish_operation_metrics
+from app.utils.release_utils import normalize_release_sha
 from app.utils.security_utils import apply_security_headers
 from app.utils.tunnel.cloudflare import CloudflareTunnelMiddleware
 
@@ -38,8 +41,10 @@ if settings.SENTRY_DSN and not settings.DEBUG:
             CeleryIntegration(),
         ],
         before_send=scrub_sentry_event,
-        traces_sample_rate=0.1,
-        profiles_sample_rate=0.1,
+        release=normalize_release_sha(settings.RELEASE_SHA),
+        environment=settings.DEPLOYMENT_ENV,
+        traces_sample_rate=settings.SENTRY_API_TRACES_SAMPLE_RATE,
+        profiles_sample_rate=settings.SENTRY_API_PROFILES_SAMPLE_RATE,
     )
 from app.utils.logging.logger import configure_logging, get_logger
 
@@ -50,11 +55,28 @@ log = get_logger("lorevia.http")
 _CORS_OPTIONS = cors_middleware_options()
 _CORS_ALLOW_ORIGINS = {str(origin) for origin in _CORS_OPTIONS.get("allow_origins", [])}
 _CORS_ALLOW_CREDENTIALS = bool(_CORS_OPTIONS.get("allow_credentials"))
+_PRIVATE_API_CACHE_CONTROL = b"private, no-store, no-cache, max-age=0, must-revalidate"
 _CORS_ALLOW_ORIGIN_REGEX = (
     re.compile(str(pattern))
     if isinstance((pattern := _CORS_OPTIONS.get("allow_origin_regex")), str) and pattern
     else None
 )
+_OBSERVED_READ_PATH_MARKERS = (
+    "/notifications",
+    "/books",
+    "/public",
+    "/search",
+    "/world-building",
+    "/conversations",
+    "/messages",
+    "/stats",
+    "/analytics",
+    "/jobs",
+)
+
+
+def _is_observed_read_path(path: str) -> bool:
+    return any(marker in path for marker in _OBSERVED_READ_PATH_MARKERS)
 
 
 def _cors_failure_headers(origin: str | None) -> list[tuple[bytes, bytes]]:
@@ -214,13 +236,24 @@ class SecurityHeadersMiddleware:
         set_request_id(request_id)
         set_request_user_id(None)
         started_at = time.perf_counter()
+        metrics_token = begin_operation_metrics()
         response_started = False
+        response_status = 500
+        response_size_bytes = 0
 
         async def send_with_headers(message):
-            nonlocal response_started
+            nonlocal response_size_bytes, response_started, response_status
             if message["type"] == "http.response.start":
                 response_started = True
+                response_status = int(message.get("status") or 500)
                 raw_headers: list[tuple[bytes, bytes]] = message.get("headers", [])
+                is_api_response = (
+                    str(scope.get("path") or "").startswith(f"{settings.API_V1_PREFIX}/")
+                    or str(scope.get("path") or "") == settings.API_V1_PREFIX
+                )
+                has_cache_control = any(
+                    name.lower() == b"cache-control" for name, _value in raw_headers
+                )
                 security_overrides = apply_security_headers(
                     {},
                     request_id=request_id,
@@ -243,7 +276,11 @@ class SecurityHeadersMiddleware:
                 for sec_name, sec_value in security_overrides.items():
                     if sec_name not in applied:
                         preserved.append((sec_name, sec_value))
+                if is_api_response and not has_cache_control:
+                    preserved.append((b"cache-control", _PRIVATE_API_CACHE_CONTROL))
                 message["headers"] = preserved
+            elif message["type"] == "http.response.body":
+                response_size_bytes += len(message.get("body") or b"")
             await send(message)
 
         try:
@@ -254,7 +291,7 @@ class SecurityHeadersMiddleware:
                 extra={
                     "request_id": request_id,
                     "method": scope.get("method"),
-                    "path": scope.get("path"),
+                    "path": redact_sensitive_text(str(scope.get("path") or "")),
                 },
             )
             # If response hasn't started, send a 500 error response
@@ -282,14 +319,23 @@ class SecurityHeadersMiddleware:
                 raise
 
         duration_ms = round((time.perf_counter() - started_at) * 1000, 2)
-        if settings.DEBUG or duration_ms >= settings.SLOW_REQUEST_LOG_MS:
+        path = str(scope.get("path") or "")
+        operation_metrics = finish_operation_metrics(metrics_token)
+        if (
+            settings.DEBUG
+            or duration_ms >= settings.SLOW_REQUEST_LOG_MS
+            or _is_observed_read_path(path)
+        ):
             log.info(
                 "request_complete",
                 extra={
                     "request_id": request_id,
                     "method": scope.get("method"),
-                    "path": scope.get("path"),
+                    "path": redact_sensitive_text(path),
+                    "status_code": response_status,
                     "duration_ms": duration_ms,
+                    "response_size_bytes": response_size_bytes,
+                    **operation_metrics,
                 },
             )
         set_request_id(None)
@@ -312,7 +358,12 @@ app.openapi = _openapi_schema  # type: ignore[method-assign]
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "app": "LoreVia", "version": "2.0.0"}
+    return {
+        "status": "ok",
+        "app": "LoreVia",
+        "version": "2.0.0",
+        "release_sha": normalize_release_sha(settings.RELEASE_SHA),
+    }
 
 
 @app.get("/ready")

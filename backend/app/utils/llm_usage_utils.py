@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import math
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -20,10 +21,27 @@ from app.core.database import AsyncSessionLocal
 from app.models.user import LlmUsageEvent, User
 from app.parsers.chunker import count_tokens
 from app.utils.billing_utils import ARCHITECT_TIER, AUTHOR_TIER, billing_access_tier
+from app.utils.logging.errors import public_error_message
 from app.utils.request_context import get_request_id, get_request_user_id
 
 log = logging.getLogger("lorevia.llm_usage")
-LLM_PROVIDER_CALL_EXCEPTIONS = (OpenAIError, httpx.HTTPError, TimeoutError, RuntimeError)
+LLM_PROVIDER_CALL_EXCEPTIONS = (
+    OpenAIError,
+    httpx.HTTPError,
+    TimeoutError,
+    RuntimeError,
+)
+CUSTOMER_BILLING_SCOPE = "customer"
+SYSTEM_BILLING_SCOPE = "system"
+PROCESSING_FEATURE_PREFIXES = (
+    "chapter_",
+    "character_",
+    "extraction_",
+    "initial_ingestion",
+    "manual_reprocess",
+    "plot_thread_",
+    "reader_recall",
+)
 
 
 @dataclass(frozen=True)
@@ -32,6 +50,10 @@ class LlmUsageSummary:
     prompt_tokens: int = 0
     completion_tokens: int = 0
     total_tokens: int = 0
+    ai_interactive_available: bool = True
+    ai_processing_available: bool = True
+    ai_capacity_usage_percent: int = 0
+    ai_capacity_resets_at: datetime | None = None
 
 
 @dataclass(frozen=True)
@@ -82,12 +104,25 @@ def is_llm_call_error(exc: BaseException) -> bool:
 
 def is_retryable_llm_call_error(exc: BaseException) -> bool:
     """Identify failures that should be retried at one provider call, not at task level."""
-    if is_transient_llm_provider_error(exc):
-        return True
-    if not isinstance(exc, HTTPException) or exc.status_code not in {429, 503}:
-        return False
-    message = " ".join(str(exc.detail or "").lower().split())
-    return "llm capacity" in message or "llm coordination" in message
+    return is_transient_llm_provider_error(exc)
+
+
+def public_llm_http_error_message(exc: HTTPException) -> str:
+    """Preserve safe AI allowance messages while hiding unrelated HTTP details."""
+
+    detail = exc.detail
+    if isinstance(detail, dict) and detail.get("kind") in {
+        "llm_attribution",
+        "llm_budget",
+        "llm_configuration",
+        "llm_tokens",
+    }:
+        message = detail.get("message") or detail.get("detail")
+        if message:
+            return str(message)
+    if isinstance(detail, str) and detail.lower().startswith("llm "):
+        return detail
+    return public_error_message(exc.status_code)
 
 
 def _coerce_uuid(value: object | None) -> uuid.UUID | None:
@@ -101,7 +136,9 @@ def _coerce_uuid(value: object | None) -> uuid.UUID | None:
         return None
 
 
-def _usage_counts(response: ChatCompletion | CreateEmbeddingResponse) -> tuple[int, int, int]:
+def _usage_counts(
+    response: ChatCompletion | CreateEmbeddingResponse,
+) -> tuple[int, int, int]:
     usage = getattr(response, "usage", None)
     if usage is None:
         return 0, 0, 0
@@ -129,7 +166,7 @@ def _message_content_text(content: Any) -> str:
     return str(content)
 
 
-def estimate_chat_completion_tokens(kwargs: dict[str, Any]) -> int:
+def estimate_chat_completion_token_parts(kwargs: dict[str, Any]) -> tuple[int, int]:
     messages = kwargs.get("messages") or []
     prompt_parts: list[str] = []
     if isinstance(messages, list):
@@ -141,8 +178,14 @@ def estimate_chat_completion_tokens(kwargs: dict[str, Any]) -> int:
                 prompt_parts.append(str(message))
     else:
         prompt_parts.append(str(messages))
-    prompt_tokens = count_tokens("\n".join(prompt_parts))
+    raw_prompt_tokens = count_tokens("\n".join(prompt_parts))
+    prompt_tokens = max(math.ceil(raw_prompt_tokens * 1.10) + 16, 1)
     completion_tokens = int(kwargs.get("max_tokens") or kwargs.get("max_completion_tokens") or 1000)
+    return prompt_tokens, max(completion_tokens, 0)
+
+
+def estimate_chat_completion_tokens(kwargs: dict[str, Any]) -> int:
+    prompt_tokens, completion_tokens = estimate_chat_completion_token_parts(kwargs)
     return max(prompt_tokens + completion_tokens, 1)
 
 
@@ -151,6 +194,43 @@ def estimate_embedding_tokens(kwargs: dict[str, Any]) -> int:
     if isinstance(input_value, list):
         return max(sum(count_tokens(str(item or "")) for item in input_value), 1)
     return max(count_tokens(str(input_value or "")), 1)
+
+
+def llm_budget_class_for_feature(feature: str) -> str:
+    normalized = str(feature or "").strip().lower()
+    if normalized.startswith(PROCESSING_FEATURE_PREFIXES):
+        return "processing"
+    return "interactive"
+
+
+def _resolved_usage_user_id(
+    user_id: uuid.UUID | None,
+    *,
+    billing_scope: str,
+) -> uuid.UUID | None:
+    resolved = _coerce_uuid(user_id or get_request_user_id())
+    if resolved is not None:
+        return resolved
+    if billing_scope == SYSTEM_BILLING_SCOPE:
+        return None
+    log.error("llm_usage_attribution_missing billing_scope=%s", billing_scope)
+    raise HTTPException(
+        503,
+        {
+            "kind": "llm_attribution",
+            "message": "AI processing is temporarily unavailable because account attribution is missing.",
+        },
+    )
+
+
+def resolve_llm_usage_attribution(
+    user_id: uuid.UUID | None,
+    *,
+    billing_scope: str = CUSTOMER_BILLING_SCOPE,
+) -> uuid.UUID | None:
+    """Validate customer attribution even when a provider call is skipped or cached."""
+
+    return _resolved_usage_user_id(user_id, billing_scope=billing_scope)
 
 
 def llm_token_caps_for_user(user: Any) -> LlmTokenCaps:
@@ -210,7 +290,13 @@ async def assert_llm_token_capacity(
 ) -> LlmTokenCaps:
     resolved_user_id = _coerce_uuid(user_id or getattr(user, "id", None) or get_request_user_id())
     if resolved_user_id is None:
-        return LlmTokenCaps(five_hour=0, weekly=0, monthly=0)
+        raise HTTPException(
+            503,
+            {
+                "kind": "llm_attribution",
+                "message": "AI processing is temporarily unavailable because account attribution is missing.",
+            },
+        )
     resolved_user = user
     if resolved_user is None:
         resolved_user = await db.get(User, resolved_user_id)
@@ -220,28 +306,78 @@ async def assert_llm_token_capacity(
     current = now or datetime.now(UTC)
     if current.tzinfo is None:
         current = current.replace(tzinfo=UTC)
+    requested_tokens = max(int(estimated_tokens or 0), 0)
     windows = (
-        ("5-hour", current - timedelta(hours=5), caps.five_hour),
-        ("weekly", current - timedelta(days=7), caps.weekly),
-        ("monthly", current - timedelta(days=30), caps.monthly),
+        ("5-hour", timedelta(hours=5), caps.five_hour),
+        ("weekly", timedelta(days=7), caps.weekly),
+        ("monthly", timedelta(days=30), caps.monthly),
     )
-    for label, started_at, limit in windows:
-        used = int(
-            (
-                await db.execute(
-                    select(func.coalesce(func.sum(LlmUsageEvent.total_tokens), 0)).where(
-                        LlmUsageEvent.user_id == resolved_user_id,
-                        LlmUsageEvent.created_at >= started_at,
-                    )
+    oldest_window_start = current - timedelta(days=30)
+    usage_rows = list(
+        (
+            await db.execute(
+                select(LlmUsageEvent.created_at, LlmUsageEvent.total_tokens)
+                .where(
+                    LlmUsageEvent.user_id == resolved_user_id,
+                    LlmUsageEvent.created_at >= oldest_window_start,
                 )
-            ).scalar()
-            or 0
-        )
-        if used + max(int(estimated_tokens or 0), 0) > limit:
-            raise HTTPException(
-                429,
-                f"{limit_subject} token limit exceeded for the {label} window.",
+                .order_by(LlmUsageEvent.created_at.asc())
             )
+        ).all()
+    )
+    blocked_windows: list[dict[str, Any]] = []
+    for label, duration, limit in windows:
+        started_at = current - duration
+        active_rows = [row for row in usage_rows if row.created_at >= started_at]
+        used = sum(max(int(row.total_tokens or 0), 0) for row in active_rows)
+        if used + requested_tokens <= limit:
+            continue
+
+        next_resume_at: datetime | None = None
+        if requested_tokens <= limit:
+            tokens_to_expire = used + requested_tokens - limit
+            expired_tokens = 0
+            for row in active_rows:
+                expired_tokens += max(int(row.total_tokens or 0), 0)
+                if expired_tokens >= tokens_to_expire:
+                    created_at = row.created_at
+                    if created_at.tzinfo is None:
+                        created_at = created_at.replace(tzinfo=UTC)
+                    next_resume_at = created_at + duration + timedelta(seconds=1)
+                    break
+        blocked_windows.append(
+            {
+                "window": label,
+                "used_tokens": used,
+                "token_limit": limit,
+                "next_resume_at": next_resume_at,
+            }
+        )
+
+    if blocked_windows:
+        resumable_at = [
+            item["next_resume_at"]
+            for item in blocked_windows
+            if isinstance(item.get("next_resume_at"), datetime)
+        ]
+        auto_resume = len(resumable_at) == len(blocked_windows)
+        next_resume_at = max(resumable_at) if auto_resume and resumable_at else None
+        labels = [str(item["window"]) for item in blocked_windows]
+        window_label = labels[0] if len(labels) == 1 else ", ".join(labels)
+        message = f"{limit_subject} token limit exceeded for the {window_label} window."
+        raise HTTPException(
+            429,
+            {
+                "kind": "llm_tokens",
+                "message": message,
+                "detail": message,
+                "window": window_label,
+                "windows": labels,
+                "next_resume_at": (next_resume_at.isoformat() if next_resume_at else None),
+                "auto_resume": auto_resume,
+                "permanent": not auto_resume,
+            },
+        )
     return caps
 
 
@@ -254,7 +390,13 @@ async def assert_llm_token_capacity_for_request(
 ) -> LlmTokenCaps:
     resolved_user_id = _coerce_uuid(user_id or get_request_user_id())
     if resolved_user_id is None:
-        return LlmTokenCaps(five_hour=0, weekly=0, monthly=0)
+        raise HTTPException(
+            503,
+            {
+                "kind": "llm_attribution",
+                "message": "AI processing is temporarily unavailable because account attribution is missing.",
+            },
+        )
     if db is not None:
         return await assert_llm_token_capacity(
             db,
@@ -283,8 +425,9 @@ async def record_llm_usage_event(
     provider: str = "openai",
     cached: bool = False,
     metadata: dict[str, Any] | None = None,
+    billing_scope: str = CUSTOMER_BILLING_SCOPE,
 ) -> None:
-    resolved_user_id = user_id or get_request_user_id()
+    resolved_user_id = _resolved_usage_user_id(user_id, billing_scope=billing_scope)
     if resolved_user_id is None:
         return
 
@@ -327,8 +470,9 @@ async def record_llm_usage_counts(
     provider: str = "openai",
     cached: bool = False,
     metadata: dict[str, Any] | None = None,
+    billing_scope: str = CUSTOMER_BILLING_SCOPE,
 ) -> None:
-    resolved_user_id = user_id or get_request_user_id()
+    resolved_user_id = _resolved_usage_user_id(user_id, billing_scope=billing_scope)
     if resolved_user_id is None:
         return
 
@@ -362,34 +506,57 @@ async def create_tracked_chat_completion(
     feature: str,
     model: str,
     db: AsyncSession | None = None,
-    user_id: uuid.UUID | None = None,
+    user_id: uuid.UUID | None,
     book_id: uuid.UUID | None = None,
     metadata: dict[str, Any] | None = None,
+    budget_class: str | None = None,
+    billing_scope: str = CUSTOMER_BILLING_SCOPE,
     **kwargs: Any,
 ) -> ChatCompletion:
-    resolved_user_id = _coerce_uuid(user_id or get_request_user_id())
+    resolved_user_id = _resolved_usage_user_id(user_id, billing_scope=billing_scope)
     if resolved_user_id is None:
         return await client.chat.completions.create(model=model, **kwargs)
+    from app.services.llm_circuit_breaker_service import (
+        acquire_provider_circuit_permit,
+        record_provider_failure,
+        record_provider_success,
+        release_provider_circuit_permit,
+    )
     from app.services.llm_control_service import (
         fail_llm_reservation,
         finish_llm_reservation,
         reserve_llm_call,
     )
 
-    reservation = await reserve_llm_call(
-        user_id=resolved_user_id,
-        estimated_tokens=estimate_chat_completion_tokens(kwargs),
-        feature=feature,
-        operation="chat",
-        model=model,
-        book_id=book_id,
-    )
+    prompt_tokens, completion_tokens = estimate_chat_completion_token_parts(kwargs)
+    permit = await acquire_provider_circuit_permit(provider="openai", model=model)
+    try:
+        reservation = await reserve_llm_call(
+            user_id=resolved_user_id,
+            estimated_prompt_tokens=prompt_tokens,
+            estimated_completion_tokens=completion_tokens,
+            feature=feature,
+            operation="chat",
+            model=model,
+            book_id=book_id,
+            provider="openai",
+            budget_class=budget_class or llm_budget_class_for_feature(feature),
+            metadata=metadata,
+        )
+    except BaseException:
+        await release_provider_circuit_permit(permit)
+        raise
     try:
         response = await client.chat.completions.create(model=model, **kwargs)
-    except LLM_PROVIDER_CALL_EXCEPTIONS:
+    except LLM_PROVIDER_CALL_EXCEPTIONS as exc:
         await _fail_llm_reservation_best_effort(fail_llm_reservation, reservation)
+        await record_provider_failure(
+            permit,
+            transient=is_transient_llm_provider_error(exc),
+        )
         raise
     await finish_llm_reservation(reservation, response)
+    await record_provider_success(permit)
     return response
 
 
@@ -399,34 +566,57 @@ async def create_tracked_embedding(
     feature: str,
     model: str,
     db: AsyncSession | None = None,
-    user_id: uuid.UUID | None = None,
+    user_id: uuid.UUID | None,
     book_id: uuid.UUID | None = None,
     metadata: dict[str, Any] | None = None,
+    budget_class: str | None = None,
+    billing_scope: str = CUSTOMER_BILLING_SCOPE,
     **kwargs: Any,
 ) -> CreateEmbeddingResponse:
-    resolved_user_id = _coerce_uuid(user_id or get_request_user_id())
+    resolved_user_id = _resolved_usage_user_id(user_id, billing_scope=billing_scope)
     if resolved_user_id is None:
         return await client.embeddings.create(model=model, **kwargs)
+    from app.services.llm_circuit_breaker_service import (
+        acquire_provider_circuit_permit,
+        record_provider_failure,
+        record_provider_success,
+        release_provider_circuit_permit,
+    )
     from app.services.llm_control_service import (
         fail_llm_reservation,
         finish_llm_reservation,
         reserve_llm_call,
     )
 
-    reservation = await reserve_llm_call(
-        user_id=resolved_user_id,
-        estimated_tokens=estimate_embedding_tokens(kwargs),
-        feature=feature,
-        operation="embedding",
-        model=model,
-        book_id=book_id,
-    )
+    prompt_tokens = estimate_embedding_tokens(kwargs)
+    permit = await acquire_provider_circuit_permit(provider="openai", model=model)
+    try:
+        reservation = await reserve_llm_call(
+            user_id=resolved_user_id,
+            estimated_prompt_tokens=prompt_tokens,
+            estimated_completion_tokens=0,
+            feature=feature,
+            operation="embedding",
+            model=model,
+            book_id=book_id,
+            provider="openai",
+            budget_class=budget_class or llm_budget_class_for_feature(feature),
+            metadata=metadata,
+        )
+    except BaseException:
+        await release_provider_circuit_permit(permit)
+        raise
     try:
         response = await client.embeddings.create(model=model, **kwargs)
-    except LLM_PROVIDER_CALL_EXCEPTIONS:
+    except LLM_PROVIDER_CALL_EXCEPTIONS as exc:
         await _fail_llm_reservation_best_effort(fail_llm_reservation, reservation)
+        await record_provider_failure(
+            permit,
+            transient=is_transient_llm_provider_error(exc),
+        )
         raise
     await finish_llm_reservation(reservation, response)
+    await record_provider_success(permit)
     return response
 
 
@@ -435,6 +625,9 @@ async def summarize_llm_usage_for_user(db: AsyncSession, user_id: object) -> Llm
     if resolved_user_id is None:
         return LlmUsageSummary()
 
+    user = await db.get(User, resolved_user_id)
+    if user is None:
+        return LlmUsageSummary()
     row = (
         await db.execute(
             select(
@@ -446,9 +639,25 @@ async def summarize_llm_usage_for_user(db: AsyncSession, user_id: object) -> Llm
         )
     ).one()
 
+    from app.services.llm_control_service import summarize_llm_cost_capacity
+
+    interactive_capacity = await summarize_llm_cost_capacity(
+        db,
+        user=user,
+        budget_class="interactive",
+    )
+    processing_capacity = await summarize_llm_cost_capacity(
+        db,
+        user=user,
+        budget_class="processing",
+    )
     return LlmUsageSummary(
         request_count=int(row[0] or 0),
         prompt_tokens=int(row[1] or 0),
         completion_tokens=int(row[2] or 0),
         total_tokens=int(row[3] or 0),
+        ai_interactive_available=interactive_capacity.available,
+        ai_processing_available=processing_capacity.available,
+        ai_capacity_usage_percent=round(interactive_capacity.usage_fraction * 100),
+        ai_capacity_resets_at=interactive_capacity.resets_at,
     )

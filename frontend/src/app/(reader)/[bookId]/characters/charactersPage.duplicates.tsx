@@ -63,7 +63,7 @@ export function CharacterDuplicateWorkspace({
     return (
       <div className="p-5">
         <div className="space-y-4">
-          <p className={isDark ? "text-sm text-slate-400" : "text-sm text-stone-500"}>No duplicate suggestion is selected right now. Start with a manual pair and compare any two character records directly.</p>
+          <p className={isDark ? "text-sm text-slate-400" : "text-sm text-stone-600"}>No duplicate suggestion is selected right now. Start with a manual pair and compare any two character records directly.</p>
           {mergeableCharacters.length >= 2 ? (
             <button
               type="button"
@@ -88,9 +88,9 @@ export function CharacterDuplicateWorkspace({
     <div className="p-5">
       <div className="space-y-5">
         <div>
-          <p className={`text-3xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-violet-300" : "text-violet-600"}`}>Duplicate review</p>
+          <p className={`text-xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-violet-300" : "text-violet-600"}`}>Duplicate review</p>
           <h2 className={`mt-2 text-3xl font-semibold tracking-tight ${isDark ? "text-white" : "text-stone-950"}`}>{isManualMerge ? "Manual merge" : "Merge suggestion"}</h2>
-          <p className={`mt-2 text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>
+          <p className={`mt-2 text-sm ${isDark ? "text-slate-400" : "text-stone-600"}`}>
             Compare evidence before merging duplicate character records.
           </p>
           {protectedOrCurated ? (
@@ -103,7 +103,7 @@ export function CharacterDuplicateWorkspace({
         <SurfaceCard title="Manual pair" isDark={isDark}>
           <div className="grid gap-3 xl:grid-cols-2">
             <label className="text-sm">
-              <span className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Primary record</span>
+              <span className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-400" : "text-stone-600"}`}>Primary record</span>
               <select
                 value={primaryCharacter.id}
                 onChange={(event) => {
@@ -122,7 +122,7 @@ export function CharacterDuplicateWorkspace({
               </select>
             </label>
             <label className="text-sm">
-              <span className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Merge into primary</span>
+              <span className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-400" : "text-stone-600"}`}>Merge into primary</span>
               <select
                 value={secondaryCharacter.id}
                 onChange={(event) => onSetManualSecondary(event.target.value)}
@@ -152,12 +152,12 @@ export function CharacterDuplicateWorkspace({
             return (
               <SurfaceCard key={character.id} title={index === 0 ? "Primary" : "Candidate"} isDark={isDark}>
                 <div className="flex items-start gap-3">
-                  <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-sm font-semibold ${isDark ? "bg-violet-500/18 text-violet-100" : "bg-violet-100 text-violet-700"}`}>
+                  <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-sm text-sm font-semibold ${isDark ? "bg-violet-500/18 text-violet-100" : "bg-violet-100 text-violet-700"}`}>
                     {characterInitial(character.name)}
                   </div>
                   <div className="min-w-0">
                     <h3 className={`text-xl font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>{character.name}</h3>
-                    <p className={`mt-1 text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>
+                    <p className={`mt-1 text-sm ${isDark ? "text-slate-400" : "text-stone-600"}`}>
                       {formatRole(character.role)} / {formatStatus(character.status)} / {formatChapterRange(character.first_chapter, character.last_seen_chapter ?? null)}
                     </p>
                   </div>
@@ -166,7 +166,7 @@ export function CharacterDuplicateWorkspace({
                 {flags.length > 0 ? (
                   <div className="mt-3 flex flex-wrap gap-2">
                     {flags.map((flag) => (
-                      <span key={flag} className={`rounded-full px-2.5 py-1 text-xs font-medium ${flagClasses(isDark, flag)}`}>
+                      <span key={flag} className={`rounded-sm px-2.5 py-1 text-xs font-medium ${flagClasses(isDark, flag)}`}>
                         {flag}
                       </span>
                     ))}
@@ -178,32 +178,32 @@ export function CharacterDuplicateWorkspace({
                 </p>
 
                 <div className="mt-4">
-                  <p className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Aliases</p>
+                  <p className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-400" : "text-stone-600"}`}>Aliases</p>
                   <p className={`mt-2 text-sm ${isDark ? "text-slate-300" : "text-stone-600"}`}>{character.aliases.length > 0 ? character.aliases.join(", ") : "No aliases recorded"}</p>
                 </div>
 
                 <div className="mt-4">
-                  <p className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Traits</p>
+                  <p className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-400" : "text-stone-600"}`}>Traits</p>
                   <div className="mt-2 flex flex-wrap gap-2">
                     {character.personality_tags.length > 0 ? character.personality_tags.slice(0, 6).map((tag) => (
-                      <span key={tag} className={`rounded-full px-3 py-1.5 text-xs ${isDark ? "bg-white/[0.05] text-slate-200" : "bg-white text-stone-700 border border-stone-200"}`}>
+                      <span key={tag} className={`rounded-sm px-3 py-1.5 text-xs ${isDark ? "bg-white/[0.05] text-slate-200" : "bg-white text-stone-700 border border-stone-200"}`}>
                         {tag}
                       </span>
-                    )) : <span className={isDark ? "text-sm text-slate-400" : "text-sm text-stone-500"}>No trait tags yet.</span>}
+                    )) : <span className={isDark ? "text-sm text-slate-400" : "text-sm text-stone-600"}>No trait tags yet.</span>}
                   </div>
                 </div>
 
                 <div className="mt-4">
-                  <p className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Evidence</p>
+                  <p className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-400" : "text-stone-600"}`}>Evidence</p>
                   <div className="mt-2 space-y-2">
                     {evidence.slice(0, 2).map((result, evidenceIndex) => (
-                      <div key={`${character.id}-evidence-compare-${evidenceIndex}`} className={`rounded-xl border px-3 py-3 ${isDark ? "border-[#17202c] bg-black/20" : "border-stone-200 bg-white"}`}>
-                        <p className={`text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>Chapter {result.chapter_num}</p>
+                      <div key={`${character.id}-evidence-compare-${evidenceIndex}`} className={`rounded-sm border px-3 py-3 ${isDark ? "border-[#17202c] bg-black/20" : "border-stone-200 bg-white"}`}>
+                        <p className={`text-xs ${isDark ? "text-slate-400" : "text-stone-600"}`}>Chapter {result.chapter_num}</p>
                         <p className={`mt-1 text-sm font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>{result.summary}</p>
                       </div>
                     ))}
                     {evidence.length === 0 ? (
-                      <p className={isDark ? "text-sm text-slate-400" : "text-sm text-stone-500"}>No evidence preview loaded yet.</p>
+                      <p className={isDark ? "text-sm text-slate-400" : "text-sm text-stone-600"}>No evidence preview loaded yet.</p>
                     ) : null}
                   </div>
                 </div>
@@ -214,12 +214,12 @@ export function CharacterDuplicateWorkspace({
 
         <SurfaceCard title="Differences" isDark={isDark}>
           <div className="grid gap-3 md:grid-cols-2">
-            <div className={`rounded-xl border px-4 py-3 ${isDark ? "border-[#17202c] bg-black/20" : "border-stone-200 bg-white"}`}>
-              <p className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Primary record</p>
+            <div className={`rounded-sm border px-4 py-3 ${isDark ? "border-[#17202c] bg-black/20" : "border-stone-200 bg-white"}`}>
+              <p className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-400" : "text-stone-600"}`}>Primary record</p>
               <p className={`mt-2 text-sm ${isDark ? "text-slate-300" : "text-stone-600"}`}>{primaryCharacter.name} / {primaryCharacter.mention_count ?? 0} mentions / {relationshipCounts.get(primaryCharacter.id) ?? 0} ties</p>
             </div>
-            <div className={`rounded-xl border px-4 py-3 ${isDark ? "border-[#17202c] bg-black/20" : "border-stone-200 bg-white"}`}>
-              <p className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Candidate record</p>
+            <div className={`rounded-sm border px-4 py-3 ${isDark ? "border-[#17202c] bg-black/20" : "border-stone-200 bg-white"}`}>
+              <p className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-400" : "text-stone-600"}`}>Candidate record</p>
               <p className={`mt-2 text-sm ${isDark ? "text-slate-300" : "text-stone-600"}`}>{secondaryCharacter.name} / {secondaryCharacter.mention_count ?? 0} mentions / {relationshipCounts.get(secondaryCharacter.id) ?? 0} ties</p>
             </div>
           </div>
@@ -289,28 +289,28 @@ export function CharacterDuplicateSideRail({
       {primaryCharacter && secondaryCharacter ? (
         <div className="space-y-4">
           <section className={`rounded-md border p-4 ${isDark ? "border-[#202a38] bg-white/[0.03]" : "border-stone-200 bg-stone-50/75"}`}>
-            <p className={`text-3xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>{isManualMerge ? "Manual merge" : "Merge suggestion"}</p>
+            <p className={`text-xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-400" : "text-stone-600"}`}>{isManualMerge ? "Manual merge" : "Merge suggestion"}</p>
             <p className={`mt-3 text-2xl font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>{selectedMergeSuggestion && !isManualMerge ? `${selectedMergeSuggestion.confidence}%` : "Manual review"}</p>
             <p className={`mt-2 text-sm leading-6 ${isDark ? "text-slate-300" : "text-stone-600"}`}>{selectedMergeSuggestion && !isManualMerge ? "Confidence based on name overlap, alias collisions, and shared chapter context." : "Use this when a family-role alias or late rename was missed by automatic duplicate suggestions."}</p>
             {selectedMergeSuggestion && !isManualMerge ? (
               <div className="mt-4 space-y-2">
                 {selectedMergeSuggestion.reasons.map((reason) => (
-                  <div key={reason} className={`rounded-xl border px-3 py-2.5 text-sm ${isDark ? "border-[#17202c] bg-black/20 text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}>
+                  <div key={reason} className={`rounded-sm border px-3 py-2.5 text-sm ${isDark ? "border-[#17202c] bg-black/20 text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}>
                     {reason}
                   </div>
                 ))}
                 {selectedMergeSuggestion.sharedClusterKeys.length > 0 ? (
-                  <div className={`rounded-xl border px-3 py-2.5 text-sm ${isDark ? "border-[#17202c] bg-black/20 text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}>
+                  <div className={`rounded-sm border px-3 py-2.5 text-sm ${isDark ? "border-[#17202c] bg-black/20 text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}>
                     Shared clusters: {selectedMergeSuggestion.sharedClusterKeys.join(", ")}
                   </div>
                 ) : null}
                 {selectedMergeSuggestion.sharedChapters.length > 0 ? (
-                  <div className={`rounded-xl border px-3 py-2.5 text-sm ${isDark ? "border-[#17202c] bg-black/20 text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}>
+                  <div className={`rounded-sm border px-3 py-2.5 text-sm ${isDark ? "border-[#17202c] bg-black/20 text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}>
                     Shared chapters: {selectedMergeSuggestion.sharedChapters.join(", ")}
                   </div>
                 ) : null}
                 {typeof selectedMergeSuggestion.embeddingSimilarity === "number" ? (
-                  <div className={`rounded-xl border px-3 py-2.5 text-sm ${isDark ? "border-[#17202c] bg-black/20 text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}>
+                  <div className={`rounded-sm border px-3 py-2.5 text-sm ${isDark ? "border-[#17202c] bg-black/20 text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}>
                     Embedding similarity: {formatPercent(selectedMergeSuggestion.embeddingSimilarity)}
                   </div>
                 ) : null}
@@ -319,7 +319,7 @@ export function CharacterDuplicateSideRail({
           </section>
 
           <section className={`rounded-md border p-4 ${isDark ? "border-[#202a38] bg-white/[0.03]" : "border-stone-200 bg-stone-50/75"}`}>
-            <p className={`text-3xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Quick actions</p>
+            <p className={`text-xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-400" : "text-stone-600"}`}>Quick actions</p>
             <div className="mt-4 space-y-3">
               <QuickActionTile
                 isDark={isDark}
@@ -349,13 +349,13 @@ export function CharacterDuplicateSideRail({
           </section>
 
           <section className={`rounded-md border p-4 ${isDark ? "border-[#202a38] bg-white/[0.03]" : "border-stone-200 bg-stone-50/75"}`}>
-            <p className={`text-3xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Relationship queue</p>
+            <p className={`text-xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-400" : "text-stone-600"}`}>Relationship queue</p>
             {relationshipCandidates.length > 0 ? (
               <div className="mt-4 space-y-3">
                 {relationshipCandidates.slice(0, 4).map((candidate) => (
-                  <div key={`duplicate-review-${candidate.id}`} className={`rounded-xl border px-3 py-3 ${isDark ? "border-[#17202c] bg-black/20" : "border-stone-200 bg-white"}`}>
+                  <div key={`duplicate-review-${candidate.id}`} className={`rounded-sm border px-3 py-3 ${isDark ? "border-[#17202c] bg-black/20" : "border-stone-200 bg-white"}`}>
                     <p className={`text-sm font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>{candidate.raw_character_a} and {candidate.raw_character_b}</p>
-                    <p className={`mt-1 text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>
+                    <p className={`mt-1 text-xs ${isDark ? "text-slate-400" : "text-stone-600"}`}>
                       Chapter {candidate.chapter_number}{candidate.rel_type ? ` · ${formatRelationshipType(candidate.rel_type)}` : ""}
                     </p>
                     <p className={`mt-2 text-sm leading-6 ${isDark ? "text-slate-300" : "text-stone-600"}`}>
@@ -365,7 +365,7 @@ export function CharacterDuplicateSideRail({
                 ))}
               </div>
             ) : (
-              <p className={`mt-4 text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>
+              <p className={`mt-4 text-sm ${isDark ? "text-slate-400" : "text-stone-600"}`}>
                 No unresolved relationship candidates match the current filters.
               </p>
             )}
@@ -373,7 +373,7 @@ export function CharacterDuplicateSideRail({
         </div>
       ) : (
         <div className="space-y-4">
-          <p className={isDark ? "text-sm text-slate-400" : "text-sm text-stone-500"}>Choose a suggestion or start a manual merge to compare records the detector did not catch yet.</p>
+          <p className={isDark ? "text-sm text-slate-400" : "text-sm text-stone-600"}>Choose a suggestion or start a manual merge to compare records the detector did not catch yet.</p>
           {characterCount >= 2 ? (
             <button
               type="button"

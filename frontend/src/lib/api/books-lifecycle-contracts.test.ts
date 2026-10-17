@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import {
   booksApi,
   deleteMock,
+  getMock,
   invalidateQueryKeysMock,
   isAxiosErrorMock,
   postMock,
@@ -175,6 +176,10 @@ describe("books api lifecycle contracts", () => {
     expect(form.get("mode")).toBe("author")
     expect(progress).toHaveBeenCalledWith(25)
     expect(invalidateQueryKeysMock).toHaveBeenCalledWith("books:list:")
+    expect(invalidateQueryKeysMock).toHaveBeenCalledWith("books:page:active")
+    expect(invalidateQueryKeysMock).toHaveBeenCalledWith("books:page:all")
+    expect(invalidateQueryKeysMock).toHaveBeenCalledWith("books:selector:active")
+    expect(invalidateQueryKeysMock).toHaveBeenCalledWith("books:selector:all")
     expect(invalidateQueryKeysMock).toHaveBeenCalledWith("books:stats")
   })
 
@@ -206,5 +211,59 @@ describe("books api lifecycle contracts", () => {
     expect(form.get("work_type")).toBe("novel")
     expect(invalidateQueryKeysMock).toHaveBeenCalledWith("book:book-1:")
     expect(invalidateQueryKeysMock).toHaveBeenCalledWith("reader:book-1:")
+  })
+
+  it("polls durable manuscript import jobs until the result is ready", async () => {
+    vi.useFakeTimers()
+    const result = {
+      book_id: "book-1",
+      imported_chapters: [2, 3],
+      chapter_content_versions: { 2: 1, 3: 1 },
+      total_chapters: 3,
+      mode: "author" as const,
+      source_kind: "batch_upload",
+      chapter_reports: [],
+    }
+    postMock.mockResolvedValueOnce({
+      data: {
+        id: "job-1",
+        book_id: "book-1",
+        status: "queued",
+        progress_completed: 0,
+        progress_total: 1,
+        cancel_requested: false,
+        result: null,
+        error: null,
+        created_at: "2026-09-10T08:00:00Z",
+        updated_at: "2026-09-10T08:00:00Z",
+      },
+    })
+    getMock.mockResolvedValueOnce({
+      data: {
+        id: "job-1",
+        book_id: "book-1",
+        status: "completed",
+        progress_completed: 1,
+        progress_total: 1,
+        cancel_requested: false,
+        result,
+        error: null,
+        created_at: "2026-09-10T08:00:00Z",
+        updated_at: "2026-09-10T08:00:01Z",
+      },
+    })
+
+    try {
+      const pending = booksApi.importManuscript("book-1", {
+        files: [new File(["chapter"], "chapter.txt", { type: "text/plain" })],
+      })
+      await Promise.resolve()
+      await vi.advanceTimersByTimeAsync(1_500)
+
+      await expect(pending).resolves.toEqual(result)
+      expect(getMock).toHaveBeenCalledWith("/books/book-1/manuscript/import/job-1")
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

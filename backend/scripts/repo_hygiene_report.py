@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import ast
+import os
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 OVERSIZED_LINE_LIMIT = 500
 SKIP_DIRS = {
     ".git",
+    ".agents",
+    ".docker-config",
     ".mypy_cache",
     ".next",
     ".pytest_cache",
@@ -38,13 +41,16 @@ LEGACY_ALIAS_ALLOWED_PATH_PARTS = {
 }
 
 
-def _iter_source_files() -> list[Path]:
+def _skip_directory(name: str) -> bool:
+    return name in SKIP_DIRS or name.startswith(".next-e2e-")
+
+
+def _iter_source_files(repo_root: Path = REPO_ROOT) -> list[Path]:
     files: list[Path] = []
-    for path in REPO_ROOT.rglob("*"):
-        if any(part in SKIP_DIRS for part in path.relative_to(REPO_ROOT).parts):
-            continue
-        if path.is_file():
-            files.append(path)
+    for directory, directory_names, file_names in os.walk(repo_root):
+        directory_names[:] = [name for name in directory_names if not _skip_directory(name)]
+        parent = Path(directory)
+        files.extend(parent / name for name in file_names)
     return files
 
 

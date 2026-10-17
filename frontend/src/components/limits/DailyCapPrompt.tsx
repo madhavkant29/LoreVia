@@ -7,6 +7,7 @@ import { useAuthStore } from "@/lib/stores/authStore"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 import {
   DAILY_CAP_EVENT,
+  DAILY_LIMIT_MESSAGE,
   type DailyCapEventDetail,
 } from "@/lib/limits/dailyCap"
 
@@ -59,6 +60,10 @@ export function DailyCapPrompt() {
   }
 
   const copy = actionCopy(eventDetail.action)
+  const bodyText =
+    eventDetail.detail && eventDetail.detail !== DAILY_LIMIT_MESSAGE
+      ? eventDetail.detail
+      : copy.body
 
   const close = () => {
     setEventDetail(null)
@@ -87,7 +92,7 @@ export function DailyCapPrompt() {
           </button>
         </div>
 
-        <p className={`mt-4 text-sm leading-7 ${isDark ? "text-slate-300" : "text-stone-600"}`}>{copy.body}</p>
+        <p className={`mt-4 text-sm leading-7 ${isDark ? "text-slate-300" : "text-stone-600"}`}>{bodyText}</p>
 
         <div className={`mt-5 rounded-lg border p-5 ${isDark ? "border-white/[0.08] bg-white/[0.04]" : "border-stone-200 bg-white/85"}`}>
           <p className="text-sm leading-7">

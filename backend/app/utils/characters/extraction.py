@@ -110,15 +110,15 @@ def _entity_mentions_linked_in_text(left_name: str, right_name: str, text: str) 
 
     if left_role and left_anchor:
         anchor_patterns = (
-            rf"\b{re.escape(left_anchor)}['â€™]s {re.escape(left_role)}\b[^.?!\n]{{0,80}}\b{re.escape(normalized_right)}\b",
-            rf"\b{re.escape(normalized_right)}\b[^.?!\n]{{0,80}}\b{re.escape(left_anchor)}['â€™]s {re.escape(left_role)}\b",
+            rf"\b{re.escape(left_anchor)}['\u2019]s {re.escape(left_role)}\b[^.?!\n]{{0,80}}\b{re.escape(normalized_right)}\b",
+            rf"\b{re.escape(normalized_right)}\b[^.?!\n]{{0,80}}\b{re.escape(left_anchor)}['\u2019]s {re.escape(left_role)}\b",
         )
         if any(re.search(pattern, text, flags=re.IGNORECASE) for pattern in anchor_patterns):
             return True
     if right_role and right_anchor:
         anchor_patterns = (
-            rf"\b{re.escape(right_anchor)}['â€™]s {re.escape(right_role)}\b[^.?!\n]{{0,80}}\b{re.escape(normalized_left)}\b",
-            rf"\b{re.escape(normalized_left)}\b[^.?!\n]{{0,80}}\b{re.escape(right_anchor)}['â€™]s {re.escape(right_role)}\b",
+            rf"\b{re.escape(right_anchor)}['\u2019]s {re.escape(right_role)}\b[^.?!\n]{{0,80}}\b{re.escape(normalized_left)}\b",
+            rf"\b{re.escape(normalized_left)}\b[^.?!\n]{{0,80}}\b{re.escape(right_anchor)}['\u2019]s {re.escape(right_role)}\b",
         )
         if any(re.search(pattern, text, flags=re.IGNORECASE) for pattern in anchor_patterns):
             return True

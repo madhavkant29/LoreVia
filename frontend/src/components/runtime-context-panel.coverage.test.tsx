@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
 import { describe, expect, it, vi } from "vitest"
+import { act } from "react"
 
 import {
   booksApiMock,
@@ -26,6 +27,7 @@ describe("context panel runtime coverage", () => {
         loading={false}
         onClose={onClose}
         mobileSheet
+        canEdit
         theme="dark"
         selectedQuote="The lantern hummed when Mara lied."
         chapterNumber={3}
@@ -60,18 +62,18 @@ describe("context panel runtime coverage", () => {
       expect.objectContaining({ character_name: "Mara Vale" }),
     )
 
-    await clickText("+1 more", "span")
+    await clickText("+1 more", "button")
     expect(text()).toContain("Show less")
     await click("Edit")
-    setFieldValue(firstField<HTMLTextAreaElement>("textarea"), "Mara Bright")
-    await click("Save Changes")
+    await act(async () => { setFieldValue(document.querySelector<HTMLTextAreaElement>('[aria-label="Character name"]')!, "Mara Bright") })
+    await act(async () => { Array.from(document.querySelectorAll("button")).find((button) => button.textContent === "Save Changes")?.click() })
     expect(booksApiMock.updateCharacter).toHaveBeenCalledWith(
       "book-1",
       "char-1",
-      expect.objectContaining({ name: "Mara Vale" }),
+      expect.objectContaining({ name: "Mara Bright" }),
     )
     await click("Links")
-    expect(text()).toContain("Relationship links")
+    expect(text()).toContain("View relationships through chapter 3")
     await click("Recall")
     expect(text()).toContain("Mara last appeared")
 

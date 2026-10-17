@@ -1,4 +1,5 @@
 import pytest
+from redis.exceptions import RedisError
 
 from app.core import redis as redis_utils
 
@@ -7,6 +8,7 @@ class _FakeRedis:
     def __init__(self):
         self.values: dict[str, str] = {}
         self.deleted: list[tuple[str, ...]] = []
+        self.scan_calls: list[tuple[str | None, int | None]] = []
         self.setex_calls: list[tuple[str, int, str]] = []
 
     async def get(self, key):
@@ -36,6 +38,7 @@ class _FakeRedis:
         return {}
 
     async def scan(self, *, cursor=0, match=None, count=None):
+        self.scan_calls.append((match, count))
         prefix = str(match or "").rstrip("*")
         keys = [key for key in self.values if not prefix or key.startswith(prefix)]
         return 0, keys
@@ -51,6 +54,22 @@ def test_cache_policy_registry_documents_major_namespaces():
 
 
 @pytest.mark.asyncio
+async def test_noncritical_cache_operations_degrade_to_a_miss_when_redis_is_down(monkeypatch):
+    async def _redis_unavailable():
+        raise RedisError("redis unavailable")
+
+    monkeypatch.setattr(redis_utils, "get_redis", _redis_unavailable)
+
+    assert await redis_utils.cache_get("public:books") is None
+    assert await redis_utils.cache_get_int("cache_version:book:1", default=7) == 7
+    await redis_utils.cache_set("public:books", {"books": []}, 60)
+    await redis_utils.cache_del("public:books")
+    marker = await redis_utils.cache_set_version_marker("cache_version:book:1")
+
+    assert marker > 0
+
+
+@pytest.mark.asyncio
 async def test_advisor_response_cache_round_trip(monkeypatch):
     fake_redis = _FakeRedis()
 
@@ -63,7 +82,75 @@ async def test_advisor_response_cache_round_trip(monkeypatch):
     payload = await redis_utils.get_advisor_response_cache("book-1", "cache-key")
 
     assert payload == {"reply": "hello"}
+    assert fake_redis.setex_calls[0][0] == redis_utils.key_advisor_response_cache(
+        "book-1", "cache-key", 0
+    )
     assert fake_redis.setex_calls[0][1] == redis_utils.ADVISOR_CACHE_TTL_SECONDS
+
+
+@pytest.mark.asyncio
+async def test_advisor_response_cache_skips_stale_in_flight_write(monkeypatch):
+    fake_redis = _FakeRedis()
+    fake_redis.values[redis_utils.key_book_cache_version("book-1")] = "2"
+
+    async def _fake_get_redis():
+        return fake_redis
+
+    monkeypatch.setattr(redis_utils, "get_redis", _fake_get_redis)
+
+    await redis_utils.set_advisor_response_cache(
+        "book-1",
+        "cache-key",
+        {"reply": "stale"},
+        expected_version=1,
+    )
+
+    assert fake_redis.setex_calls == []
+    assert await redis_utils.get_advisor_response_cache("book-1", "cache-key") is None
+
+
+@pytest.mark.asyncio
+async def test_advisor_response_cache_writes_matching_in_flight_version(monkeypatch):
+    fake_redis = _FakeRedis()
+    fake_redis.values[redis_utils.key_book_cache_version("book-1")] = "2"
+
+    async def _fake_get_redis():
+        return fake_redis
+
+    monkeypatch.setattr(redis_utils, "get_redis", _fake_get_redis)
+
+    await redis_utils.set_advisor_response_cache(
+        "book-1",
+        "cache-key",
+        {"reply": "fresh"},
+        expected_version=2,
+    )
+
+    assert fake_redis.setex_calls[0][0] == redis_utils.key_advisor_response_cache(
+        "book-1", "cache-key", 2
+    )
+    assert await redis_utils.get_advisor_response_cache("book-1", "cache-key") == {"reply": "fresh"}
+
+
+@pytest.mark.asyncio
+async def test_series_advisor_cache_skips_stale_in_flight_write(monkeypatch):
+    fake_redis = _FakeRedis()
+    fake_redis.values[redis_utils.key_series_cache_version("series-1")] = "4"
+
+    async def _fake_get_redis():
+        return fake_redis
+
+    monkeypatch.setattr(redis_utils, "get_redis", _fake_get_redis)
+
+    await redis_utils.set_series_advisor_response_cache(
+        "series-1",
+        "cache-key",
+        {"reply": "stale"},
+        expected_version=3,
+    )
+
+    assert fake_redis.setex_calls == []
+    assert await redis_utils.get_series_advisor_response_cache("series-1", "cache-key") is None
 
 
 @pytest.mark.asyncio
@@ -97,7 +184,7 @@ async def test_advisor_response_cache_invalid_payload_is_treated_as_miss(monkeyp
 
 
 @pytest.mark.asyncio
-async def test_invalidate_advisor_cache_namespaces_deletes_book_and_series_keys(monkeypatch):
+async def test_invalidate_advisor_cache_namespaces_bumps_versions_without_scanning(monkeypatch):
     fake_redis = _FakeRedis()
     fake_redis.values = {
         redis_utils.key_advisor_response_cache("book-1", "a"): '{"reply":"one"}',
@@ -116,10 +203,16 @@ async def test_invalidate_advisor_cache_namespaces_deletes_book_and_series_keys(
         series_ids=["series-1"],
     )
 
-    assert redis_utils.key_advisor_response_cache("book-1", "a") not in fake_redis.values
-    assert redis_utils.key_editorial_review_cache("book-1", "b") not in fake_redis.values
-    assert redis_utils.key_series_advisor_response_cache("series-1", "c") not in fake_redis.values
+    assert redis_utils.key_book_cache_version("book-1") in fake_redis.values
+    assert redis_utils.key_series_cache_version("series-1") in fake_redis.values
+    assert redis_utils.key_advisor_response_cache("book-1", "a") in fake_redis.values
+    assert redis_utils.key_editorial_review_cache("book-1", "b") in fake_redis.values
+    assert redis_utils.key_series_advisor_response_cache("series-1", "c") in fake_redis.values
     assert "public:books" in fake_redis.values
+    assert fake_redis.scan_calls == []
+    assert fake_redis.deleted == []
+    assert await redis_utils.get_advisor_response_cache("book-1", "a") is None
+    assert await redis_utils.get_series_advisor_response_cache("series-1", "c") is None
 
 
 @pytest.mark.asyncio
@@ -199,8 +292,8 @@ async def test_mark_cache_dirty_updates_version_markers(monkeypatch):
 async def test_redis_diagnostics_reports_memory_clients_and_prefixes(monkeypatch):
     fake_redis = _FakeRedis()
     fake_redis.values = {
-        "advisor:book:book-1:message:a": "{}",
-        "advisor:series:series-1:message:b": "{}",
+        "advisor:book:book-1:v0:message:a": "{}",
+        "advisor:series:series-1:v0:message:b": "{}",
         "cache_version:book:book-1": "1",
         "public:forum:posts:v1:all:x:1:20": "{}",
         "embedding:model:feature:hash": "[]",
@@ -224,4 +317,4 @@ async def test_redis_diagnostics_reports_memory_clients_and_prefixes(monkeypatch
         "embedding": 1,
         "public:forum": 1,
     }
-    assert diagnostics["key_prefix_samples"]["advisor:book"] == ["advisor:book:book-1:message:a"]
+    assert diagnostics["key_prefix_samples"]["advisor:book"] == ["advisor:book:book-1:v0:message:a"]

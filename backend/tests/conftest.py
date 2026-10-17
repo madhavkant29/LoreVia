@@ -48,6 +48,7 @@ from app.api.deps.rate_limit import (
     rate_limit_recall,
     rate_limit_search,
     rate_limit_summary,
+    rate_limit_support,
     rate_limit_upload,
     rate_limit_world_building_ai,
     rate_limit_world_building_upload,
@@ -66,6 +67,12 @@ from app.utils.migration_utils import (
 def test_runtime_defaults(monkeypatch, request):
     """Run tests with production-like auth and billing behavior by default."""
     monkeypatch.setattr(settings, "DEBUG", False, raising=False)
+    monkeypatch.setattr(
+        settings,
+        "JWT_SECRET",
+        "test-jwt-secret-with-at-least-32-characters",
+        raising=False,
+    )
     monkeypatch.setattr(settings, "FREE_MAX_BOOKS", 0, raising=False)
     monkeypatch.setattr(settings, "FREE_TOTAL_TOKEN_BUDGET", 150000, raising=False)
     monkeypatch.setattr(settings, "FREE_SEARCH_PER_DAY", 0, raising=False)
@@ -78,16 +85,18 @@ def test_runtime_defaults(monkeypatch, request):
     monkeypatch.setattr(settings, "FREE_CONTINUITY_PER_DAY", 0, raising=False)
     monkeypatch.setattr(settings, "FREE_CONTINUITY_PER_MINUTE", 0, raising=False)
 
-    from app.utils import billing_utils as _billing_utils
+    from app.utils import billing_utils
 
     monkeypatch.setattr(
-        _billing_utils, "has_authoring_access", lambda *_args, **_kwargs: True, raising=False
+        billing_utils, "has_authoring_access", lambda *_args, **_kwargs: True, raising=False
     )
 
-    from app.utils import auth_csrf as _csrf
+    from app.utils import auth_csrf
 
     if not request.node.module.__name__.endswith("test_auth"):
-        monkeypatch.setattr(_csrf, "validate_auth_csrf_token", lambda _request: None, raising=False)
+        monkeypatch.setattr(
+            auth_csrf, "validate_auth_csrf_token", lambda _request: None, raising=False
+        )
 
 
 @pytest.fixture(autouse=True)
@@ -119,7 +128,7 @@ def mock_storage_uploads(monkeypatch):
 def mock_dedup_embeddings(monkeypatch):
     """Keep character dedup embeddings local during tests."""
 
-    async def _fake_embed_for_dedup(name: str, traits: dict) -> list[float]:
+    async def _fake_embed_for_dedup(name: str, traits: dict, **_kwargs) -> list[float]:
         text = f"{name}|{sorted((traits or {}).keys())}"
         seed = sum(ord(char) for char in text)
         return [((seed + index) % 997) / 997 for index in range(1536)]
@@ -267,6 +276,10 @@ def mock_redis(monkeypatch, request):
                     self.ops.append(("setex", (key, ttl, value)))
                     return self
 
+                def incr(self, key):
+                    self.ops.append(("incr", (key,)))
+                    return self
+
                 def zremrangebyscore(self, key, minimum, maximum):
                     self.ops.append(("zremrangebyscore", (key, minimum, maximum)))
                     return self
@@ -300,6 +313,11 @@ def mock_redis(monkeypatch, request):
                             key, _ttl, value = args
                             outer.store[str(key)] = str(value)
                             results.append(True)
+                        elif op_name == "incr":
+                            key = str(args[0])
+                            value = int(outer.store.get(key, "0")) + 1
+                            outer.store[key] = str(value)
+                            results.append(value)
                         elif op_name == "zremrangebyscore":
                             key, minimum, maximum = args
                             entries = outer.sorted_sets.setdefault(str(key), {})
@@ -398,11 +416,13 @@ async def setup_db(setup_engine):
             )
 
     async with engine_test.begin() as conn:
-        # Enable pgvector extension for vector columns
+        # Enable pgvector extension for vector columns.
         await conn.execute(sa.text("CREATE EXTENSION IF NOT EXISTS vector"))
         await conn.run_sync(_drop_orphan_test_rowtypes)
         await conn.run_sync(Base.metadata.drop_all)
         await conn.run_sync(_drop_orphan_test_rowtypes)
+
+    async with engine_test.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     yield
     async with engine_test.begin() as conn:
@@ -444,6 +464,7 @@ async def client(db):
         rate_limit_search: lambda: None,
         rate_limit_recall: lambda: None,
         rate_limit_summary: lambda: None,
+        rate_limit_support: lambda: None,
         rate_limit_chat: lambda: None,
         rate_limit_public: lambda: None,
         rate_limit_public_asset: lambda: None,

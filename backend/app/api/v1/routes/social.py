@@ -6,19 +6,31 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps.auth import get_current_user
+from app.api.deps.feature_flags import require_cursor_page_apis_enabled
 from app.core.database import get_db
 from app.models.user import User
 from app.schemas.social import (
     DirectConversationCreateBody,
     DirectConversationListOut,
+    DirectConversationPageOut,
     DirectMessageCreateBody,
     DirectMessageListOut,
     DirectMessageOut,
+    DirectMessagePageOut,
     FriendRequestCreateBody,
     FriendRequestOut,
     SocialRelationshipListOut,
     UnreadCountOut,
     UserSearchResponse,
+)
+from app.services.social_service import (
+    DEFAULT_CONVERSATION_PAGE_LIMIT,
+    DEFAULT_MESSAGE_PAGE_LIMIT,
+    MAX_CONVERSATION_PAGE_LIMIT,
+    MAX_MESSAGE_PAGE_LIMIT,
+    list_direct_conversation_page,
+    list_direct_message_page,
+    mark_direct_conversation_read,
 )
 from app.utils.social_utils import (
     build_conversation_summary,
@@ -29,7 +41,6 @@ from app.utils.social_utils import (
     list_conversation_messages,
     list_conversation_summaries,
     list_relationships,
-    mark_conversation_read,
     respond_to_friend_request,
     search_users_for_social,
     send_direct_message,
@@ -152,6 +163,29 @@ async def list_conversations(
     )
 
 
+@router.get(
+    "/conversations/page",
+    response_model=DirectConversationPageOut,
+    dependencies=[Depends(require_cursor_page_apis_enabled)],
+)
+async def list_conversations_page(
+    limit: int = Query(
+        DEFAULT_CONVERSATION_PAGE_LIMIT,
+        ge=1,
+        le=MAX_CONVERSATION_PAGE_LIMIT,
+    ),
+    cursor: str | None = Query(None, max_length=512),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await list_direct_conversation_page(
+        db,
+        current_user=current_user,
+        limit=limit,
+        cursor=cursor,
+    )
+
+
 @router.get("/conversations/unread-count", response_model=UnreadCountOut)
 async def get_unread_conversation_count(
     db: AsyncSession = Depends(get_db),
@@ -203,6 +237,27 @@ async def get_messages(
     )
 
 
+@router.get(
+    "/conversations/{conversation_id}/messages/page",
+    response_model=DirectMessagePageOut,
+    dependencies=[Depends(require_cursor_page_apis_enabled)],
+)
+async def get_messages_page(
+    conversation_id: uuid.UUID,
+    limit: int = Query(DEFAULT_MESSAGE_PAGE_LIMIT, ge=1, le=MAX_MESSAGE_PAGE_LIMIT),
+    cursor: str | None = Query(None, max_length=512),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await list_direct_message_page(
+        db,
+        current_user=current_user,
+        conversation_id=conversation_id,
+        limit=limit,
+        cursor=cursor,
+    )
+
+
 @router.post(
     "/conversations/{conversation_id}/messages", response_model=DirectMessageOut, status_code=201
 )
@@ -232,5 +287,7 @@ async def read_conversation(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    await mark_conversation_read(db, current_user=current_user, conversation_id=conversation_id)
+    await mark_direct_conversation_read(
+        db, current_user=current_user, conversation_id=conversation_id
+    )
     return {"ok": True}

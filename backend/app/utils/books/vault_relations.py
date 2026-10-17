@@ -1,5 +1,5 @@
 """
-Book utility helpers ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â DB query wrappers, cover management, progress
+Book utility helpers — DB query wrappers, cover management, progress
 computation, manuscript parsing, and chapter number utilities extracted
 from the books route.
 """
@@ -45,6 +45,7 @@ async def sync_vault_note_relations(
     book: Book,
     user_id: uuid.UUID,
     source: str = VaultNoteSource.USER_NOTES.value,
+    commit: bool = True,
 ) -> dict[str, int]:
     normalized_source = normalize_vault_note_source(source)
     if normalized_source != VaultNoteSource.USER_NOTES.value:
@@ -143,7 +144,8 @@ async def sync_vault_note_relations(
                 series_links_created += 1
 
     await db.flush()
-    await db.commit()
+    if commit:
+        await db.commit()
     return {
         "links": links_created,
         "backlinks": backlinks_created,

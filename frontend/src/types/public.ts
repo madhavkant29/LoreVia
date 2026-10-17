@@ -77,6 +77,12 @@ export interface PublicForumCommentListResponse {
   items: PublicForumComment[]
 }
 
+export interface PublicForumCommentCursorPage {
+  items: PublicForumComment[]
+  next_cursor: string | null
+  has_more: boolean
+}
+
 export interface PublicForumInterest {
   id: string
   post_id: string
@@ -95,6 +101,12 @@ export interface PublicForumInterestListResponse {
   items: PublicForumInterest[]
 }
 
+export interface PublicForumInterestCursorPage {
+  items: PublicForumInterest[]
+  next_cursor: string | null
+  has_more: boolean
+}
+
 export interface PublicForumPostListResponse {
   items: PublicForumPost[]
   total: number
@@ -104,6 +116,12 @@ export interface PublicForumPostListResponse {
   ranking_key?: string | null
   time_window?: string | null
   surface?: string | null
+}
+
+export interface PublicForumPostCursorPage {
+  items: PublicForumPost[]
+  next_cursor: string | null
+  has_more: boolean
 }
 
 export interface PublicUserProject {

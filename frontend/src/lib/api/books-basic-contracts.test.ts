@@ -15,15 +15,37 @@ describe("books api basic contracts", () => {
   })
 
   it("lists active books", async () => {
+    getMock.mockResolvedValueOnce({ data: { items: [], next_cursor: null } })
     await booksApi.list()
 
-    expect(getMock).toHaveBeenCalledWith("/books", { params: { include_hidden: false } })
+    expect(getMock).toHaveBeenCalledWith("/books/page", {
+      params: { include_hidden: false, limit: 100 },
+    })
   })
 
   it("lists all books when include hidden is true", async () => {
+    getMock.mockResolvedValueOnce({ data: { items: [], next_cursor: null } })
     await booksApi.list(true)
 
-    expect(getMock).toHaveBeenCalledWith("/books", { params: { include_hidden: true } })
+    expect(getMock).toHaveBeenCalledWith("/books/page", {
+      params: { include_hidden: true, limit: 100 },
+    })
+  })
+
+  it("loads a bounded cursor page", async () => {
+    await booksApi.listPage(true, "next-page", 25)
+
+    expect(getMock).toHaveBeenCalledWith("/books/page", {
+      params: { include_hidden: true, limit: 25, cursor: "next-page" },
+    })
+  })
+
+  it("loads navigation-sized book selectors separately from library pages", async () => {
+    await booksApi.listSelector(true, 120)
+
+    expect(getMock).toHaveBeenCalledWith("/books/selector", {
+      params: { include_hidden: true, limit: 120 },
+    })
   })
 
   it("loads stats", async () => {
@@ -83,6 +105,14 @@ describe("books api basic contracts", () => {
   it("exports a manuscript with optional table of contents", async () => {
     await booksApi.exportManuscript("book-1", "pdf", "trade_paperback", false, "eb-garamond", true)
 
+    expect(postMock).toHaveBeenCalledWith("/books/book-1/exports/prepare", {
+      export_kind: "manuscript",
+      format: "pdf",
+      preset: "trade_paperback",
+      include_scene_metadata: false,
+      include_toc: true,
+      font_family: "eb-garamond",
+    })
     expect(getMock).toHaveBeenCalledWith("/books/book-1/manuscript/export", {
       params: {
         format: "pdf",
@@ -102,6 +132,16 @@ describe("books api basic contracts", () => {
       previewChapters: 2,
     })
 
+    expect(postMock).toHaveBeenCalledWith("/books/book-1/exports/prepare", {
+      export_kind: "novel",
+      format: "epub",
+      preset: "large_print",
+      include_images: true,
+      image_placement: "inline",
+      include_image_captions: false,
+      preview_chapters: 2,
+      font_family: "eb-garamond",
+    })
     expect(getMock).toHaveBeenCalledWith("/books/book-1/novel/export", {
       params: {
         format: "epub",
@@ -114,6 +154,51 @@ describe("books api basic contracts", () => {
       },
       responseType: "blob",
     })
+  })
+
+  it("polls a durable large export and downloads the protected artifact", async () => {
+    const queuedJob = {
+      id: "job-1",
+      book_id: "book-1",
+      status: "queued" as const,
+      export_kind: "manuscript" as const,
+      format: "pdf" as const,
+      progress_completed: 0,
+      progress_total: 30,
+      filename: null,
+      media_type: null,
+      size_bytes: null,
+      download_url: null,
+      error: null,
+      expires_at: null,
+      created_at: "2026-09-12T00:00:00Z",
+      updated_at: "2026-09-12T00:00:00Z",
+    }
+    const blob = new Blob(["export"], { type: "application/pdf" })
+    postMock.mockResolvedValueOnce({ data: { delivery: "job", job: queuedJob } })
+    getMock
+      .mockResolvedValueOnce({
+        data: {
+          ...queuedJob,
+          status: "completed",
+          filename: "Draft-manuscript.pdf",
+          media_type: "application/pdf",
+          size_bytes: 6,
+          download_url: "/api/v1/books/book-1/exports/job-1/download",
+          expires_at: "2026-09-13T00:00:00Z",
+        },
+      })
+      .mockResolvedValueOnce({ data: blob })
+
+    const result = await booksApi.exportManuscript("book-1", "pdf")
+
+    expect(result).toBe(blob)
+    expect(getMock).toHaveBeenNthCalledWith(1, "/books/book-1/exports/job-1")
+    expect(getMock).toHaveBeenNthCalledWith(
+      2,
+      "/api/v1/books/book-1/exports/job-1/download",
+      { responseType: "blob" },
+    )
   })
 
   it("saves a novel preface and invalidates the writer workspace cache", async () => {

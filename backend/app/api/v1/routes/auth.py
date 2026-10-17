@@ -54,12 +54,13 @@ from app.utils.auth_cookies import (
     resolve_device_id,
     resolve_device_id_optional,
 )
-from app.utils.auth_csrf import enforce_cookie_csrf
+from app.utils.auth_csrf import enforce_cookie_csrf, set_auth_csrf_cookie
 from app.utils.auth_utils import (
     current_token_version,
     get_user_for_auth_subject,
     normalize_email,
     parse_auth_subject_uuid,
+    supabase_email_is_confirmed,
     verify_password_safely,
 )
 from app.utils.logging.errors import public_error_message
@@ -71,6 +72,12 @@ router.include_router(auth_account.router)
 log = logging.getLogger("lorevia.auth")
 LEGAL_VERSION = "2026-04"
 SUPABASE_OAUTH_PERSISTENCE_EXCEPTIONS = (RuntimeError, ValueError, SQLAlchemyError)
+
+
+@router.get("/csrf", status_code=204)
+async def csrf(response: Response) -> None:
+    """Issue a browser-readable CSRF cookie before the first unsafe request."""
+    set_auth_csrf_cookie(response)
 
 
 @router.post("/register", response_model=RegisterOut, status_code=201)
@@ -200,12 +207,7 @@ async def oauth_supabase(
     if verification_response.status_code != 200:
         log.warning(
             "Supabase OAuth verification failed",
-            extra={
-                "status_code": verification_response.status_code,
-                "response_text": verification_response.text[:500]
-                if verification_response.text
-                else None,
-            },
+            extra={"status_code": verification_response.status_code},
         )
         raise HTTPException(401, f"Invalid sign-in token ({verification_response.status_code})")
 
@@ -217,6 +219,11 @@ async def oauth_supabase(
     email = normalize_email(sb_user.get("email", ""))
     if not email:
         raise HTTPException(401, "Invalid sign-in token")
+    if not supabase_email_is_confirmed(sb_user):
+        log.warning("supabase_oauth_email_unconfirmed")
+        raise HTTPException(
+            401, "Please verify your email with your sign-in provider before signing in."
+        )
     try:
         supabase_auth_id = parse_auth_subject_uuid(sb_user.get("id"))
     except ValueError:
@@ -262,6 +269,8 @@ async def oauth_supabase(
                         supabase_auth_id=supabase_auth_id,
                         email_verified_at=datetime.now(UTC),
                         password_hash=hash_password(secrets.token_urlsafe(32)),
+                        legal_accepted_at=datetime.now(UTC),
+                        legal_version=LEGAL_VERSION,
                     )
                     db.add(existing)
                     await db.flush()

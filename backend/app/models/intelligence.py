@@ -9,6 +9,7 @@ from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
     ARRAY,
     Boolean,
+    CheckConstraint,
     DateTime,
     Float,
     ForeignKey,
@@ -19,14 +20,16 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
+from app.models.generation import GenerationScopedMixin
 
 
-class BookChunk(Base):
+class BookChunk(GenerationScopedMixin, Base):
     """Full-book text chunks + embeddings. Core of semantic search."""
 
     __tablename__ = "book_chunks"
@@ -39,6 +42,24 @@ class BookChunk(Base):
             postgresql_with={"m": 16, "ef_construction": 64},
         ),
         Index("ix_book_chunks_book_chunk", "book_id", "chunk_index"),
+        Index(
+            "ix_book_chunks_text_search",
+            text("to_tsvector('simple', text)"),
+            postgresql_using="gin",
+        ),
+        UniqueConstraint(
+            "chapter_id",
+            "generation_id",
+            "chunk_index",
+            name="uq_book_chunks_chapter_generation_chunk_index",
+        ),
+        Index(
+            "uq_book_chunks_unversioned_chapter_chunk_index",
+            "chapter_id",
+            "chunk_index",
+            unique=True,
+            postgresql_where=text("generation_id is null"),
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -60,7 +81,7 @@ class BookChunk(Base):
     chapter = relationship("Chapter", back_populates="chunks")
 
 
-class CharacterRelationship(Base):
+class CharacterRelationship(GenerationScopedMixin, Base):
     """Timeline-aware relationship pairs between characters."""
 
     __tablename__ = "character_relationships"
@@ -111,7 +132,7 @@ class CharacterRelationship(Base):
     )
 
 
-class PlotThread(Base):
+class PlotThread(GenerationScopedMixin, Base):
     """Tracked arcs and subplots with status."""
 
     __tablename__ = "plot_threads"
@@ -140,11 +161,26 @@ class PlotThread(Base):
     book = relationship("Book", back_populates="plot_threads")
 
 
-class ChapterSummary(Base):
+class ChapterSummary(GenerationScopedMixin, Base):
     """Cached LLM summaries — generated once, served forever."""
 
     __tablename__ = "chapter_summaries"
-    __table_args__ = (Index("ix_chapter_summaries_chapter_mode", "chapter_id", "mode"),)
+    __table_args__ = (
+        Index("ix_chapter_summaries_chapter_mode", "chapter_id", "mode"),
+        UniqueConstraint(
+            "chapter_id",
+            "generation_id",
+            "mode",
+            name="uq_chapter_summaries_chapter_generation_mode",
+        ),
+        Index(
+            "uq_chapter_summaries_unversioned_chapter_mode",
+            "chapter_id",
+            "mode",
+            unique=True,
+            postgresql_where=text("generation_id is null"),
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     chapter_id: Mapped[uuid.UUID] = mapped_column(
@@ -153,7 +189,9 @@ class ChapterSummary(Base):
         nullable=False,
         index=True,
     )
-    mode: Mapped[str] = mapped_column(String, nullable=False)  # short | detailed | key_points
+    mode: Mapped[str] = mapped_column(
+        String, nullable=False
+    )  # short | detailed | key_points | editorial_note
     content: Mapped[str] = mapped_column(Text, nullable=False)
     key_events: Mapped[dict | None] = mapped_column(JSONB)
     char_changes: Mapped[dict | None] = mapped_column(JSONB)
@@ -162,6 +200,73 @@ class ChapterSummary(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     chapter = relationship("Chapter", back_populates="summaries")
+
+
+class ReaderEvent(GenerationScopedMixin, Base):
+    """Materialized reader-safe event generated from chapter intelligence."""
+
+    __tablename__ = "reader_events"
+    __table_args__ = (
+        Index(
+            "ix_reader_events_book_chapter_sort",
+            "book_id",
+            "chapter_number",
+            "sort_order",
+            "sort_label",
+            "id",
+        ),
+        Index("ix_reader_events_chapter_generation", "chapter_id", "generation_id"),
+        Index(
+            "uq_reader_events_book_generation_source",
+            "book_id",
+            "generation_id",
+            "source_key",
+            unique=True,
+            postgresql_where=text("generation_id is not null"),
+        ),
+        Index(
+            "uq_reader_events_book_source_unversioned",
+            "book_id",
+            "source_key",
+            unique=True,
+            postgresql_where=text("generation_id is null"),
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    book_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("books.id", ondelete="CASCADE"), nullable=False
+    )
+    chapter_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("chapters.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    character_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("characters.id", ondelete="SET NULL"), index=True
+    )
+    source_key: Mapped[str] = mapped_column(String(255), nullable=False)
+    event_type: Mapped[str] = mapped_column(String(24), nullable=False)
+    chapter_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    chapter_title: Mapped[str | None] = mapped_column(String)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    sort_label: Mapped[str] = mapped_column(String, nullable=False)
+    payload: Mapped[dict] = mapped_column(
+        JSONB,
+        nullable=False,
+        default=dict,
+        server_default=text("'{}'::jsonb"),
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+    book = relationship("Book")
+    chapter = relationship("Chapter")
+    character = relationship("Character")
 
 
 class ContinuityScan(Base):
@@ -385,7 +490,7 @@ class ContinuityFindingEvidence(Base):
     observation = relationship("ContinuityObservation", back_populates="evidence_links")
 
 
-class WikiEntry(Base):
+class WikiEntry(GenerationScopedMixin, Base):
     """Auto-generated wiki: locations, factions, items, events."""
 
     __tablename__ = "wiki_entries"
@@ -431,6 +536,14 @@ class Notification(Base):
     """In-app notifications for author and reader workflows."""
 
     __tablename__ = "notifications"
+    __table_args__ = (
+        Index("ix_notifications_user_created_id", "user_id", "created_at", "id"),
+        Index(
+            "ix_notifications_user_unread",
+            "user_id",
+            postgresql_where=text("read_at IS NULL"),
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = mapped_column(
@@ -532,6 +645,7 @@ class WorldBuildingDocument(Base):
     s3_key: Mapped[str] = mapped_column(String, nullable=False)
     word_count: Mapped[int | None] = mapped_column(Integer)
     source_size_bytes: Mapped[int | None] = mapped_column(Integer)
+    content_sha256: Mapped[str | None] = mapped_column(String(64), index=True)
     is_active: Mapped[bool] = mapped_column(default=True, index=True)
     archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
     created_at: Mapped[datetime] = mapped_column(
@@ -544,7 +658,133 @@ class WorldBuildingDocument(Base):
     book = relationship("Book", back_populates="world_building_documents")
 
 
-class WorldElement(Base):
+class WorldSourceObservation(GenerationScopedMixin, Base):
+    """A durable candidate observation produced from one world source revision."""
+
+    __tablename__ = "world_source_observations"
+    __table_args__ = (
+        Index(
+            "ix_world_source_observations_book_source",
+            "book_id",
+            "source_kind",
+            "source_key",
+        ),
+        Index(
+            "ix_world_source_observations_document_generation",
+            "world_document_id",
+            "generation_id",
+        ),
+        Index(
+            "uq_world_source_observations_generation_candidate",
+            "book_id",
+            "generation_id",
+            "source_kind",
+            "source_key",
+            "candidate_key",
+            unique=True,
+            postgresql_where=text("generation_id is not null"),
+        ),
+        Index(
+            "uq_world_source_observations_unversioned_candidate",
+            "book_id",
+            "source_kind",
+            "source_key",
+            "candidate_key",
+            unique=True,
+            postgresql_where=text("generation_id is null"),
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    book_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("books.id", ondelete="CASCADE"), nullable=False
+    )
+    world_document_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("world_building_documents.id", ondelete="SET NULL"),
+    )
+    chapter_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("chapters.id", ondelete="SET NULL"), index=True
+    )
+    source_kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    source_key: Mapped[str] = mapped_column(String(255), nullable=False)
+    source_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    candidate_key: Mapped[str] = mapped_column(String(128), nullable=False)
+    payload: Mapped[dict] = mapped_column(
+        JSONB,
+        nullable=False,
+        default=dict,
+        server_default=text("'{}'::jsonb"),
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+    book = relationship("Book", back_populates="world_source_observations")
+    world_document = relationship("WorldBuildingDocument")
+    chapter = relationship("Chapter")
+
+
+class WorldAnalysisState(Base):
+    """Latest publishable book or series world-analysis snapshot and freshness state."""
+
+    __tablename__ = "world_analysis_states"
+    __table_args__ = (
+        CheckConstraint(
+            "(book_id IS NOT NULL AND series_id IS NULL) OR "
+            "(book_id IS NULL AND series_id IS NOT NULL)",
+            name="ck_world_analysis_states_exactly_one_target",
+        ),
+        Index(
+            "uq_world_analysis_states_book",
+            "book_id",
+            unique=True,
+            postgresql_where=text("book_id is not null"),
+        ),
+        Index(
+            "uq_world_analysis_states_series",
+            "series_id",
+            unique=True,
+            postgresql_where=text("series_id is not null"),
+        ),
+        Index("ix_world_analysis_states_status_updated", "status", "updated_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    book_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("books.id", ondelete="CASCADE")
+    )
+    series_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("series.id", ondelete="CASCADE")
+    )
+    scope: Mapped[str] = mapped_column(String(16), nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="queued", server_default="queued"
+    )
+    input_fingerprint: Mapped[str | None] = mapped_column(String(64), index=True)
+    payload: Mapped[dict | None] = mapped_column(JSONB, default=dict)
+    refresh_job_id: Mapped[str | None] = mapped_column(String(128), index=True)
+    stale_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    failed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    error_code: Mapped[str | None] = mapped_column(String(128), index=True)
+    error_detail: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+    book = relationship("Book", back_populates="world_analysis_states")
+    series = relationship("Series")
+
+
+class WorldElement(GenerationScopedMixin, Base):
     """Structured world-building element extracted from the manuscript."""
 
     __tablename__ = "world_elements"
@@ -639,7 +879,7 @@ class WorldCanonicalIdentity(Base):
     book = relationship("Book", back_populates="world_canonical_identities")
 
 
-class WorldGapAnalysis(Base):
+class WorldGapAnalysis(GenerationScopedMixin, Base):
     """Cached world gap detection and integration analysis output."""
 
     __tablename__ = "world_gap_analyses"

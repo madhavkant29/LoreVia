@@ -16,10 +16,11 @@ describe("stats runtime page coverage", () => {
   it("renders populated, loading, unavailable, and gated states", async () => {
     await renderPage(<StatsPage />)
 
-    expect(text()).toContain("Writing momentum overview")
-    expect(text()).toContain("The Mirror Room")
+    expect(text()).toContain("Writing progress")
+    expect(text()).toContain("Progress summary")
+    expect(text()).toContain("Heatmap of saved writing")
     expect(text()).toContain("Books finished")
-    expect(text()).toContain("LLM tokens")
+    expect(text()).toContain("AI capacity")
 
     resetRenderedPage()
     useQueryMock.mockReturnValueOnce({

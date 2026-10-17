@@ -14,7 +14,7 @@ import { asQueryKey } from "@/lib/query/cacheKeys"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 import { resolveAssetUrl } from "@/lib/utils/assetUrls"
 import { formatReputationScore, getEligibleForumAuthorBooks } from "@/lib/utils/publicForum"
-import type { Book } from "@/types/book"
+import type { BookSelector } from "@/types/book"
 import type { PublicForumPost, PublicForumPostListResponse } from "@/types/public"
 import type { User } from "@/types/user"
 
@@ -50,7 +50,7 @@ export function PublicForumPageClient({
   const [ranking, setRanking] = useState(initialData?.ranking_key ?? "most_popular")
   const [timeWindow, setTimeWindow] = useState(initialData?.time_window ?? "monthly")
   const [viewer, setViewer] = useState<User | null>(null)
-  const [authorBooks, setAuthorBooks] = useState<Book[]>([])
+  const [authorBooks, setAuthorBooks] = useState<BookSelector[]>([])
   const [composerThreadType, setComposerThreadType] = useState<"novel" | "general">("novel")
   const [selectedBookId, setSelectedBookId] = useState("")
   const [headline, setHeadline] = useState("")
@@ -123,7 +123,7 @@ export function PublicForumPageClient({
         return
       }
       const [booksPayload, myForumPosts] = await Promise.all([
-        booksApi.list(true).catch(() => null),
+        booksApi.listSelector(true).catch(() => null),
         publicApi.listMyForumPosts().catch(() => null),
       ])
       if (!active) return
@@ -274,12 +274,7 @@ export function PublicForumPageClient({
           <Link href="/public" className={`text-sm ${isDark ? "text-slate-400 hover:text-white" : "text-slate-500 hover:text-slate-900"}`}>{"<- Back to public library"}</Link>
           <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
             <div className="min-w-0">
-              <div className="flex flex-wrap items-center gap-2 text-3xs font-semibold uppercase tracking-[0.18em]">
-                <span className={`rounded-md px-2.5 py-1 ${isDark ? "bg-[#1d2631] text-slate-200" : "bg-slate-100 text-slate-700"}`}>LoreVia Forum</span>
-                <span className={isDark ? "text-slate-500" : "text-slate-500"}>{feedTab === "ranked" ? "Ranked beta novels" : "General discussions"}</span>
-                <MetaDivider isDark={isDark} />
-                <span className={isDark ? "text-emerald-300" : "text-emerald-700"}>Live</span>
-              </div>
+              <p className={`text-sm font-semibold ${isDark ? "text-teal-300" : "text-teal-700"}`}>LoreVia discussions</p>
               <h1 className="mt-3 text-2xl font-semibold tracking-tight sm:text-3xl">
                 {feedTab === "ranked" ? "Beta novel rankings worth opening." : "General writing discussions."}
               </h1>
@@ -290,11 +285,9 @@ export function PublicForumPageClient({
               </p>
             </div>
 
-            <div className="grid grid-cols-3 gap-2 text-center text-sm lg:w-[280px]">
-              <StatCard isDark={isDark} value={String(activeData?.total ?? 0)} label="threads" />
-              <StatCard isDark={isDark} value={String(posts.filter((post) => post.allow_contact_requests).length)} label="open notes" />
-              <StatCard isDark={isDark} value={String(feedTab === "general" ? generalPage : page)} label="page" />
-            </div>
+            <p data-testid="forum-feed-summary" className={`text-sm ${isDark ? "text-slate-400" : "text-slate-600"}`}>
+              {(activeData?.total ?? 0).toLocaleString()} threads · {posts.filter((post) => post.allow_contact_requests).length} accepting reader notes · page {feedTab === "general" ? generalPage : page}
+            </p>
           </div>
 
           <div className="flex flex-wrap items-center gap-3">
@@ -316,7 +309,7 @@ export function PublicForumPageClient({
             </div>
           </div>
 
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div>
             <div className={`grid w-full gap-3 ${feedTab === "ranked" ? "lg:grid-cols-[minmax(0,1.2fr)_minmax(0,0.7fr)_minmax(0,0.7fr)]" : "lg:grid-cols-[minmax(0,1fr)]"}`}>
               <label className={`flex h-11 w-full items-center gap-3 rounded-md border px-4 ${isDark ? "border-white/10 bg-[#151b22]" : "border-slate-200 bg-white"}`}>
                 <SearchIcon className={isDark ? "text-slate-500" : "text-slate-400"} />
@@ -331,6 +324,7 @@ export function PublicForumPageClient({
               {feedTab === "ranked" ? (
                 <>
                   <select
+                    aria-label="Forum ranking"
                     value={ranking}
                     onChange={(event) => setRanking(event.target.value)}
                     className={`h-11 rounded-md border px-4 text-sm outline-none ${isDark ? "border-white/10 bg-[#151b22] text-slate-100" : "border-slate-200 bg-white text-slate-900"}`}
@@ -343,6 +337,7 @@ export function PublicForumPageClient({
                   </select>
 
                   <select
+                    aria-label="Forum ranking period"
                     value={timeWindow}
                     onChange={(event) => setTimeWindow(event.target.value)}
                     className={`h-11 rounded-md border px-4 text-sm outline-none ${isDark ? "border-white/10 bg-[#151b22] text-slate-100" : "border-slate-200 bg-white text-slate-900"}`}
@@ -356,21 +351,6 @@ export function PublicForumPageClient({
                 </>
               ) : null}
             </div>
-
-            {feedTab === "ranked" ? (
-              <div className="flex flex-wrap items-center gap-2 text-xs">
-                <ShellChip isDark={isDark} active>
-                  {posts[0]?.ranking?.label ?? "Ranked beta feed"}
-                </ShellChip>
-                <ShellChip isDark={isDark}>Open novel threads</ShellChip>
-                <ShellChip isDark={isDark}>Ratings and reader notes</ShellChip>
-              </div>
-            ) : (
-              <div className="flex flex-wrap items-center gap-2 text-xs">
-                <ShellChip isDark={isDark} active>General discussions</ShellChip>
-                <ShellChip isDark={isDark}>Community conversations</ShellChip>
-              </div>
-            )}
           </div>
         </div>
       </div>
@@ -381,7 +361,7 @@ export function PublicForumPageClient({
             <div className={`rounded-md border px-4 py-4 text-sm ${isDark ? "border-rose-500/30 bg-rose-500/10 text-rose-200" : "border-rose-200 bg-rose-50 text-rose-700"}`}>{error}</div>
           ) : null}
 
-          <div className="grid gap-3">
+          <div data-testid="forum-topic-list" className={`border-y ${isDark ? "border-white/10" : "border-slate-200"}`}>
             {(feedTab === "ranked" ? loading : generalLoading) ? (
               <div className={`rounded-md border px-4 py-5 text-sm ${isDark ? "border-white/10 bg-[#121821] text-slate-400" : "border-slate-200 bg-white text-slate-500"}`}>Loading forum posts...</div>
             ) : null}
@@ -425,7 +405,7 @@ export function PublicForumPageClient({
 
         <aside className="space-y-4 lg:sticky lg:top-4 lg:self-start">
           {viewer ? (
-            <section className={`rounded-lg border p-4 ${isDark ? "border-white/10 bg-[#121821]" : "border-slate-200 bg-white"}`}>
+            <section className={`border-y p-4 ${isDark ? "border-white/10" : "border-slate-200"}`}>
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <p className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-slate-500"}`}>Author tools</p>
@@ -434,7 +414,7 @@ export function PublicForumPageClient({
                     Switch between general community conversations and manuscript-specific beta-reader threads.
                   </p>
                 </div>
-                <span className={`rounded-full px-2.5 py-1 text-3xs font-semibold ${isDark ? "bg-white/[0.06] text-slate-300" : "bg-slate-100 text-slate-700"}`}>@{viewer.username || "member"}</span>
+                <span className={`text-xs font-semibold ${isDark ? "text-slate-400" : "text-slate-600"}`}>@{viewer.username || "member"}</span>
               </div>
               <div className={`mt-4 inline-flex rounded-md p-1 ${isDark ? "bg-white/[0.05]" : "bg-slate-100"}`}>
                 <button
@@ -565,8 +545,7 @@ export function PublicForumPageClient({
               </div>
             </section>
           ) : (
-            <section className={`rounded-lg border p-4 ${isDark ? "border-white/10 bg-[#121821]" : "border-slate-200 bg-white"}`}>
-              <p className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-slate-500"}`}>Browse first</p>
+            <section className={`border-y p-4 ${isDark ? "border-white/10" : "border-slate-200"}`}>
               <h2 className="mt-2 text-lg font-semibold">Read like a real beta reader</h2>
               <p className={`mt-2 text-sm leading-6 ${isDark ? "text-slate-400" : "text-slate-600"}`}>
                 Sign in to comment on active threads, react to other readers, and send a direct beta-read note when an author is open to contact.
@@ -574,29 +553,6 @@ export function PublicForumPageClient({
             </section>
           )}
 
-          <section className={`rounded-lg border p-4 ${isDark ? "border-white/10 bg-[#121821]" : "border-slate-200 bg-white"}`}>
-            <p className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-slate-500"}`}>How this feed works</p>
-            <div className="mt-4 space-y-3 text-sm">
-              <InfoRow
-                isDark={isDark}
-                icon={<CompassIcon className={isDark ? "text-amber-300" : "text-orange-600"} />}
-                title="Discovery first"
-                body="Novel threads surface through ranking windows like top rated, most popular, big cast, and recently updated."
-              />
-              <InfoRow
-                isDark={isDark}
-                icon={<ThreadIcon className={isDark ? "text-amber-300" : "text-orange-600"} />}
-                title="Split thread system"
-                body="Users can open general discussions daily, but each novel can only have one open manuscript thread at a time."
-              />
-              <InfoRow
-                isDark={isDark}
-                icon={<InboxIcon className={isDark ? "text-amber-300" : "text-orange-600"} />}
-                title="Reader intent matters"
-                body="Authors can collect serious beta-read requests without exposing the manuscript itself."
-              />
-            </div>
-          </section>
         </aside>
       </div>
     </div>
@@ -606,18 +562,17 @@ export function PublicForumPageClient({
 function ForumFeedCard({ isDark, post }: { isDark: boolean, post: PublicForumPost }) {
   const isNovelThread = (post.thread_type || "novel") === "novel"
   return (
-    <article className={`overflow-hidden rounded-lg border transition ${isDark ? "border-white/10 bg-[#121821]" : "border-slate-200 bg-white"}`}>
+    <article className={`border-b py-5 last:border-b-0 ${isDark ? "border-white/10" : "border-slate-200"}`}>
       <div className="flex">
-        <div className={`flex w-[72px] shrink-0 flex-col items-center justify-start gap-2 border-r px-3 py-4 ${isDark ? "border-white/10 bg-[#0f141b]" : "border-slate-200 bg-slate-50/70"}`}>
-          <VoteArrowIcon className={isDark ? "text-slate-500" : "text-slate-400"} />
+        <div className={`flex w-[62px] shrink-0 flex-col items-center justify-start gap-1 border-r px-3 ${isDark ? "border-white/10" : "border-slate-200"}`}>
           <span className="text-lg font-semibold">{Math.round(post.discoverability_score)}</span>
-          <span className={`text-3xs uppercase tracking-[0.16em] ${isDark ? "text-slate-500" : "text-slate-500"}`}>pulse</span>
+          <span className={`text-xs ${isDark ? "text-slate-500" : "text-slate-500"}`}>score</span>
         </div>
 
-        <div className="min-w-0 flex-1 px-4 py-4 sm:px-5">
+        <div className="min-w-0 flex-1 px-4 sm:px-5">
           <div className="flex flex-wrap items-center gap-2 text-xs">
             {post.ranking?.label ? (
-              <span className={`rounded-full px-2 py-1 font-semibold ${isDark ? "bg-amber-400/12 text-amber-200" : "bg-orange-100 text-orange-700"}`}>
+              <span className={`font-semibold ${isDark ? "text-amber-200" : "text-orange-700"}`}>
                 #{post.ranking.position ?? "?"} {post.ranking.label}
               </span>
             ) : null}
@@ -627,11 +582,11 @@ function ForumFeedCard({ isDark, post }: { isDark: boolean, post: PublicForumPos
             <MetaText isDark={isDark}>{post.author_trust_level}</MetaText>
             <MetaDivider isDark={isDark} />
             <MetaText isDark={isDark}>rep {formatReputationScore(post.author_reputation_score)}</MetaText>
-            <span className={`rounded-full px-2 py-1 font-semibold ${isNovelThread ? (isDark ? "bg-amber-400/12 text-amber-200" : "bg-amber-100 text-amber-700") : (isDark ? "bg-teal-400/12 text-teal-200" : "bg-teal-100 text-teal-700")}`}>
+            <span className={`font-semibold ${isNovelThread ? (isDark ? "text-amber-200" : "text-amber-700") : (isDark ? "text-teal-200" : "text-teal-700")}`}>
               {isNovelThread ? "novel" : "general"}
             </span>
             {isNovelThread && post.allow_contact_requests ? (
-              <span className={`rounded-full px-2 py-1 font-semibold ${isDark ? "bg-emerald-400/12 text-emerald-200" : "bg-emerald-100 text-emerald-700"}`}>open to reader notes</span>
+              <span className={isDark ? "text-emerald-200" : "text-emerald-700"}>open to reader notes</span>
             ) : null}
           </div>
 
@@ -664,7 +619,7 @@ function ForumFeedCard({ isDark, post }: { isDark: boolean, post: PublicForumPos
             <p className={`mt-3 text-xs leading-6 ${isDark ? "text-slate-400" : "text-slate-500"}`}>{post.ranking.supporting_note}</p>
           ) : null}
 
-          <div className="mt-4 flex flex-wrap items-center gap-2 text-xs">
+          <div className={`mt-4 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs ${isDark ? "text-slate-400" : "text-slate-600"}`}>
             <ActionPill isDark={isDark} icon={<CommentBubbleIcon className="h-3.5 w-3.5" />}>
               {post.comment_count} comments
             </ActionPill>
@@ -689,22 +644,21 @@ function ForumFeedCard({ isDark, post }: { isDark: boolean, post: PublicForumPos
             ) : null}
           </div>
 
-          <div className="mt-4 flex flex-wrap items-center gap-3">
+          <div className="mt-4 flex flex-wrap items-center gap-4 text-sm">
             <Link
               href={`/public/forum/${post.id}` as Route}
-              className={`inline-flex h-10 items-center justify-center rounded-md px-4 text-sm font-semibold transition ${isDark ? "bg-teal-300 text-slate-950 hover:bg-teal-200" : "bg-[#1f615d] text-white hover:bg-[#174c49]"}`}
+              className={`font-semibold ${isDark ? "text-teal-200 hover:text-white" : "text-teal-700 hover:text-teal-900"}`}
             >
-              Open thread
+              Open thread →
             </Link>
             {post.author_username ? (
               <Link
-                href={`/chats?username=${encodeURIComponent(post.author_username)}` as Route}
-                className={`inline-flex h-10 items-center justify-center rounded-md px-4 text-sm font-semibold transition ${isDark ? "border border-white/10 bg-white/[0.04] text-slate-100 hover:bg-white/[0.08]" : "border border-slate-200 bg-white text-slate-900 hover:bg-slate-50"}`}
+                href={`/public/writers/${post.author_username}` as Route}
+                className={isDark ? "text-slate-400 hover:text-white" : "text-slate-600 hover:text-slate-900"}
               >
-                Message @{post.author_username}
+                View @{post.author_username}
               </Link>
             ) : null}
-            <MetaText isDark={isDark}>{isNovelThread ? "Rank updates use ratings, comments, reader intent, craft signals, and update cadence." : "General threads are for broader craft and community discussion."}</MetaText>
           </div>
         </div>
       </div>
@@ -783,36 +737,9 @@ function formatRelativeDay(value: string): string {
   return `${deltaDays}d ago`
 }
 
-function StatCard({ isDark, value, label }: { isDark: boolean, value: string, label: string }) {
-  return (
-    <div className={`rounded-md px-3 py-3 ${isDark ? "bg-[#151b22]" : "bg-white ring-1 ring-slate-200"}`}>
-      <p className="text-lg font-semibold">{value}</p>
-      <p className={`mt-1 text-3xs uppercase tracking-[0.16em] ${isDark ? "text-slate-500" : "text-slate-500"}`}>{label}</p>
-    </div>
-  )
-}
-
-function ShellChip({ children, isDark, active = false }: { children: React.ReactNode, isDark: boolean, active?: boolean }) {
-  const activeClass = isDark
-    ? "border-amber-400/30 bg-amber-400/10 text-amber-100"
-    : "border-orange-200 bg-orange-50 text-orange-700"
-  const idleClass = isDark
-    ? "border-white/10 bg-white/[0.04] text-slate-300"
-    : "border-slate-200 bg-white text-slate-600"
-
-  return (
-    <span className={`inline-flex items-center rounded-full border px-3 py-2 ${active ? activeClass : idleClass}`}>
-      {children}
-    </span>
-  )
-}
-
 function UserBadge({ isDark, username }: { isDark: boolean, username: string }) {
   return (
-    <span className={`inline-flex items-center gap-2 rounded-full px-2.5 py-1 font-medium ${isDark ? "bg-white/[0.05] text-slate-100" : "bg-slate-100 text-slate-900"}`}>
-      <span className={`flex h-5 w-5 items-center justify-center rounded-full text-3xs font-semibold ${isDark ? "bg-[#202834] text-slate-100" : "bg-white text-slate-700 ring-1 ring-slate-200"}`}>
-        {username.slice(0, 1).toUpperCase()}
-      </span>
+    <span className={`font-semibold ${isDark ? "text-slate-200" : "text-slate-900"}`}>
       @{username}
     </span>
   )
@@ -820,7 +747,7 @@ function UserBadge({ isDark, username }: { isDark: boolean, username: string }) 
 
 function ActionPill({ children, icon, isDark }: { children: React.ReactNode, icon?: React.ReactNode, isDark: boolean }) {
   return (
-    <span className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 ${isDark ? "bg-white/[0.04] text-slate-300" : "bg-slate-100 text-slate-700"}`}>
+    <span className={`inline-flex items-center gap-1.5 ${isDark ? "text-slate-400" : "text-slate-600"}`}>
       {icon}
       {children}
     </span>
@@ -833,28 +760,6 @@ function MetaText({ children, isDark }: { children: React.ReactNode, isDark: boo
 
 function MetaDivider({ isDark }: { isDark: boolean }) {
   return <span className={`h-1 w-1 rounded-full ${isDark ? "bg-slate-600" : "bg-slate-400"}`} aria-hidden="true" />
-}
-
-function InfoRow({
-  isDark,
-  icon,
-  title,
-  body,
-}: {
-  isDark: boolean
-  icon: React.ReactNode
-  title: string
-  body: string
-}) {
-  return (
-    <div className="flex items-start gap-3">
-      <span className="mt-0.5">{icon}</span>
-      <div>
-        <p className="font-medium">{title}</p>
-        <p className={isDark ? "text-slate-400" : "text-slate-600"}>{body}</p>
-      </div>
-    </div>
-  )
 }
 
 function SearchIcon({ className }: { className?: string }) {
@@ -886,23 +791,6 @@ function CommentBubbleIcon({ className }: { className?: string }) {
   return (
     <svg viewBox="0 0 20 20" fill="none" className={`${className || "h-4 w-4"}`} aria-hidden="true">
       <path d="M4 4.75h12a1.25 1.25 0 0 1 1.25 1.25v7A1.25 1.25 0 0 1 16 14.25H9.5l-3.75 2.5V14.25H4A1.25 1.25 0 0 1 2.75 13V6A1.25 1.25 0 0 1 4 4.75Z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
-    </svg>
-  )
-}
-
-function CompassIcon({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 20 20" fill="none" className={`h-4 w-4 ${className || ""}`} aria-hidden="true">
-      <circle cx="10" cy="10" r="7" stroke="currentColor" strokeWidth="1.5" />
-      <path d="m12.75 7.25-1.94 5.56-5.56 1.94 1.94-5.56 5.56-1.94Z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
-    </svg>
-  )
-}
-
-function ThreadIcon({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 20 20" fill="none" className={`h-4 w-4 ${className || ""}`} aria-hidden="true">
-      <path d="M4.5 5.5h11M4.5 10h8M4.5 14.5h6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
     </svg>
   )
 }

@@ -2,7 +2,7 @@ import "server-only"
 
 import { resolveApiOrigin } from "@/lib/constants"
 import { normalizeBookRouteId } from "@/lib/utils/bookRoutes"
-import type { Book } from "@/types/book"
+import type { BookPage } from "./books"
 import type { ChapterData } from "@/types/reader"
 
 const API_BASE = `${resolveApiOrigin()}/api/v1`
@@ -44,8 +44,15 @@ export const serverApi = {
   },
 
   listBooks(includeHidden: boolean, cookieHeader: string | null) {
-    return fetchAuthenticatedJson<Book[]>(
-      `/books?include_hidden=${includeHidden}`,
+    return fetchAuthenticatedJson<BookPage>(
+      `/books/page?include_hidden=${includeHidden}&limit=100`,
+      cookieHeader,
+    ).then((page) => page?.items ?? null)
+  },
+
+  listBooksPage(includeHidden: boolean, cookieHeader: string | null) {
+    return fetchAuthenticatedJson<BookPage>(
+      `/books/page?include_hidden=${includeHidden}&limit=50`,
       cookieHeader,
     )
   },

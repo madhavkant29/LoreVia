@@ -1,32 +1,43 @@
-FROM python:3.12-slim
+FROM python:3.12.14-slim-trixie@sha256:f77ac9e44ae96ef2c90b8053ea08c31f8be030f824196b0ae4db6d462c84e51f
 WORKDIR /app
 
-# Cloudflare tunnel enforcement is header-based and does not require the
-# cloudflared binary in local compose or standard deployments. Keep the
-# download opt-in for environments that still want the executable bundled.
-ARG INSTALL_CLOUDFLARED=0
-RUN if [ "$INSTALL_CLOUDFLARED" = "1" ]; then \
-        apt-get update && apt-get install -y curl && \
-        curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 \
-        -o /usr/local/bin/cloudflared && \
-        chmod +x /usr/local/bin/cloudflared && \
-        apt-get clean && rm -rf /var/lib/apt/lists/*; \
-    fi
+# Security gate: the pinned base digest can lag Debian point releases. Apply
+# repository security updates so the release image carries patched system
+# packages (checked by the container-image-scan CI job).
+RUN apt-get update \
+    && apt-get upgrade -y \
+    && rm -rf /var/lib/apt/lists/*
+
+# Keep the network-facing process on a fixed unprivileged service account.
+# The image-owned local-storage directory is writable by the same account.
+RUN groupadd -g 10001 app && useradd -m -u 10001 -g 10001 -s /bin/bash app && \
+    mkdir -p /app/storage && \
+    chown -R app:app /app
 
 COPY backend/requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Optional asset prefetch for network-permitted environments. Local compose
-# and restricted builders can skip these without breaking startup because the
-# application already degrades gracefully when the spaCy model is absent.
-ARG PREFETCH_MODEL_ASSETS=0
-RUN if [ "$PREFETCH_MODEL_ASSETS" = "1" ]; then \
-        python -c "import tiktoken; tiktoken.encoding_for_model('gpt-4o-mini')" && \
+# Token accounting must not depend on a first-request network download.
+ENV DATA_GYM_CACHE_DIR=/opt/lorevia/tiktoken
+RUN mkdir -p "$DATA_GYM_CACHE_DIR" \
+    && python -c "import tiktoken; tiktoken.encoding_for_model('gpt-4o-mini')" \
+    && chmod -R a=rX "$DATA_GYM_CACHE_DIR"
+
+# The optional spaCy model has a tested conservative fallback, so builders may
+# opt into the larger language asset without making it a release prerequisite.
+ARG PREFETCH_SPACY_MODEL=0
+RUN if [ "$PREFETCH_SPACY_MODEL" = "1" ]; then \
         python -m spacy download en_core_web_sm; \
     fi
 
 COPY backend/ .
-RUN chmod +x start.sh
+RUN chmod +x start.sh worker-start.sh && chown -R app:app /app
+
+ARG RELEASE_SHA=unknown
+ENV RELEASE_SHA=$RELEASE_SHA
+LABEL org.opencontainers.image.revision=$RELEASE_SHA
 
 EXPOSE 8000
+USER 10001:10001
+ENTRYPOINT ["./worker-start.sh"]
 CMD ["./start.sh"]

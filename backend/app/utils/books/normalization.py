@@ -1,5 +1,5 @@
 """
-Book utility helpers ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â DB query wrappers, cover management, progress
+Book utility helpers — DB query wrappers, cover management, progress
 computation, manuscript parsing, and chapter number utilities extracted
 from the books route.
 """
@@ -22,6 +22,8 @@ if TYPE_CHECKING:
 
 BOOK_WORK_TYPES = {"novel", "screenplay", "other"}
 UPLOAD_EXTENSION_TO_FORMAT = {
+    ".scriv.zip": "scrivener",
+    ".scrivzip": "scrivener",
     ".pdf": "pdf",
     ".epub": "epub",
     ".docx": "docx",
@@ -33,6 +35,7 @@ UPLOAD_EXTENSION_TO_FORMAT = {
     ".script": "fountain",
 }
 FORMAT_TO_UPLOAD_EXTENSION = {
+    "scrivener": ".scrivzip",
     "pdf": ".pdf",
     "epub": ".epub",
     "docx": ".docx",
@@ -43,7 +46,7 @@ FORMAT_TO_UPLOAD_EXTENSION = {
 }
 SCREENPLAY_INFER_FORMATS = {"fountain"}
 SCREENPLAY_INPUT_FORMATS = {"pdf", "fountain", "txt", "md"}
-TEXT_ONLY_UPLOAD_FORMATS = {"docx", "doc", "txt", "md"}
+TEXT_ONLY_UPLOAD_FORMATS = {"docx", "doc", "txt", "md", "scrivener"}
 SCENE_BREAK_LINE_RE = re.compile(r"^\s*(?:#(?:\s*#)*|\*\s*\*\s*\*)\s*$", re.MULTILINE)
 SCENE_HEADING_LINE_RE = re.compile(r"^\s*#{1,3}(?:\s+(.*?))?\s*$")
 SCENE_METADATA_LABELS = {
@@ -383,6 +386,12 @@ _CHAPTER_KIND_LABELS: dict[str, str] = {
     "index": "Index",
     "title_page": "Title Page",
     "copyright": "Copyright",
+    "notes": "Author’s Note",
+    "glossary": "Glossary",
+    "chronology": "Chronology",
+    "part_opening": "Part Opening",
+    "interlude": "Interlude",
+    "unknown": "Section",
 }
 
 _CHAPTER_KIND_ALIASES: dict[str, str] = {

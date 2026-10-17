@@ -325,11 +325,11 @@ export default function HomePage() {
             title="Questions worth settling before you start."
             align="center"
           />
-          <div className="mx-auto mt-8 grid max-w-5xl items-start gap-4 md:grid-cols-2">
+          <div className="mx-auto mt-8 max-w-4xl border-y border-white/[0.1]">
             {faqItems.map((item) => (
               <details
                 key={item.q}
-                className="group self-start rounded-lg border border-white/[0.08] bg-[#0d1715] p-5 open:border-[#235f57]"
+                className="group border-b border-white/[0.1] py-5 last:border-b-0"
               >
                 <summary className="flex cursor-pointer list-none items-center justify-between gap-4 text-lg font-semibold text-white">
                   <span>{item.q}</span>
@@ -342,7 +342,7 @@ export default function HomePage() {
         </Section>
 
         <section className="mx-auto max-w-7xl px-5 pb-22 pt-6 md:px-8">
-          <div className="rounded-lg border border-[#665128] bg-[#171719] px-6 py-8 md:px-10 md:py-10">
+          <div className="border-y border-[#665128] py-9">
             <div className="grid gap-6 lg:grid-cols-[1fr_auto] lg:items-center">
               <div>
                 <h2 className="font-display text-4xl font-semibold leading-tight text-[#f4f1ea] md:text-5xl">

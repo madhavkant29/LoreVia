@@ -18,6 +18,7 @@ WORKER_ROLES = {
     "analysis": WorkerRole("analysis,analysis_priority", "ANALYSIS_WORKER_CONCURRENCY"),
     "embedding": WorkerRole("embedding", "EMBEDDING_WORKER_CONCURRENCY"),
     "intelligence": WorkerRole("intelligence", "INTELLIGENCE_WORKER_CONCURRENCY"),
+    "maintenance": WorkerRole("maintenance", "MAINTENANCE_WORKER_CONCURRENCY"),
 }
 
 

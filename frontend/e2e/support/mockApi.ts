@@ -3,14 +3,19 @@ import type { Character } from "@/types/character"
 import type { EmailPreferences } from "@/types/email"
 import type { ContinuityFinding, PublicBook, RevisionIntelligence } from "@/types/book"
 import type { PublicForumPost } from "@/types/public"
+import type { DirectMessage } from "@/types/social"
+import { patchRevisionIntelligenceItem } from "@/lib/utils/revisionIntelligence"
 
 type SessionMode = "authenticated" | "guest"
 type LoginMode = "success" | "unauthorized"
 type AdminMode = "none" | "moderation" | "billing" | "super" | "owner"
 type VoiceConsistencyMode = "success" | "backend-error" | "weak-attribution" | "selected-character"
 type CharacterBibleMode = "default" | "review-only"
-type ManuscriptProcessingMode = "default" | "refresh-after-two-book-reads" | "allowance-paused"
-type UserTierMode = "author" | "free"
+type ManuscriptProcessingMode = "default" | "refresh-after-two-book-reads" | "allowance-paused" | "token-auto-paused"
+type UserTierMode = "author" | "free" | "trial"
+type FirstImpressionMode = "complete" | "cached" | "failed" | "running"
+type MockWorkType = "novel" | "screenplay" | "other"
+type MockBookMode = "author" | "reader"
 
 type MockOptions = {
   session?: SessionMode
@@ -21,6 +26,16 @@ type MockOptions = {
   manuscriptProcessing?: ManuscriptProcessingMode
   userTier?: UserTierMode
   activationPending?: boolean
+  activationClean?: boolean
+  firstImpression?: FirstImpressionMode
+  workType?: MockWorkType
+  bookMode?: MockBookMode
+  workspaceShell?: MockBookMode
+  readerBootstrapProfile?: "critical"
+  betaReaderStale?: boolean
+  chapterReports?: boolean
+  zeroProjects?: boolean
+  seriesBooks?: boolean
 }
 
 const ADMIN_TEST_SESSION_COOKIE = "lorevia_admin_test_session"
@@ -36,6 +51,10 @@ function normalizeMockApiPath(pathname: string) {
     .replace(/^\/api\/v1\/intelligence\/[^/]+--([^/]+)(?=\/|$)/, "/api/v1/intelligence/$1")
 }
 
+function countWords(text: string) {
+  return text.trim().split(/\s+/).filter(Boolean).length
+}
+
 const user = {
   id: "user-1",
   email: "author@getlorevia.com",
@@ -47,7 +66,7 @@ const user = {
   trial_ends_at: null,
   reading_mode: "analyst",
   daily_word_goal: 1200,
-  today_word_count: 450,
+  today_word_count: 0,
   last_login_at: "2026-05-08T10:00:00Z",
   login_streak_days: 7,
   longest_login_streak_days: 12,
@@ -103,6 +122,14 @@ const book = {
     updated_at: "2026-05-08T11:45:00Z",
     last_error: null,
   },
+}
+
+const comparisonBook = {
+  ...book,
+  id: "book-2",
+  title: "Embers Beyond the Gate",
+  series_order: 2,
+  created_at: "2026-05-09T12:00:00Z",
 }
 
 const initialPublicForumPosts: PublicForumPost[] = [
@@ -332,6 +359,9 @@ let publicForumComments: Array<{
   updated_at: string
 }> = JSON.parse(JSON.stringify(initialPublicForumComments))
 
+const publicSampleChapterText = "Nora crossed the ash gate before the bells could name her."
+const publicSampleChapterWordCount = countWords(publicSampleChapterText)
+
 function buildNestedForumComments(postId: string) {
   const postComments = publicForumComments
     .filter((comment) => comment.post_id === postId)
@@ -396,11 +426,11 @@ const publicWriterProfiles = {
           chapter_view_count: 244,
           published_at: "2026-05-14T08:00:00Z",
           chapter_count: 1,
-          total_words: 2450,
+          total_words: publicSampleChapterWordCount,
           has_open_discussion: true,
           open_discussion_count: 1,
-          discussion_comment_count: 2,
-          discussion_interest_count: 3,
+          discussion_comment_count: countForumComments("forum-post-1"),
+          discussion_interest_count: initialPublicForumPosts.find((post) => post.id === "forum-post-1")?.interest_count ?? 0,
         },
       },
     ],
@@ -410,7 +440,7 @@ const publicWriterProfiles = {
       total_chapter_views: 244,
       total_public_books: 1,
       total_chapters: 1,
-      total_words: 2450,
+      total_words: publicSampleChapterWordCount,
       latest_published_at: "2026-05-14T08:00:00Z",
       open_forum_discussions_count: 1,
     },
@@ -493,11 +523,11 @@ const publicBooks: PublicBook[] = [
       chapter_view_count: 212,
       published_at: "2026-05-14T08:00:00Z",
       chapter_count: 1,
-      total_words: 1800,
+      total_words: publicSampleChapterWordCount,
       has_open_discussion: true,
       open_discussion_count: 1,
-      discussion_comment_count: 7,
-      discussion_interest_count: 3,
+      discussion_comment_count: countForumComments("forum-post-1"),
+      discussion_interest_count: initialPublicForumPosts.find((post) => post.id === "forum-post-1")?.interest_count ?? 0,
     },
   },
 ]
@@ -508,8 +538,20 @@ const publicUploadsOverview = {
   total_visible_chapters: publicBooks.reduce((total, book) => total + (book.analytics?.chapter_count ?? book.total_chapters ?? 0), 0),
   total_visible_words: publicBooks.reduce((total, book) => total + (book.analytics?.total_words ?? 0), 0),
   uploads_last_30_days: publicBooks.length,
-  genre_breakdown: [{ label: "Epic Fantasy", count: 1 }],
-  work_type_breakdown: [{ label: "Novel", count: 1 }],
+  genre_breakdown: Array.from(
+    publicBooks.reduce((counts, book) => {
+      const genre = book.genre || "Unspecified"
+      return counts.set(genre, (counts.get(genre) ?? 0) + 1)
+    }, new Map<string, number>()),
+    ([label, count]) => ({ label, count }),
+  ),
+  work_type_breakdown: Array.from(
+    publicBooks.reduce((counts, book) => {
+      const workType = book.work_type || "other"
+      return counts.set(workType, (counts.get(workType) ?? 0) + 1)
+    }, new Map<string, number>()),
+    ([label, count]) => ({ label: label.charAt(0).toUpperCase() + label.slice(1), count }),
+  ),
   recent_uploads: publicBooks,
 }
 
@@ -535,8 +577,8 @@ const publicChapters = {
     chapter_description: "A spoiler-safe sample chapter for public readers.",
     total_chapters: 1,
     text_url: null,
-    text_content: "Nora crossed the ash gate before the bells could name her.",
-    html_content: "<p>Nora crossed the ash gate before the bells could name her.</p>",
+    text_content: publicSampleChapterText,
+    html_content: `<p>${publicSampleChapterText}</p>`,
   },
 }
 
@@ -560,8 +602,8 @@ const initialBetaReads = [
     required_comment_count: 3,
     required_feedback_item_count: 3,
     require_final_feedback: true,
-    starts_at: "2026-05-13T12:00:00Z",
-    expires_at: "2026-05-14T23:59:00Z",
+    starts_at: "2026-09-21T12:00:00Z",
+    expires_at: "2026-09-25T23:59:00Z",
     access_granted_at: "2026-05-13T12:00:00Z",
     submitted_at: null,
     completed_at: null,
@@ -610,8 +652,8 @@ const initialBetaReads = [
     required_comment_count: 3,
     required_feedback_item_count: 4,
     require_final_feedback: true,
-    starts_at: "2026-05-14T10:00:00Z",
-    expires_at: "2026-05-16T23:59:00Z",
+    starts_at: "2026-09-22T10:00:00Z",
+    expires_at: "2026-09-28T23:59:00Z",
     access_granted_at: "2026-05-14T10:00:00Z",
     submitted_at: null,
     completed_at: null,
@@ -660,8 +702,8 @@ const initialBetaReads = [
     required_comment_count: 3,
     required_feedback_item_count: 3,
     require_final_feedback: true,
-    starts_at: "2026-05-12T12:00:00Z",
-    expires_at: "2026-05-18T23:59:00Z",
+    starts_at: "2026-09-20T12:00:00Z",
+    expires_at: "2026-09-26T23:59:00Z",
     access_granted_at: "2026-05-12T12:00:00Z",
     submitted_at: null,
     completed_at: null,
@@ -710,8 +752,8 @@ const initialBetaReads = [
     required_comment_count: 2,
     required_feedback_item_count: 2,
     require_final_feedback: true,
-    starts_at: "2026-05-18T12:00:00Z",
-    expires_at: "2026-05-22T23:59:00Z",
+    starts_at: "2026-09-27T12:00:00Z",
+    expires_at: "2026-10-01T23:59:00Z",
     access_granted_at: "2026-05-14T10:00:00Z",
     submitted_at: null,
     completed_at: null,
@@ -1006,61 +1048,102 @@ function computeBetaReadSummary(feedbackItems: Array<{ kind: string }>) {
   }
 }
 
-const booksStats = {
-  public: {
-    total_books_read: 2,
-    total_words_read: 60171,
-  },
-  private: {
-    total_uploads: 4,
-    total_token_consumption: 42000,
-    total_chapters_tracked: 19,
-    saved_quotes: 11,
-  },
-  writing: {
-    today: { words: 1202, target_words: 1200, progress_pct: 100 },
-    this_week: { words: 2565, target_words: 8400, progress_pct: 31 },
-    this_month: { words: 23065, target_words: null, progress_pct: null },
-    this_year: { words: 60171, target_words: null, progress_pct: null },
-    last_24_hours: { words: 2565, target_words: null, progress_pct: null },
-    last_7_days: { words: 14678, target_words: null, progress_pct: null },
-    last_30_days: { words: 60171, target_words: null, progress_pct: null },
-    last_year: { words: 60171, target_words: null, progress_pct: null },
-    heatmap: [
-      "2026-04-20",
-      "2026-04-21",
-      "2026-04-22",
-      "2026-04-23",
-      "2026-04-24",
-      "2026-04-25",
-      "2026-04-26",
-      "2026-04-27",
-      "2026-04-28",
-      "2026-04-29",
-      "2026-04-30",
-      "2026-05-01",
-      "2026-05-02",
-      "2026-05-03",
-      "2026-05-04",
-      "2026-05-05",
-      "2026-05-06",
-      "2026-05-07",
-      "2026-05-08",
-      "2026-05-09",
-      "2026-05-10",
-      "2026-05-11",
-      "2026-05-12",
-      "2026-05-13",
-      "2026-05-14",
-    ].map((date, index) => ({
-      date,
-      words: [0, 0, 120, 240, 0, 80, 0, 0, 0, 160, 220, 310, 0, 0, 450, 610, 720, 900, 1040, 1150, 0, 430, 580, 762, 1202][index] ?? 0,
-    })),
-    entries_today: [
-      { book_id: "book-1", chapter_number: 36, title: "Chapter XXXVI", words: 763 },
-      { book_id: "book-1", chapter_number: null, title: "Epilogue", words: 439 },
-    ],
-  },
+type MockStatsBook = {
+  total_chapters?: number | null
+  total_tokens?: number | null
+  total_words?: number | null
+}
+
+type MockStatsChapterList = {
+  chapters?: Array<{ word_count?: number | null }>
+}
+
+function buildBooksStats(mockBook: MockStatsBook | null, mockChapterList: MockStatsChapterList | null, dailyWordGoal = user.daily_word_goal) {
+  const activeWordLimit = 2_000_000
+  const monthlyProcessedWordLimit = 1_000_000
+  const sourceStorageLimitBytes = 5 * 1024 ** 3
+  const uploadLimit = 5
+  const chapters = mockChapterList?.chapters ?? []
+  const chapterWords = chapters.reduce((total, chapter) => total + Math.max(0, Number(chapter.word_count ?? 0) || 0), 0)
+  const activeWords = Math.max(0, Number(mockBook?.total_words ?? chapterWords) || 0)
+  const uploadCount = mockBook ? 1 : 0
+
+  return {
+    public: {
+      total_books_read: 0,
+      total_words_read: 0,
+    },
+    private: {
+      total_uploads: uploadCount,
+      manuscript_uploads: uploadCount,
+      worldbuilding_uploads: 0,
+      upload_limit: uploadLimit,
+      uploads_remaining: Math.max(uploadLimit - uploadCount, 0),
+      upload_limit_unlimited: false,
+      active_analyzed_words: activeWords,
+      active_word_limit: activeWordLimit,
+      active_words_remaining: Math.max(activeWordLimit - activeWords, 0),
+      monthly_processed_words: activeWords,
+      monthly_processed_word_limit: monthlyProcessedWordLimit,
+      monthly_processed_words_remaining: Math.max(monthlyProcessedWordLimit - activeWords, 0),
+      source_storage_bytes: 0,
+      source_storage_limit_bytes: sourceStorageLimitBytes,
+      source_storage_remaining_bytes: sourceStorageLimitBytes,
+      allowances_enforced: true,
+      total_token_consumption: Math.max(0, Number(mockBook?.total_tokens ?? 0) || 0),
+      llm_request_count: 0,
+      llm_prompt_tokens: 0,
+      llm_completion_tokens: 0,
+      llm_total_tokens: 0,
+      ai_interactive_available: true,
+      ai_processing_available: true,
+      ai_capacity_usage_percent: 0,
+      ai_capacity_resets_at: null,
+      total_chapters_tracked: mockBook ? chapters.length || Math.max(0, Number(mockBook.total_chapters ?? 0) || 0) : 0,
+      saved_quotes: 0,
+    },
+    writing: {
+      today: { words: 0, target_words: dailyWordGoal, progress_pct: 0 },
+      this_week: { words: 0, target_words: dailyWordGoal * 7, progress_pct: 0 },
+      this_month: { words: 0, target_words: null, progress_pct: null },
+      this_year: { words: 0, target_words: null, progress_pct: null },
+      last_24_hours: { words: 0, target_words: null, progress_pct: null },
+      last_7_days: { words: 0, target_words: null, progress_pct: null },
+      last_30_days: { words: 0, target_words: null, progress_pct: null },
+      last_year: { words: 0, target_words: null, progress_pct: null },
+      heatmap: [
+        "2026-04-20",
+        "2026-04-21",
+        "2026-04-22",
+        "2026-04-23",
+        "2026-04-24",
+        "2026-04-25",
+        "2026-04-26",
+        "2026-04-27",
+        "2026-04-28",
+        "2026-04-29",
+        "2026-04-30",
+        "2026-05-01",
+        "2026-05-02",
+        "2026-05-03",
+        "2026-05-04",
+        "2026-05-05",
+        "2026-05-06",
+        "2026-05-07",
+        "2026-05-08",
+        "2026-05-09",
+        "2026-05-10",
+        "2026-05-11",
+        "2026-05-12",
+        "2026-05-13",
+        "2026-05-14",
+      ].map((date) => ({
+        date,
+        words: 0,
+      })),
+      entries_today: [],
+    },
+  }
 }
 
 const chapterList = {
@@ -1075,7 +1158,7 @@ const chapterList = {
 
 let mockReadingProgress = {
   current_chapter: 2,
-  scroll_pct: 35,
+  scroll_pct: 0.35,
   chapters_read_count: 2,
   percent_complete: 64,
   chapters_left: 1,
@@ -1801,10 +1884,28 @@ const notifications = {
         top_item_title: "Chapter 2 assumption may break later payoff",
       },
       read_at: null,
-      created_at: "2026-05-11T11:00:00Z",
+      created_at: "2026-09-22T08:30:00Z",
+    },
+    {
+      id: "notification-ready-1",
+      book_id: "book-1",
+      kind: "book_ready",
+      title: "Sky of Ash is ready",
+      body: "Your manuscript is ready to review.",
+      data: {
+        analysis_complete: true,
+        character_count: 4,
+        relationship_count: 3,
+        plot_thread_count: 2,
+        continuity_issue_count: 1,
+      },
+      read_at: "2026-09-21T17:20:00Z",
+      created_at: "2026-09-21T17:15:00Z",
     },
   ],
   unread_count: 1,
+  next_cursor: null,
+  has_more: false,
 }
 
 const notes = [
@@ -1888,13 +1989,15 @@ const initialCollaborators = [
 
 const collaborators = JSON.parse(JSON.stringify(initialCollaborators))
 
+const worldBuildingDocumentText = "Northreach is a desert capital. Glass Road is the main trade route. Salt Marks are used for tolls."
+
 const worldBuildingDocuments = [
   {
     id: "world-doc-1",
     book_id: "book-1",
     title: "Core World Notes",
     source_name: "core-world-notes.txt",
-    word_count: 186,
+    word_count: countWords(worldBuildingDocumentText),
     is_active: true,
     archived_at: null,
     created_at: "2026-05-08T10:00:00Z",
@@ -1904,7 +2007,7 @@ const worldBuildingDocuments = [
 
 const worldBuildingDocumentDetail = {
   ...worldBuildingDocuments[0],
-  text: "Northreach is a desert capital. Glass Road is the main trade route. Salt Marks are used for tolls.",
+  text: worldBuildingDocumentText,
   html: null,
 }
 
@@ -2160,6 +2263,126 @@ const weakAttributionVoiceConsistency = {
   ],
 }
 
+const aiBetaReaderReport = {
+  report_id: "ai-beta-report-1",
+  scope: "chapter",
+  request_hash: "request-hash",
+  source_fingerprint: "source-fingerprint",
+  created_at: "2026-08-30T10:00:00Z",
+  is_stale: false,
+  checks: ["repetition", "voice", "reader_feedback"],
+  coverage: {
+    requested_chapters: [2],
+    analyzed_chapters: [2],
+    missing_chapters: [],
+    word_count: 11200,
+    character_count: 2,
+  },
+  overall_impression: "The chapter has a strong sense of pressure, though the gate exchange pauses the reveal.",
+  strengths: ["The ash-storm setting stays vivid without obscuring the immediate stakes."],
+  reader_questions: ["Why does Nora trust the gatekeeper now?"],
+  prioritized_revisions: ["Compress the gate exchange before the reveal."],
+  overused_terms: [
+    {
+      id: "term-silver-gate",
+      term: "silver gate",
+      kind: "phrase",
+      count: 5,
+      rate_per_1000: 0.68,
+      narration_count: 4,
+      dialogue_count: 1,
+      burst_detected: true,
+      chapter_counts: { "2": 5 },
+      evidence: [{ chapter_number: 2, excerpt: "Nora crossed the silver gate before the ash bells sounded." }],
+    },
+  ],
+  character_voices: [
+    {
+      id: "voice-gregor",
+      character_id: "char-gregor",
+      character_name: "Gregor",
+      distinctness_score: 42,
+      confidence: "high",
+      sample_dialogue_count: 18,
+      sample_word_count: 360,
+      closest_character_id: "char-grete",
+      closest_character_name: "Grete",
+      similarity_score: 58,
+      signals: { avg_sentence_length: 12, formality_score_x1000: 480 },
+      shared_signals: ["sentence length", "formality"],
+      shared_phrases: ["all right"],
+    },
+    {
+      id: "voice-grete",
+      character_id: "char-grete",
+      character_name: "Grete",
+      distinctness_score: 42,
+      confidence: "high",
+      sample_dialogue_count: 20,
+      sample_word_count: 390,
+      closest_character_id: "char-gregor",
+      closest_character_name: "Gregor",
+      similarity_score: 58,
+      signals: { avg_sentence_length: 12, formality_score_x1000: 482 },
+      shared_signals: ["sentence length", "formality"],
+      shared_phrases: ["all right"],
+    },
+  ],
+  findings: [
+    {
+      id: "finding-gate-pacing",
+      category: "pacing",
+      severity: "high",
+      title: "The gate exchange pauses the reveal",
+      description: "The reader understands the conflict before the scene releases new information.",
+      chapter_number: 2,
+      evidence: [{ chapter_number: 2, excerpt: "Nora waited while the gatekeeper repeated the old warning." }],
+      recommendation: "Move the reveal ahead of the second explanation.",
+      reader_question: "What changes Nora's mind?",
+    },
+  ],
+  revision_candidates: [
+    {
+      id: "candidate-gate-pacing",
+      source_item_id: "finding-gate-pacing",
+      category: "pacing",
+      severity: "high",
+      title: "Compress the gate exchange",
+      description: "The reveal loses momentum during repeated explanation.",
+      recommendation: "Move the reveal ahead of the second warning.",
+      chapter_number: 2,
+      evidence: [{ chapter_number: 2, excerpt: "Nora waited while the gatekeeper repeated the old warning." }],
+    },
+  ],
+  warnings: [],
+}
+
+const firstImpressionReport = {
+  ...aiBetaReaderReport,
+  report_id: "first-impression-report-1",
+  scope: "full_book",
+  request_hash: "first-impression-request",
+  source_fingerprint: "first-impression-source",
+  created_at: "2026-05-07T12:08:00Z",
+  is_stale: false,
+  checks: ["reader_feedback"],
+  coverage: {
+    requested_chapters: [1, 2, 3],
+    analyzed_chapters: [1, 2, 3],
+    missing_chapters: [],
+    word_count: 31500,
+    character_count: 4,
+  },
+  overall_impression: "The draft opens with a clear emotional contract: Nora wants entry into the gate city, but the cost of that entry keeps rising.",
+  reader_vibe: "Ash-dark fantasy with intimate stakes, ceremonial tension, and a guarded but lyrical voice.",
+  story_understanding: "Nora is trying to cross into a city that treats blood, oath, and belonging as the same question. Kael's warnings put trust and survival in conflict.",
+  strengths: [
+    "Nora and Kael's gate exchange gives the central relationship immediate pressure.",
+    "The ash-storm imagery keeps the world vivid while staying tied to the scene conflict.",
+  ],
+  prioritized_revisions: ["Clarify when Nora first understands the blood-oath rule before Chapter 1 uses it."],
+}
+
 function json(route: Route, body: unknown, status = 200) {
   return route.fulfill({
     status,
@@ -2218,10 +2441,33 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
   const voiceConsistencyMode = options.voiceConsistency ?? "success"
   const characterBibleMode = options.characterBible ?? "default"
   const manuscriptProcessingMode = options.manuscriptProcessing ?? "default"
+  const firstImpressionMode = options.firstImpression ?? "complete"
+  let betaReaderJobPolls = 0
+  let betaReaderRevisionCreated = false
+  const mockConversationMessages: DirectMessage[] = [
+    {
+      id: "message-1",
+      conversation_id: "conversation-1",
+      sender_user_id: "user-2",
+      recipient_user_id: "user-1",
+      body: "Can you read chapter two?",
+      recipient_read_at: null,
+      created_at: "2026-09-22T08:30:00Z",
+    },
+    {
+      id: "message-2",
+      conversation_id: "conversation-1",
+      sender_user_id: "user-1",
+      recipient_user_id: "user-2",
+      body: "Yes—I can send notes this evening.",
+      recipient_read_at: "2026-09-22T08:36:00Z",
+      created_at: "2026-09-22T08:34:00Z",
+    },
+  ]
   let activationRevision = (options.activationPending
     ? {
         ...revisionIntelligence,
-        priority_findings: [
+        priority_findings: options.activationClean ? [] : [
           {
             ...revisionIntelligence.change_impacts[0],
             why_flagged: revisionIntelligence.change_impacts[0].description,
@@ -2246,7 +2492,7 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
         ],
         activation: { eligible: true, completed: false, completed_at: null, completion_action: null, completed_finding_id: null },
         analysis_complete: true,
-        continuity_status: "issues_found",
+        continuity_status: options.activationClean ? "clean" : "issues_found",
         coverage: { chapters_analyzed: 3, observation_count: 18, citation_coverage: 1 },
         stale_finding_count: 0,
         analysis_limitations: [],
@@ -2261,7 +2507,7 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
         stale_finding_count: 0,
         analysis_limitations: [],
       }) as unknown as RevisionIntelligence
-  let continuityFindings: ContinuityFinding[] = options.activationPending
+  let continuityFindings: ContinuityFinding[] = options.activationPending && !options.activationClean
     ? [
         {
           id: "continuity-finding-1",
@@ -2319,6 +2565,25 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
         },
       ]
     : []
+  let firstImpressionStatus = firstImpressionMode === "failed"
+    ? {
+        status: "failed",
+        task_id: "first-impression-job-1",
+        progress: null,
+        report: null,
+        error: "beta_reader_generation_failed",
+        can_retry: true,
+      }
+    : {
+        status: firstImpressionMode === "running" ? "running" : "complete",
+        task_id: firstImpressionMode === "cached" ? null : "first-impression-job-1",
+        progress: firstImpressionMode === "running"
+          ? { stage: "reader_feedback", completed: 1, total: 3, message: "LoreVia is reading for what makes this manuscript itself." }
+          : null,
+        report: firstImpressionMode === "running" ? null : firstImpressionReport,
+        error: null,
+        can_retry: false,
+      }
   book.hidden_at = null
   book.is_public = false
   const mockUser = {
@@ -2331,6 +2596,15 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
           tier_label: "Free",
           trial_active: false,
           trial_ends_at: null,
+        }
+      : {}),
+    ...(options.userTier === "trial"
+      ? {
+          tier: "free",
+          plan_tier: "free",
+          tier_label: "Author (free trial)",
+          trial_active: true,
+          trial_ends_at: "2099-09-08T10:00:00Z",
         }
       : {}),
   }
@@ -2380,7 +2654,7 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
         window.sessionStorage.removeItem("lorevia-auth-user")
       })
     }
-  } catch (error) {
+  } catch {
     // SessionStorage not accessible yet (no document context)
     // This is fine - the auth bootstrap will handle hydration after navigation
   }
@@ -2389,18 +2663,21 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
   publicForumComments = JSON.parse(JSON.stringify(initialPublicForumComments))
   collaborators.splice(0, collaborators.length, ...JSON.parse(JSON.stringify(initialCollaborators)))
   let mockBook = JSON.parse(JSON.stringify(book))
+  mockBook.work_type = options.workType ?? mockBook.work_type
+  mockBook.mode = options.bookMode ?? mockBook.mode
+  mockBook.workspace_shell = options.workspaceShell ?? mockBook.workspace_shell
   let mockWriterWorkspace = JSON.parse(JSON.stringify(writerWorkspace))
   let mockNotifications = JSON.parse(JSON.stringify(notifications))
   let mockWorkspaceTree = JSON.parse(JSON.stringify(workspaceTree))
   let mockChapterList = JSON.parse(JSON.stringify(chapterList))
   let mockBetaReads = JSON.parse(JSON.stringify(initialBetaReads))
-  let mockBetaReadQuestions = JSON.parse(JSON.stringify(initialBetaReadQuestions))
-  let mockBetaReadFeedbackItems = JSON.parse(JSON.stringify(initialBetaReadFeedbackItems))
-  let mockCharacterBibleCharacters: Character[] = characterBibleMode === "review-only"
+  const mockBetaReadQuestions = JSON.parse(JSON.stringify(initialBetaReadQuestions))
+  const mockBetaReadFeedbackItems = JSON.parse(JSON.stringify(initialBetaReadFeedbackItems))
+  const mockCharacterBibleCharacters: Character[] = characterBibleMode === "review-only"
     ? []
     : JSON.parse(JSON.stringify(characterBibleCharacters))
-  let mockCharacterReviewPayload = JSON.parse(JSON.stringify(characterReviewPayload))
-  let mockRelationshipGraph = JSON.parse(JSON.stringify(relationshipGraph))
+  const mockCharacterReviewPayload = JSON.parse(JSON.stringify(characterReviewPayload))
+  const mockRelationshipGraph = JSON.parse(JSON.stringify(relationshipGraph))
   let mockNotes = JSON.parse(JSON.stringify(notes))
   let mockVaultNotes = JSON.parse(JSON.stringify(vaultNotes))
   let mockManuscriptAnnotations = JSON.parse(JSON.stringify(manuscriptAnnotations))
@@ -2413,12 +2690,13 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
   }
   let bookDetailReadCount = 0
   let allowanceProcessingContinued = false
+  let mockBookDeleted = false
 
   const buildBookOverview = () => ({
     book: mockBook,
     progress: {
       current_chapter: 2,
-      scroll_pct: 35,
+      scroll_pct: 0.35,
       chapters_read_count: 2,
       percent_complete: 64,
       chapters_left: 1,
@@ -2453,13 +2731,22 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
         },
       ],
     },
+    world_stats: {
+      active_documents: worldBuildingDocuments.filter((document) => document.is_active && !document.archived_at).length,
+      corpus_words: worldBuildingDocuments
+        .filter((document) => document.is_active && !document.archived_at)
+        .reduce((total, document) => total + (document.word_count ?? 0), 0),
+      extracted_elements: worldElements.length,
+      total_items: worldBuildingDocuments.filter((document) => document.is_active && !document.archived_at).length + worldElements.length,
+    },
   })
 
   const buildReaderBootstrap = () => ({
+    profile: options.readerBootstrapProfile,
     overview: buildBookOverview(),
     notes: mockNotes,
     saved_quotes: [],
-    stats: booksStats,
+    stats: buildBooksStats(options.zeroProjects ? null : mockBook, options.zeroProjects ? null : mockChapterList, mockUser.daily_word_goal),
     characters: mockCharacterBibleCharacters,
     chapter_reports: [],
     prewriting_check: preWritingCheck,
@@ -2470,6 +2757,32 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
 
   const buildBookDetailResponse = () => {
     bookDetailReadCount += 1
+    if (manuscriptProcessingMode === "token-auto-paused") {
+      return {
+        ...mockBook,
+        status: "processing",
+        processing: {
+          ...(mockBook.processing ?? {}),
+          status: "paused",
+          stage: "usage_limited",
+          progress_pct: 50,
+          chapters_completed: 2,
+          chapters_total: 4,
+          processing_run_id: "processing-run-token-pause",
+          pause_reason: "llm_token_limit",
+          auto_resume: true,
+          resume_available: false,
+          resume_blockers: [{
+            kind: "llm_tokens",
+            detail: "LLM usage token limit exceeded for the 5-hour window.",
+            next_resume_at: "2026-08-30T12:00:00Z",
+            auto_resume: true,
+          }],
+          next_resume_at: "2026-08-30T12:00:00Z",
+          retry_available: false,
+        },
+      }
+    }
     if (manuscriptProcessingMode === "allowance-paused" && !allowanceProcessingContinued) {
       return {
         ...mockBook,
@@ -2534,7 +2847,7 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
     canon_overrides: [],
     elements: worldElements,
     wiki: [],
-    stats: booksStats,
+    stats: buildBooksStats(options.zeroProjects ? null : mockBook, options.zeroProjects ? null : mockChapterList, mockUser.daily_word_goal),
     gap_analysis: worldGapAnalysis,
   })
 
@@ -2563,6 +2876,42 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
 
     if (path === "/api/v1/auth/me" && method === "GET") {
       return session === "authenticated" ? json(route, mockUser) : json(route, { detail: "Unauthorized" }, 401)
+    }
+
+    if (path === "/api/v1/auth/me/ui-preferences" && method === "GET") {
+      return json(route, {
+        schema_version: 1,
+        revision: 1,
+        complexity_mode: "standard",
+        dashboard_visibility: {},
+        dashboard_order: [],
+        public_tool_visibility: {},
+        density: "comfortable",
+        reader_toolbar_density: "standard",
+        locked_tool_presentation: "compact",
+        default_workspace_shell: "author",
+        mobile_actions: [],
+        guidance_dismissals: {},
+        recommendation_snoozes: {},
+        updated_at: "2026-05-08T12:00:00Z",
+      })
+    }
+
+    if (path === "/api/v1/auth/me/ui-preferences/books/book-1" && method === "GET") {
+      return json(route, {
+        book_id: "book-1",
+        schema_version: 1,
+        revision: 1,
+        book_preset: "all",
+        advanced_tool_override: null,
+        hidden_book_tools: [],
+        overview_cards: {},
+        reader_actions: [],
+        mobile_actions: [],
+        panel_state: {},
+        timeline_collapsed_sections: {},
+        updated_at: "2026-05-08T12:00:00Z",
+      })
     }
 
     if (path === "/api/v1/auth/session" && method === "POST") {
@@ -2601,12 +2950,130 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
       return json(route, { ok: true })
     }
 
+    if (path === "/api/v1/support/config" && method === "GET") {
+      return json(route, {
+        assistant_enabled: true,
+        corpus_version: "support-e2e-v1",
+      })
+    }
+
+    if (path === "/api/v1/support/guides" && method === "GET") {
+      return json(route, {
+        guides: [
+          {
+            slug: "story-bible-analysis-and-search-tools",
+            title: "Choose a story-bible or analysis tool",
+            summary: "Find character, voice, analysis, and search tools.",
+            routes: ["/:bookId/characters", "/:bookId/voice"],
+            workspace: "author",
+          },
+        ],
+      })
+    }
+
+    if (path === "/api/v1/support/chat" && method === "POST") {
+      return json(route, {
+        answer: "Open Voice Consistency from the Writing workspace for character voice review.",
+        sources: [
+          {
+            slug: "story-bible-analysis-and-search-tools",
+            title: "Choose a story-bible or analysis tool",
+            summary: "Find character, voice, analysis, and search tools.",
+            url: "/help?guide=story-bible-analysis-and-search-tools",
+          },
+        ],
+        actions: [
+          {
+            label: "Open Voice Consistency",
+            href: "/book-1/voice",
+            external: false,
+          },
+        ],
+        confidence: 0.92,
+        escalation_available: true,
+        declined: false,
+      })
+    }
+
+    if (path === "/api/v1/billing/checkout/preview" && method === "POST") {
+      const payload = route.request().postDataJSON() as { plan?: string }
+      const plan = payload.plan ?? "author_monthly"
+      const priceByPlan: Record<string, number> = {
+        author_monthly: 19,
+        author_annual: 190,
+        architect_monthly: 39,
+        architect_annual: 390,
+      }
+      const price = priceByPlan[plan] ?? 0
+      const annual = plan.endsWith("_annual")
+      const trialActive = Boolean(mockUser.trial_active)
+      const amount = `$${price.toFixed(2)} USD`
+      return json(route, {
+        plan,
+        display_name: plan.startsWith("architect_") ? "Architect" : "Author",
+        billing_interval: annual ? "annual" : "monthly",
+        trial_status: trialActive ? "active" : "expired",
+        trial_active: trialActive,
+        trial_ends_at: mockUser.trial_ends_at ?? "2026-04-11T09:00:00Z",
+        charge_today: amount,
+        recurring_price: `${amount} every ${annual ? "year" : "month"}`,
+        confirmation_required: trialActive,
+        confirmation_text: trialActive
+          ? `I understand my trial is already active and I will be charged ${amount} now.`
+          : null,
+        checkout_button_label: `Pay ${amount} now`,
+        default_action_label: trialActive ? "Continue free trial" : null,
+        quote_token: `signed-quote-${plan}`,
+        billing_enabled: true,
+        message: null,
+      })
+    }
+
     if (path === "/api/v1/billing/checkout" && method === "POST") {
       const payload = route.request().postDataJSON() as { plan?: string }
       return json(route, {
         billing_enabled: false,
         checkout_url: null,
         message: `Mock checkout requested for ${payload.plan ?? "unknown"}.`,
+      })
+    }
+
+    if (path === "/api/v1/billing/checkout/abandon" && method === "POST") {
+      const payload = route.request().postDataJSON() as { transaction_id?: string }
+      return json(route, {
+        abandoned: true,
+        transaction_id: payload.transaction_id ?? "txn_mock",
+        status: "canceled",
+      })
+    }
+
+    if (path === "/api/v1/billing/subscription" && method === "GET") {
+      const tier = String(mockUser.tier ?? "free")
+      const planTier = tier === "architect" ? "architect" : tier === "author" ? "author" : "free"
+      const paid = planTier !== "free"
+      const amount = planTier === "architect" ? 39 : planTier === "author" ? 19 : 0
+      const displayState = paid ? "active" : mockUser.trial_active ? "trial" : "free"
+      return json(route, {
+        plan: paid ? `${planTier}_monthly` : "free",
+        plan_tier: planTier,
+        status: paid ? "active" : displayState,
+        display_state: displayState,
+        price: { amount, currency: "USD", interval: "month" },
+        current_period_start: paid ? "2026-09-19T00:00:00Z" : null,
+        current_period_end: paid ? "2026-10-19T00:00:00Z" : null,
+        cancel_at_period_end: false,
+        cancellation_scheduled_at: null,
+        next_charge_at: paid ? "2026-10-19T00:00:00Z" : null,
+        auto_renew: paid,
+        last_payment_status: null,
+        has_paddle_subscription: paid,
+      })
+    }
+
+    if (path === "/api/v1/billing/portal" && method === "POST") {
+      return json(route, {
+        billing_enabled: true,
+        portal_url: `${E2E_APP_ORIGIN}/?mock_billing_portal=1`,
       })
     }
 
@@ -2898,6 +3365,76 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
       return json(route, mockNotifications)
     }
 
+    if (path === "/api/v1/social/conversations/unread-count" && method === "GET") {
+      return json(route, { unread_count: 2 })
+    }
+
+    if (path === "/api/v1/social/conversations/page" && method === "GET") {
+      return json(route, {
+        items: [
+          {
+            id: "conversation-1",
+            other_user: {
+              id: "user-2",
+              username: "theo",
+              messaging_permission: "friends_only",
+              friend_state: "accepted",
+              can_message: true,
+            },
+            last_message_preview: "Can you read chapter two?",
+            last_message_at: "2026-09-22T08:30:00Z",
+            unread_count: 2,
+          },
+          {
+            id: "conversation-2",
+            other_user: {
+              id: "user-3",
+              username: "lina",
+              messaging_permission: "anyone",
+              friend_state: "accepted",
+              can_message: true,
+            },
+            last_message_preview: "The pacing note was useful—thank you.",
+            last_message_at: "2026-09-21T17:10:00Z",
+            unread_count: 0,
+          },
+        ],
+        next_cursor: null,
+        has_more: false,
+      })
+    }
+
+    if (path === "/api/v1/social/relationships" && method === "GET") {
+      return json(route, { friends: [], incoming_requests: [], outgoing_requests: [] })
+    }
+
+    if (path === "/api/v1/social/conversations/conversation-1/messages/page" && method === "GET") {
+      return json(route, {
+        items: mockConversationMessages,
+        next_cursor: null,
+        has_more: false,
+      })
+    }
+
+    if (path === "/api/v1/social/conversations/conversation-1/read" && method === "POST") {
+      return json(route, { ok: true })
+    }
+
+    if (path === "/api/v1/social/conversations/conversation-1/messages" && method === "POST") {
+      const payload = route.request().postDataJSON() as { body?: string } | null
+      const sentMessage: DirectMessage = {
+        id: "message-sent",
+        conversation_id: "conversation-1",
+        sender_user_id: "user-1",
+        recipient_user_id: "user-2",
+        body: payload?.body ?? "",
+        recipient_read_at: null,
+        created_at: "2026-09-22T09:00:00Z",
+      }
+      mockConversationMessages.push(sentMessage)
+      return json(route, sentMessage, 201)
+    }
+
     const notificationMatch = path.match(/^\/api\/v1\/notifications\/([^/]+)\/read$/)
     if (notificationMatch && method === "PUT") {
       const notificationId = notificationMatch[1]
@@ -2912,12 +3449,129 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
       return updated ? json(route, updated) : notFound(route)
     }
 
+    const includeHiddenBooks = url.searchParams.get("include_hidden") === "true"
+    const listedBooks = mockBookDeleted || options.zeroProjects || (!includeHiddenBooks && mockBook.hidden_at)
+      ? []
+      : [mockBook]
+
+    if (path === "/api/v1/books/page" && method === "GET") {
+      return json(route, { items: listedBooks, next_cursor: null })
+    }
+
+    if (path === "/api/v1/books/selector" && method === "GET") {
+      return json(route, options.seriesBooks && listedBooks.length ? [...listedBooks, comparisonBook] : listedBooks)
+    }
+
+    if (path === "/api/v1/books/series" && method === "GET") {
+      return json(route, {
+        items: [
+          {
+            id: "series-1",
+            name: "Ash Cycle",
+            description: "A connected fantasy series about the ember gates.",
+            created_at: "2026-05-01T09:00:00Z",
+            books: [book, comparisonBook],
+          },
+          {
+            id: "series-2",
+            name: "North Road",
+            description: "A planned companion series.",
+            created_at: "2026-05-12T09:00:00Z",
+            books: [],
+          },
+        ],
+        total: 2,
+        limit: 50,
+        offset: 0,
+        has_more: false,
+      })
+    }
+
+    if (path === "/api/v1/books/series/series-1/bible" && method === "GET") {
+      return json(route, {
+        series_id: "series-1",
+        name: "Ash Cycle",
+        description: "A connected fantasy series about the ember gates.",
+        work_type: "screenplay",
+        episode_count: 2,
+        episodes: [],
+        recurring_characters: [],
+        recurring_relationships: [],
+        unresolved_plot_threads: [],
+        canon_entries: [],
+        continuity_risks: ["The gate oath changes between projects."],
+      })
+    }
+
+    if (path === "/api/v1/intelligence/series/series-1/world-building/series-analysis" && method === "GET") {
+      return json(route, {
+        book_count: 2,
+        analysis_count: 3,
+        world_context: [
+          { name: "Ash Gate", description: "The eastern gate bound by the old oath." },
+          { name: "Glass Road", description: "The trade route shared by both projects." },
+        ],
+      })
+    }
+
+    if (path === "/api/v1/intelligence/series/series-1/advisor/message-stream" && method === "POST") {
+      const reply = "Nora changes most across the series, moving from guarded duty to deliberate trust."
+      return route.fulfill({
+        status: 200,
+        contentType: "text/event-stream",
+        body: [
+          `event: delta\ndata: ${JSON.stringify({ content: reply })}`,
+          `event: done\ndata: ${JSON.stringify({
+            reply,
+            intent: "character_arc",
+            response_type: "standard",
+            retrieved_passages: [],
+            cached: false,
+          })}`,
+          "",
+        ].join("\n\n"),
+      })
+    }
+
     if (path === "/api/v1/books" && method === "GET") {
-      return json(route, book.hidden_at ? [] : [book])
+      return json(route, listedBooks)
     }
 
     if (path === "/api/v1/books/stats" && method === "GET") {
-      return json(route, booksStats)
+      return json(route, buildBooksStats(options.zeroProjects ? null : mockBook, options.zeroProjects ? null : mockChapterList, mockUser.daily_word_goal))
+    }
+
+    if (path === "/api/v1/books/notes/page" && method === "GET") {
+      return json(route, {
+        items: [{
+          id: "note-1",
+          book_id: "book-1",
+          book_title: "Sky of Ash",
+          chapter_number: 2,
+          chapter_title: "The Ember Gate",
+          title: "Gate oath continuity",
+          body: "Mara still carries the silver key when the gate opens.",
+          updated_at: "2026-09-20T10:00:00Z",
+        }],
+        next_cursor: null,
+      })
+    }
+
+    if (path === "/api/v1/books/quotes/page" && method === "GET") {
+      return json(route, {
+        items: [{
+          id: "quote-1",
+          book_id: "book-1",
+          book_title: "Sky of Ash",
+          chapter_number: 2,
+          chapter_title: "The Ember Gate",
+          character_name: "Mara Vale",
+          quote_text: "The gate remembers every oath.",
+          note: "Echo this promise before the final crossing.",
+          created_at: "2026-09-20T10:00:00Z",
+        }],
+        next_cursor: null,
+      })
     }
 
     if (path === "/api/v1/books/book-1" && method === "GET") {
@@ -2948,6 +3602,7 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
     }
 
     if (path === "/api/v1/books/book-1/permanent" && method === "DELETE") {
+      mockBookDeleted = true
       book.hidden_at = "2026-05-15T00:00:00Z"
       book.is_public = false
       return json(route, {
@@ -2963,9 +3618,11 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
         book_id: "book-1",
         status: "processing",
         chapters_queued: 3,
-        total_words: 31500,
-        upload_charge_consumed: true,
-        charge_kind: "manual_reprocess",
+        total_words: Math.max(0, Number(mockBook.total_words ?? 0) || 0),
+        upload_charge_consumed: false,
+        charge_kind: null,
+        processed_words_reserved: Math.max(0, Number(mockBook.total_words ?? 0) || 0),
+        processed_words_remaining: Math.max(1_000_000 - Math.max(0, Number(mockBook.total_words ?? 0) || 0), 0),
       })
     }
 
@@ -2991,7 +3648,26 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
       })
     }
 
+    if (path === "/api/v1/books/book-1/chapters/1/content" && method === "PUT") {
+      if (mockWriterWorkspace.reprocess?.auto_reprocess_enabled === false) {
+        mockWriterWorkspace.reprocess = {
+          ...mockWriterWorkspace.reprocess,
+          pending_chapters: Array.from(new Set([...(mockWriterWorkspace.reprocess.pending_chapters ?? []), 1])),
+        }
+      }
+      return json(route, {
+        status: "updated",
+        book_id: "book-1",
+        chapter_number: 1,
+        content_version: 3,
+        client_mutation_id: "mock-save-1",
+        saved_at: "2026-06-06T00:00:00Z",
+        story_memory_status: mockWriterWorkspace.reprocess?.auto_reprocess_enabled === false ? "not_required" : "queued",
+      })
+    }
+
     if (path === "/api/v1/books/book-1/manuscript/chapters/1/reprocess" && method === "POST") {
+      const chapterWords = Math.max(0, Number(mockChapterList.chapters.find((chapter: typeof mockChapterList.chapters[number]) => chapter.number === 1)?.word_count ?? 0) || 0)
       mockWriterWorkspace.reprocess = {
         ...(mockWriterWorkspace.reprocess ?? { auto_reprocess_enabled: false, pending_chapters: [] }),
         pending_chapters: (mockWriterWorkspace.reprocess?.pending_chapters ?? []).filter((chapter: number) => chapter !== 1),
@@ -3002,7 +3678,7 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
         book_id: "book-1",
         status: "processing",
         chapters_queued: 1,
-        total_words: 1000,
+        total_words: chapterWords,
         upload_charge_consumed: false,
         charge_kind: null,
       })
@@ -3154,7 +3830,7 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
       mockBetaReads = [created, ...mockBetaReads]
       mockBetaReadQuestions[created.id] = Array.isArray(payload.author_questions)
         ? payload.author_questions
-            .map((question, index) => String(question || "").trim())
+            .map((question) => String(question || "").trim())
             .filter(Boolean)
             .map((prompt, index) => ({
               id: `${created.id}-question-${index + 1}`,
@@ -3167,8 +3843,26 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
       return json(route, created, 201)
     }
 
+    const authorBetaDetailMatch = path.match(/^\/api\/v1\/books\/book-1\/beta-reads\/([^/]+)$/)
+    if (authorBetaDetailMatch && method === "GET") {
+      const detail = buildBetaReadDetail(authorBetaDetailMatch[1])
+      return detail ? json(route, detail) : notFound(route)
+    }
+
+    if (path === "/api/v1/books/book-1/revision-rounds" && method === "GET") {
+      return json(route, { items: [] })
+    }
+
     if (path === "/api/v1/books/book-1/characters" && method === "GET") {
       return json(route, mockCharacterBibleCharacters)
+    }
+
+    if (path === "/api/v1/books/book-1/characters/identity-diagnostics" && method === "GET") {
+      return json(route, {
+        suppressed_count: 0, auto_merged_count: 0, auto_alias_count: 0,
+        blocked_duplicate_count: 0, hidden_candidate_count: 0,
+        suppression_reasons: {}, recent_identity_actions: [],
+      })
     }
 
     if (path === "/api/v1/books/book-1/character-review" && method === "GET") {
@@ -3301,7 +3995,28 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
     }
 
     if (path === "/api/v1/books/book-1/chapter-reports" && method === "GET") {
-      return json(route, [])
+      return json(route, options.chapterReports ? [
+        {
+          chapter_number: 1,
+          chapter_title: "Ashfall",
+          summary: "Nora reaches the gate, meets Kael, and acts on a blood-oath rule before its source is clear.",
+          new_characters: [{ name: "Nora Vale" }, { name: "Kael" }],
+          relationship_changes: ["Nora and Kael move from suspicion to a reluctant alliance."],
+          plot_threads_opened: ["Who taught Nora the blood-oath rule?"],
+          plot_threads_resolved: [],
+          continuity_flags: ["Nora appears to know the gate rule before Chapter 2 explains how she learned it."],
+        },
+        {
+          chapter_number: 2,
+          chapter_title: "The Ember Gate",
+          summary: "Kael explains the oath and the pair cross the bridge ahead of the ashfall.",
+          new_characters: [],
+          relationship_changes: [],
+          plot_threads_opened: [],
+          plot_threads_resolved: ["The immediate gate crossing"],
+          continuity_flags: [],
+        },
+      ] : [])
     }
 
     if (path === "/api/v1/books/book-1/pre-writing-check" && method === "GET") {
@@ -3310,6 +4025,23 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
 
     if (path === "/api/v1/books/book-1/story-health" && method === "GET") {
       return json(route, storyHealth)
+    }
+
+    if (path === "/api/v1/books/book-1/visibility-summary" && method === "GET") {
+      return json(route, {
+        book_id: "book-1",
+        access_class: "owner",
+        workspace_shell: "author",
+        badges: ["Private", "Shared"],
+        private_status: { state: "private", label: "Private workspace", detail: "Only you and people you invite can open this book." },
+        collaborators: { state: "shared", label: "Collaborators", count: 2, detail: "Two collaborators have workspace access." },
+        beta_readers: { state: "active", label: "Beta readers", count: 1, detail: "One reader has an active assignment." },
+        public_publishing: { state: "private", label: "Public publishing", detail: "No public sample is published." },
+        public_discussion: { state: "private", label: "Public discussion", detail: "Public discussion is disabled." },
+        rights: { state: "confirmed", label: "Rights", detail: "Ownership is confirmed." },
+        moderation: { state: "clean", label: "Moderation", detail: "No reports require attention." },
+        public_url: null,
+      })
     }
 
     if (path === "/api/v1/books/book-1/writer-workspace" && method === "GET") {
@@ -3353,6 +4085,10 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
       })
     }
 
+    if (path === "/api/v1/books/book-1/exports/prepare" && method === "POST") {
+      return json(route, { delivery: "synchronous", job: null })
+    }
+
     if (path === "/api/v1/books/book-1/novel/export" && method === "GET") {
       const targetUrl = new URL(route.request().url())
       const format = targetUrl.searchParams.get("format") ?? "pdf"
@@ -3375,7 +4111,45 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
     }
 
     if (path === "/api/v1/books/book-1/revision-intelligence" && method === "GET") {
-      return json(route, activationRevision)
+      const boardItems = mockWriterWorkspace.revision_board?.items ?? []
+      const currentRevision = boardItems.reduce((current: RevisionIntelligence, boardItem: { item_id: string; status: string; task_id?: string | null }) => (
+        patchRevisionIntelligenceItem(current, boardItem.item_id, { status: boardItem.status, task_id: boardItem.task_id ?? null })
+      ), activationRevision as RevisionIntelligence)
+      return json(route, currentRevision)
+    }
+
+    if (path === "/api/v1/intelligence/book-1/advisor/first-impression" && method === "GET") {
+      const current = firstImpressionStatus
+      if (current.status === "running") {
+        firstImpressionStatus = {
+          status: "complete",
+          task_id: "first-impression-job-1",
+          progress: null,
+          report: firstImpressionReport,
+          error: null,
+          can_retry: false,
+        }
+      }
+      return json(route, current)
+    }
+
+    if (path === "/api/v1/intelligence/book-1/advisor/first-impression/retry" && method === "POST") {
+      firstImpressionStatus = {
+        status: "complete",
+        task_id: "first-impression-job-2",
+        progress: null,
+        report: firstImpressionReport,
+        error: null,
+        can_retry: false,
+      }
+      return json(route, {
+        status: "queued",
+        task_id: "first-impression-job-2",
+        progress: null,
+        report: null,
+        error: null,
+        can_retry: false,
+      })
     }
 
     if (path === "/api/v1/books/book-1/continuity-findings" && method === "GET") {
@@ -3393,7 +4167,7 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
         chapter_versions: { "1": 1, "2": 2, "3": 1 },
         coverage: { chapters_analyzed: 3, observation_count: 18, citation_coverage: 1 },
         metrics: { cost_usd_per_100k_words: 0, latency_ms_per_100k_words: 2400 },
-        word_count: 2400,
+        word_count: Math.max(0, Number(mockBook.total_words ?? 0) || 0),
         duration_ms: 58,
         cost_usd: 0,
         error_detail: null,
@@ -3617,6 +4391,21 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
       return json(route, mockVaultNotes)
     }
 
+    if (path === "/api/v1/books/book-1/notes/vault/page" && method === "GET") {
+      return json(route, { items: mockVaultNotes, next_cursor: null, has_more: false })
+    }
+
+    if (path === "/api/v1/books/book-1/notes/vault/graph" && method === "GET") {
+      return json(route, {
+        nodes: mockVaultNotes.map((note: typeof mockVaultNotes[number]) => ({ id: note.path, path: note.path, title: note.path.split("/").at(-1)?.replace(/\.md$/i, "") ?? note.path, folder: note.path.split("/").slice(0, -1).join("/"), link_count: 0 })),
+        edges: [],
+      })
+    }
+
+    if (path === "/api/v1/books/book-1/notes/vault/relations" && method === "GET") {
+      return json(route, { links: [], backlinks: [], tags: [], series_links: [] })
+    }
+
     if (path === "/api/v1/books/book-1/notes/vault" && method === "PUT") {
       const body = route.request().postDataJSON() as Record<string, unknown>
       const pathValue = String(body.path ?? "")
@@ -3800,8 +4589,83 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
       return json(route, mockChapterList)
     }
 
+    if (path === "/api/v1/reader/book-1/summary-collection" && method === "GET") {
+      return json(route, buildBookOverview().summary_collection)
+    }
+
+    if (path === "/api/v1/reader/book-1/search" && method === "GET") {
+      return json(route, [
+        {
+          chapter_num: 2,
+          chapter_title: "The Ember Gate",
+          relevance: 0.91,
+          summary: "Nora hears the gatekeeper repeat the old warning.",
+          text: "Nora waited while the gatekeeper repeated the old warning about the ash road.",
+        },
+      ])
+    }
+
+    if (path === "/api/v1/reader/book-1/thematic-search" && method === "GET") {
+      return json(route, {
+        results: [
+          {
+            chapter_number: 2,
+            chapter_title: "The Ember Gate",
+            score: 0.87,
+            summary: "The ash road returns as a warning about inherited obligation.",
+          },
+        ],
+        index_status: "ready",
+      })
+    }
+
+    if (path === "/api/v1/reader/book-1/timeline" && method === "GET") {
+      return json(route, {
+        chapters: [
+          { number: 1, title: "The Ember Gate" },
+          { number: 2, title: "Ash Bridge" },
+          { number: 3, title: "The Council" },
+          { number: 4, title: "The Choice" },
+        ],
+        events: [
+          { chapter_number: 1, chapter_title: "The Ember Gate", kind: "turning point", title: "Gregor changes", detail: "The transformation isolates him from the family." },
+          { chapter_number: 3, chapter_title: "The Council", kind: "reveal", title: "Grete takes control", detail: "Grete becomes the family's decisive voice." },
+        ],
+        character_tracks: [
+          { id: "char-gregor", name: "Gregor", role: "primary character", start_chapter: 1, end_chapter: 4, detail: "Present throughout the family crisis." },
+          { id: "char-grete", name: "Grete", role: "supporting character", start_chapter: 1, end_chapter: 4, detail: "Moves from caregiver to opposition." },
+        ],
+        thread_tracks: [
+          { id: "thread-family", title: "Family survival", status: "open", start_chapter: 1, end_chapter: 4, note: "The family's dependence changes shape.", detail: null },
+        ],
+        relationship_markers: [
+          { id: "marker-gregor-grete", title: "Gregor and Grete break trust", chapter_number: 3, detail: "Grete stops defending Gregor." },
+        ],
+      })
+    }
+
     if (path === "/api/v1/reader/book-1/relationships" && method === "GET") {
       return json(route, mockRelationshipGraph)
+    }
+
+    if (path === "/api/v1/reader/book-1/relationship-evolution" && method === "GET") {
+      return json(route, {
+        pairs: [
+          {
+            characters: ["Gregor", "Grete"],
+            events: [
+              { chapter: 1, type: "family", description: "Grete becomes Gregor's closest ally after the transformation." },
+              { chapter: 4, type: "estrangement", description: "Their trust breaks under the family's mounting pressure." },
+            ],
+          },
+          {
+            characters: ["Gregor", "Mr. Samsa"],
+            events: [
+              { chapter: 2, type: "conflict", description: "Mr. Samsa forces Gregor back into his room." },
+            ],
+          },
+        ],
+      })
     }
 
     if (path === "/api/v1/books/book-1/cover" && method === "GET") {
@@ -3832,12 +4696,240 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
       return chapterData ? json(route, chapterData) : notFound(route)
     }
 
+    if (path.startsWith("/api/v1/reader/book-1/plot-threads/") && method === "GET") {
+      const threads = [
+          {
+            id: "thread-gate",
+            title: "Who opened the gate?",
+            type: "mystery",
+            status: "developing",
+            description: "The opening breach still points to an unknown accomplice.",
+            introduced_at: 1,
+            resolved_at: null,
+            first_mentioned: 1,
+            last_mentioned: 4,
+            mention_count: 6,
+            importance: 0.92,
+            note: "",
+            character_ids: ["char-nora", "char-kael"],
+            related_characters: ["Nora Vale", "Kael Arden"],
+            risk: null,
+            suggested_action: "Keep one clue active before the midpoint.",
+            tags: ["central mystery"],
+          },
+          {
+            id: "thread-heir",
+            title: "The hidden heir",
+            type: "identity",
+            status: "introduced",
+            description: "A disputed lineage could change control of the city.",
+            introduced_at: 2,
+            resolved_at: null,
+            first_mentioned: 2,
+            last_mentioned: 3,
+            mention_count: 3,
+            importance: 0.74,
+            note: "",
+            character_ids: ["char-kael"],
+            related_characters: ["Kael Arden"],
+            risk: null,
+            suggested_action: null,
+            tags: [],
+          },
+          {
+            id: "thread-map",
+            title: "The vanished map clue",
+            type: "clue",
+            status: "possibly_abandoned",
+            description: "The map disappears after the first act without a later reference.",
+            introduced_at: 1,
+            resolved_at: null,
+            first_mentioned: 1,
+            last_mentioned: 2,
+            mention_count: 2,
+            importance: 0.81,
+            note: "Restore near the archive scene.",
+            character_ids: ["char-nora"],
+            related_characters: ["Nora Vale"],
+            risk: "Readers may expect a payoff that never arrives.",
+            suggested_action: "Return the map in chapter 6 or remove its setup.",
+            tags: ["setup", "payoff"],
+          },
+          {
+            id: "thread-prophecy",
+            title: "Ash prophecy",
+            type: "prophecy",
+            status: "resolved",
+            description: "Nora rejects the prophecy's literal reading at the bridge.",
+            introduced_at: 1,
+            resolved_at: 4,
+            first_mentioned: 1,
+            last_mentioned: 4,
+            mention_count: 5,
+            importance: 0.7,
+            note: "",
+            character_ids: ["char-nora"],
+            related_characters: ["Nora Vale"],
+            risk: null,
+            suggested_action: null,
+            tags: [],
+          },
+        ]
+      if (path.endsWith("/page")) return json(route, { items: threads.map(({ note: _note, character_ids: _characterIds, related_characters: _relatedCharacters, risk: _risk, suggested_action: _suggestedAction, ...summary }) => summary), next_cursor: null, has_more: false })
+      const thread = threads.find((item) => item.id === path.split("/").at(-1))
+      return thread ? json(route, thread) : notFound(route)
+    }
+
     if (path === "/api/v1/reader/book-1/plot-threads" && method === "GET") {
       return json(route, [])
     }
 
+    if (path === "/api/v1/reader/book-1/foreshadowing" && method === "GET") {
+      return json(route, {
+        items: [
+          {
+            chapter_number: 1,
+            chapter_title: "The Ember Gate",
+            clue: "The gate key is warm before the alarm sounds.",
+            foreshadows: "Someone inside the watch has already used the key.",
+          },
+          {
+            chapter_number: 2,
+            chapter_title: "Ash in the Archive",
+            clue: "Nora recognizes the erased crest on the map.",
+            foreshadows: "Her family is connected to the hidden heir claim.",
+          },
+          {
+            chapter_number: 3,
+            chapter_title: "The Broken Bridge",
+            clue: "A silver bell rings beneath the river.",
+            foreshadows: null,
+          },
+        ],
+      })
+    }
+
     if (path === "/api/v1/intelligence/book-1/advisor/synopsis" && method === "GET") {
       return json(route, synopsis)
+    }
+
+    if (path === "/api/v1/intelligence/book-1/cross-book-intelligence" && method === "GET") {
+      return json(route, {
+        series_id: "series-1",
+        series_name: "Ash Cycle",
+        comparison_book_ids: ["book-1", "book-2"],
+        character_matches: [
+          {
+            left_book_id: "book-1",
+            right_book_id: "book-2",
+            left_name: "Nora Vale",
+            right_name: "Nora Veyl",
+            similarity: 0.96,
+          },
+          {
+            left_book_id: "book-1",
+            right_book_id: "book-2",
+            left_name: "Kael Arden",
+            right_name: "Captain Arden",
+            similarity: 0.91,
+          },
+        ],
+        wiki_matches: [
+          {
+            left_book_id: "book-1",
+            right_book_id: "book-2",
+            left_name: "Glass Road",
+            right_name: "The Glassway",
+            entry_type: "route",
+            similarity: 0.94,
+          },
+        ],
+      })
+    }
+
+    if (path === "/api/v1/intelligence/book-1/qa-stream" && method === "POST") {
+      const answer = "Nora last appears at the end of Chapter 2, where she leaves the ember gate with Kael."
+      return route.fulfill({
+        status: 200,
+        contentType: "text/event-stream",
+        body: [
+          `event: delta\ndata: ${JSON.stringify({ content: answer })}`,
+          `event: done\ndata: ${JSON.stringify({
+            answer,
+            citations: [{
+              chapter_num: 2,
+              chapter_title: "The Ember Gate",
+              excerpt: "Nora left the ember gate beside Kael before the ashfall reached the bridge.",
+              source_type: "passage",
+            }],
+            cached: false,
+          })}`,
+          "",
+        ].join("\n\n"),
+      })
+    }
+
+    if (path === "/api/v1/intelligence/book-1/advisor/editorial-review-stream" && method === "POST") {
+      const payload = {
+        review: {
+          overall_verdict: "The scene has a strong conflict turn, but Nora's gate knowledge needs earlier support.",
+          thematic_fit: {
+            score: "strong",
+            notes: "The oath reinforces the manuscript's concern with belonging and earned trust.",
+          },
+          continuity_issues: [{
+            type: "timeline",
+            severity: "moderate",
+            title: "Gate knowledge arrives after Nora uses it",
+            description: "Nora invokes the blood-oath rule here before Kael explains it in Chapter 2.",
+            suggestion: "Establish how Nora learned the first line of the oath before this scene.",
+          }],
+          insertion_opportunities: [{
+            title: "Seed the oath before the gate",
+            problem: "The reader has no source for Nora's knowledge when she reaches the gate.",
+            target_chapter: 1,
+            target_chapter_title: "Ashfall",
+            anchor_excerpt: "Nora watched the gate from the ash market.",
+            what_to_add: "Let Nora overhear a partial oath in the ash market.",
+            why_here: "It preserves the later explanation while making her action legible.",
+            purpose: "foreshadowing",
+          }],
+          grammar_issues: [{
+            original: "The gate opened, Nora ran.",
+            issue: "Comma splice",
+            fix: "The gate opened, and Nora ran.",
+          }],
+          formatting_notes: ["Keep the oath on its own line so the ritual turn remains visible."],
+        },
+        retrieved_passages: [{
+          chapter_num: 2,
+          chapter_title: "The Ember Gate",
+          chunk_index: 0,
+          excerpt: "Kael finally told Nora that royal blood was the only key.",
+          relevance: 0.94,
+        }],
+      }
+      return route.fulfill({
+        status: 200,
+        contentType: "text/event-stream",
+        body: [
+          `event: stage\ndata: ${JSON.stringify({ message: "Checking continuity" })}`,
+          `event: done\ndata: ${JSON.stringify(payload)}`,
+          "",
+        ].join("\n\n"),
+      })
+    }
+
+    if (path === "/api/v1/intelligence/book-1/advisor/greeting" && method === "GET") {
+      return json(route, {
+        message: "What aspect of your story feels unsolved right now?",
+        book_title: book.title,
+        stats: {
+          characters: 4,
+          plot_threads: 1,
+          total_chapters: 3,
+        },
+      })
     }
 
     if (path === "/api/v1/intelligence/book-1/advisor/suggestions" && method === "GET") {
@@ -3896,6 +4988,52 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
         return json(route, weakAttributionVoiceConsistency)
       }
       return json(route, voiceConsistency)
+    }
+
+    if (path === "/api/v1/intelligence/book-1/advisor/beta-reader/reports" && method === "GET") {
+      return json(route, {
+        reports: [{ ...aiBetaReaderReport, is_stale: options.betaReaderStale ?? false }],
+      })
+    }
+
+    if (path === "/api/v1/intelligence/book-1/advisor/beta-reader" && method === "POST") {
+      betaReaderJobPolls = 0
+      return json(route, {
+        status: "queued",
+        task_id: "ai-beta-job-1",
+        cached: false,
+        report: null,
+      }, 202)
+    }
+
+    if (path === "/api/v1/intelligence/book-1/advisor/beta-reader/jobs/ai-beta-job-1" && method === "GET") {
+      betaReaderJobPolls += 1
+      if (betaReaderJobPolls === 1) {
+        return json(route, {
+          task_id: "ai-beta-job-1",
+          status: "running",
+          progress: { stage: "reader_feedback", completed: 1, total: 2, message: "Reading manuscript batch 2 of 2..." },
+          report: null,
+          error: null,
+        })
+      }
+      return json(route, {
+        task_id: "ai-beta-job-1",
+        status: "complete",
+        progress: null,
+        report: { ...aiBetaReaderReport, is_stale: false },
+        error: null,
+      })
+    }
+
+    if (path === "/api/v1/intelligence/book-1/advisor/beta-reader/reports/ai-beta-report-1/revision-candidates/candidate-gate-pacing" && method === "POST") {
+      const created = !betaReaderRevisionCreated
+      betaReaderRevisionCreated = true
+      return json(route, {
+        task_id: "ai-beta-reader-task:candidate-gate-pacing",
+        candidate_id: "candidate-gate-pacing",
+        created,
+      })
     }
 
     if (path === "/api/v1/intelligence/book-1/world-building/documents" && method === "GET") {
@@ -4053,6 +5191,16 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
       return updated ? json(route, updated) : notFound(route)
     }
 
+    if (path === "/api/v1/public/books/page" && method === "GET") {
+      const url = new URL(route.request().url())
+      const limit = Math.max(1, Number.parseInt(url.searchParams.get("limit") || "24", 10) || 24)
+      return json(route, {
+        items: publicBooks.slice(0, limit),
+        next_cursor: null,
+        has_more: false,
+      })
+    }
+
     if (path === "/api/v1/public/books" && method === "GET") {
       return json(route, publicBooks)
     }
@@ -4116,12 +5264,18 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
       return post ? json(route, post) : notFound(route)
     }
 
-    const publicForumCommentsMatch = path.match(/^\/api\/v1\/public\/forum\/posts\/([^/]+)\/comments$/)
-    if (publicForumCommentsMatch && method === "GET") {
-      const postId = publicForumCommentsMatch[1]
-      return json(route, { items: buildNestedForumComments(postId) })
+    const publicForumCommentsPageMatch = path.match(/^\/api\/v1\/public\/forum\/posts\/([^/]+)\/comments\/page$/)
+    if (publicForumCommentsPageMatch && method === "GET") {
+      const postId = publicForumCommentsPageMatch[1]
+      return json(route, { items: buildNestedForumComments(postId), next_cursor: null, has_more: false })
     }
 
+    const publicForumInterestsPageMatch = path.match(/^\/api\/v1\/public\/forum\/posts\/([^/]+)\/interests\/page$/)
+    if (publicForumInterestsPageMatch && method === "GET") {
+      return json(route, { items: [], next_cursor: null, has_more: false })
+    }
+
+    const publicForumCommentsMatch = path.match(/^\/api\/v1\/public\/forum\/posts\/([^/]+)\/comments$/)
     if (publicForumCommentsMatch && method === "POST") {
       const payload = route.request().postDataJSON() as { body?: string, parent_comment_id?: string | null } | null
       const postId = publicForumCommentsMatch[1]

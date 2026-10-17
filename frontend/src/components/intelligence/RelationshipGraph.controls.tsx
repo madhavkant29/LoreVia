@@ -67,8 +67,8 @@ export function GraphToolbarButton({
 
 export function GraphStatusPill({ icon, children }: { icon: ReactNode; children: ReactNode }) {
   return (
-    <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.03] px-3 py-1.5 text-xs text-slate-300">
-      <span className="text-slate-400">{icon}</span>
+    <div className="inline-flex items-center gap-2 rounded-sm border border-[rgb(var(--border))] bg-white/[0.03] px-3 py-1.5 text-sm text-[rgb(var(--foreground))]">
+      <span className="text-[rgb(var(--muted-foreground))]">{icon}</span>
       <span>{children}</span>
     </div>
   )
@@ -89,7 +89,7 @@ export function FilterSelect({
     <div className="flex items-center gap-2">
       <label htmlFor={filterId} className="sr-only">Filter relationships</label>
       <div className="relative min-w-[132px]">
-        <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">
+        <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[rgb(var(--muted-foreground))]">
           <FilterIcon className="h-4 w-4" />
         </span>
         <select
@@ -97,7 +97,7 @@ export function FilterSelect({
           aria-label="Filter relationships"
           value={filterType ?? ""}
           onChange={(event) => setFilterType(event.target.value || null)}
-          className="w-full appearance-none rounded-xl border border-white/10 bg-[#0b1020] py-2 pl-9 pr-9 text-sm text-slate-100 transition hover:border-white/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/70"
+          className="w-full appearance-none rounded-sm border border-[rgb(var(--border))] bg-[rgb(var(--card))] py-2 pl-9 pr-9 text-sm text-[rgb(var(--foreground))] transition-colors hover:border-[rgb(var(--border))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/70"
         >
           <option value="">All</option>
           {relationshipTypes.map((type) => (
@@ -106,7 +106,7 @@ export function FilterSelect({
             </option>
           ))}
         </select>
-        <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-500">
+        <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[rgb(var(--muted-foreground))]">
           <ChevronDownIcon className="h-4 w-4" />
         </span>
       </div>
@@ -117,8 +117,8 @@ export function FilterSelect({
 export function InspectorMetric({ label, value }: { label: string; value: number }) {
   return (
     <div className="flex items-center justify-between gap-3">
-      <span className="text-slate-300">{label}</span>
-      <span className="font-semibold text-white">{value}</span>
+      <span className="text-[rgb(var(--foreground))]">{label}</span>
+      <span className="font-semibold text-[rgb(var(--foreground))]">{value}</span>
     </div>
   )
 }
@@ -136,11 +136,11 @@ export function RelationshipLabelChecklist({
 }) {
   const selectedSet = new Set(selected)
   return (
-    <fieldset className="rounded-lg border border-white/10 bg-black/15 p-3">
-      <legend className="px-1 text-xs text-slate-400">{label}</legend>
+    <fieldset className="rounded-sm border border-[rgb(var(--border))] bg-black/15 p-3">
+      <legend className="px-1 text-sm text-[rgb(var(--muted-foreground))]">{label}</legend>
       <div className="mt-2 grid max-h-36 gap-2 overflow-y-auto pr-1 sm:grid-cols-2">
         {options.map((option) => (
-          <label key={option} className="flex min-w-0 items-center gap-2 rounded-md px-2 py-1 text-xs text-slate-300 hover:bg-white/[0.04]">
+          <label key={option} className="flex min-w-0 items-center gap-2 rounded-sm px-2 py-1 text-sm text-[rgb(var(--foreground))] hover:bg-white/[0.04]">
             <input
               type="checkbox"
               checked={selectedSet.has(option)}
@@ -151,9 +151,9 @@ export function RelationshipLabelChecklist({
                   onChange(selected.filter((item) => item !== option))
                 }
               }}
-              className="h-3.5 w-3.5 rounded border-white/20 bg-[#0b1020] text-violet-500 focus:ring-violet-400"
+              className="h-3.5 w-3.5 rounded border-[rgb(var(--border))] bg-[rgb(var(--card))] text-violet-500 focus:ring-violet-400"
             />
-            <span className="truncate">{relationshipFacetLabel(option)}</span>
+            <span className="break-words">{relationshipFacetLabel(option)}</span>
           </label>
         ))}
       </div>
@@ -169,8 +169,8 @@ export function InspectorSection({
   title: string
 }) {
   return (
-    <section className="rounded-md border border-white/10 bg-black/20 p-4">
-      <p className="text-3xs font-semibold uppercase tracking-[0.24em] text-slate-500">{title}</p>
+    <section className="border-b border-[rgb(var(--border))] py-4 last:border-b-0">
+      <h4 className="text-sm font-semibold text-[rgb(var(--foreground))]">{title}</h4>
       <div className="mt-3">{children}</div>
     </section>
   )
@@ -186,11 +186,11 @@ export function EmptyInspector({
   return (
     <div className="space-y-5">
       <div>
-        <p className="text-3xs font-semibold uppercase tracking-[0.28em] text-violet-300/85">Inspector</p>
-        <h3 className="mt-3 text-[2rem] font-semibold tracking-tight text-white">Read the map</h3>
+        <p className="text-3xs font-semibold uppercase tracking-[0.28em] text-violet-700 dark:text-violet-300/85">Inspector</p>
+        <h3 className="mt-3 text-[2rem] font-semibold tracking-tight text-[rgb(var(--foreground))]">Read the map</h3>
       </div>
 
-      <p className="text-sm leading-7 text-slate-400">
+      <p className="text-sm leading-7 text-[rgb(var(--muted-foreground))]">
         Select a character to inspect their role in the network, or select a connection to read the relationship note. Arrange mode is best when you want to cluster the cast your own way.
       </p>
 
@@ -201,18 +201,18 @@ export function EmptyInspector({
         </div>
       </InspectorSection>
 
-      <div className="flex min-h-[220px] flex-col items-center justify-center rounded-lg border border-dashed border-white/10 bg-white/[0.02] px-6 text-center">
-        <div className="flex h-16 w-16 items-center justify-center rounded-full border border-violet-400/40 bg-violet-500/8 text-violet-200">
+      <div className="flex min-h-[220px] flex-col items-center justify-center rounded-sm border border-dashed border-[rgb(var(--border))] bg-white/[0.02] px-6 text-center">
+        <div className="flex h-16 w-16 items-center justify-center rounded-sm border border-violet-400/40 bg-violet-500/8 text-violet-700 dark:text-violet-200">
           <CursorIcon className="h-7 w-7" />
         </div>
-        <p className="mt-5 text-lg font-semibold text-white">Select a character or connection</p>
-        <p className="mt-2 max-w-xs text-sm leading-7 text-slate-400">
+        <p className="mt-5 text-lg font-semibold text-[rgb(var(--foreground))]">Select a character or connection</p>
+        <p className="mt-2 max-w-xs text-sm leading-7 text-[rgb(var(--muted-foreground))]">
           Use the graph to explore relationships between characters in your manuscript.
         </p>
       </div>
 
       <InspectorSection title="Tip">
-        <p className="text-sm leading-7 text-slate-300">
+        <p className="text-sm leading-7 text-[rgb(var(--foreground))]">
           Drag nodes to cluster related characters. Your layout is saved automatically.
         </p>
       </InspectorSection>

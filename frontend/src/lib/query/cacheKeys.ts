@@ -18,6 +18,14 @@ export function booksListCacheKey(includeHidden = false) {
   return `books:list:${includeHidden ? "all" : "active"}`
 }
 
+export function booksPageCacheKey(includeHidden = false) {
+  return `books:page:${includeHidden ? "all" : "active"}`
+}
+
+export function booksSelectorCacheKey(includeHidden = false) {
+  return `books:selector:${includeHidden ? "all" : "active"}`
+}
+
 export function booksStatsCacheKey() {
   return "books:stats"
 }

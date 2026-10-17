@@ -180,13 +180,51 @@ async def test_build_story_health_payload_handles_empty_runtime_data(monkeypatch
 
     payload = await story_health.build_story_health_payload(db, book)
 
-    assert payload.score >= 0
+    assert payload.score == 0
+    assert payload.available is False
+    assert payload.status == "Not available"
+    assert all(metric.available is False for metric in payload.metrics)
     assert next(metric for metric in payload.metrics if metric.label == "Pacing").detail.startswith(
         "No persisted"
     )
     assert (
-        "fresh pass"
+        "No world-gap analysis"
         in next(
             metric for metric in payload.metrics if metric.label == "Worldbuilding consistency"
         ).detail
     )
+
+
+@pytest.mark.asyncio
+async def test_build_story_health_payload_does_not_score_pacing_from_one_chapter(monkeypatch):
+    db = FakeDb(
+        [
+            FakeResult([]),
+            FakeResult([]),
+            FakeResult([]),
+            FakeResult(scalar=None),
+            FakeResult(scalar=None),
+            FakeResult([]),
+            FakeResult(scalar=None),
+            FakeResult([]),
+            FakeResult([1200]),
+        ],
+        [0, 0],
+    )
+    book = SimpleNamespace(id=uuid.uuid4(), total_chapters=1)
+
+    async def no_reports(*_args, **_kwargs):
+        return []
+
+    monkeypatch.setattr(
+        "app.utils.characters.governance.is_displayable_character", lambda character: True
+    )
+    monkeypatch.setattr(story_health, "list_chapter_consistency_reports", no_reports)
+
+    payload = await story_health.build_story_health_payload(db, book)
+    pacing = next(metric for metric in payload.metrics if metric.label == "Pacing")
+
+    assert pacing.score == 0
+    assert pacing.available is False
+    assert "at least two" in pacing.detail
+    assert payload.available is False

@@ -31,7 +31,6 @@ export function WorldbuildingDocumentSidebar({
 }) {
   return (
     <aside className={`overflow-hidden rounded-lg border ${panelClass(isDark)}`}>
-      <div className={`border-b px-5 py-4 ${isDark ? "border-white/10" : "border-stone-200"}`} />
       <div className={`flex items-center justify-between border-b px-5 py-4 ${isDark ? "border-white/10" : "border-stone-200"}`}>
         <div>
           <p className={eyebrowClass(isDark)}>Documents</p>
@@ -40,7 +39,7 @@ export function WorldbuildingDocumentSidebar({
         <button
           type="button"
           onClick={onNewDocument}
-          className={secondaryButtonClass(isDark)}
+          className={`${secondaryButtonClass(isDark)} shrink-0 whitespace-nowrap`}
         >
           New
         </button>
@@ -71,6 +70,7 @@ export function WorldbuildingDocumentSidebar({
                 <button
                   key={document.id}
                   type="button"
+                  aria-pressed={active}
                   onClick={() => onSelectDocument(document.id)}
                   className={`w-full rounded-md border px-4 py-3 text-left transition ${active
                     ? isDark
@@ -80,7 +80,7 @@ export function WorldbuildingDocumentSidebar({
                       ? "border-white/10 bg-white/[0.03] text-slate-200 hover:bg-white/[0.06]"
                       : "border-stone-200 bg-stone-50 text-stone-700 hover:bg-white"}`}
                 >
-                  <p className="truncate text-sm font-semibold">{document.title}</p>
+                  <p className="break-words text-sm font-semibold">{document.title}</p>
                   <p className={`mt-1 text-xs ${mutedTextClass(isDark)}`}>
                     {(document.word_count ?? 0).toLocaleString()} words - {new Date(document.updated_at).toLocaleDateString()}
                   </p>
@@ -88,7 +88,7 @@ export function WorldbuildingDocumentSidebar({
               )
             })}
           </div>
-          {!documentsLoading && documents.length > visibleDocuments.length ? (
+          {!documentsLoading && (showAllDocuments || documents.length > visibleDocuments.length) ? (
             <button
               type="button"
               onClick={onToggleShowAllDocuments}

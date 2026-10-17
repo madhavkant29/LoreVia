@@ -15,7 +15,7 @@ const advisorMessageStreamMock = vi.hoisted(() => vi.fn())
 const saveContextualVaultNoteMock = vi.hoisted(() => vi.fn())
 
 vi.mock("next/link", () => ({
-  default: ({ children, href, ...props }: { children: ReactNode; href: string }) => <a href={href} {...props}>{children}</a>,
+  default: ({ children, href, prefetch: _prefetch, ...props }: { children: ReactNode; href: string; prefetch?: boolean | null }) => <a href={href} {...props}>{children}</a>,
 }))
 
 vi.mock("next/dynamic", () => ({
@@ -47,8 +47,10 @@ vi.mock("@/lib/stores/preferencesStore", () => ({
 }))
 
 vi.mock("@/lib/stores/authStore", () => ({
-  useAuthStore: (selector: (state: { user: { tier: string } | null }) => unknown) => selector({ user: { tier: "pro" } }),
+  useAuthStore: (selector: (state: { hydrated: boolean; user: { id: string; tier: string } | null }) => unknown) => selector({ hydrated: true, user: { id: "user-1", tier: "pro" } }),
 }))
+
+vi.mock("@/lib/api/reader", () => ({ readerApi: { getChapterList: async () => ({ chapters: [{ number: 2, title: "Ash Road" }] }) } }))
 
 vi.mock("@/lib/billing/plans", () => ({
   canUseAuthorFeatures: () => true,
@@ -117,6 +119,7 @@ async function flushUi() {
     await Promise.resolve()
     await Promise.resolve()
     await Promise.resolve()
+    await new Promise((resolve) => setTimeout(resolve, 0))
   })
 }
 
@@ -217,7 +220,7 @@ beforeEach(() => {
   })
   advisorSuggestionsScanMock.mockResolvedValue({ job_id: "scan-job-1", cached: true })
   advisorSuggestionsJobStatusMock.mockResolvedValue({ status: "complete", result: null })
-  advisorMessageStreamMock.mockImplementation(async (_bookId, _messages, _limit, callbacks) => {
+  advisorMessageStreamMock.mockImplementation(async (_bookId, _messages, callbacks) => {
     callbacks?.onDelta?.("Opportunity: ")
     callbacks?.onDelta?.("seed the lantern earlier.")
     return {
@@ -258,6 +261,18 @@ afterEach(() => {
 })
 
 describe("AdvisorPage", () => {
+  it("preserves existing hidden checks when adopting account-specific storage", async () => {
+    localStorage.setItem("lorevia-advisor-scan:book-1", JSON.stringify({ dismissed: ["scan-1"], intentional: [] }))
+    renderPage()
+    await flushUi(); await flushUi()
+    clickByText("Recommended checks")
+    await flushUi()
+    expect(container?.textContent).toContain("All current checks are hidden")
+    expect(JSON.parse(localStorage.getItem("lorevia-advisor-scan:user-1:book-1") || "{}").dismissed).toEqual(["scan-1"])
+    clickByText("Restore all hidden checks")
+    await flushUi()
+    expect(JSON.parse(localStorage.getItem("lorevia-advisor-scan:user-1:book-1") || "{}").dismissed).toEqual([])
+  })
   it("renders the accessible mode toggle and preserved notes link", async () => {
     advisorSuggestionsMock.mockResolvedValue({
       suggestions: [],
@@ -290,8 +305,8 @@ describe("AdvisorPage", () => {
     expect(checkerTab?.getAttribute("aria-selected")).toBe("true")
     expect(scanTab?.getAttribute("aria-selected")).toBe("false")
 
-    const notesLink = Array.from(container?.querySelectorAll("a") ?? []).find((link) => link.textContent?.includes("Open notes workspace"))
-    expect(notesLink?.getAttribute("href")).toBe("/book-1/notes")
+    expect(container?.textContent).toContain("Ask advisor")
+    expect(container?.textContent).toContain("Recommended checks")
   })
 
   it("switches to continuity scan and renders heuristic summary data", async () => {
@@ -307,8 +322,8 @@ describe("AdvisorPage", () => {
       await Promise.resolve()
     })
 
-    expect(container?.textContent).toContain("Heuristic Summary")
-    expect(container?.textContent).toContain("Fallback Cards")
+    expect(container?.textContent).toContain("heuristic finding")
+    expect(container?.textContent).toContain("Fallback analysis")
     expect(container?.textContent).toContain("Editorial focus pass")
     expect(container?.textContent).toContain("Find the best pressure point")
   })
@@ -370,8 +385,10 @@ describe("AdvisorPage", () => {
     await flushUi()
     await flushUi()
 
+    clickByText("Recommended checks")
+    await flushUi()
     expect(container?.textContent).toContain("Lantern timeline conflict")
-    expect(container?.textContent).toContain("Proactive audit added")
+    expect(container?.textContent).toContain("Proactive audit included")
 
     clickByText("Save note")
     await flushUi()
@@ -387,7 +404,7 @@ describe("AdvisorPage", () => {
 
     clickByText("Dismiss")
     await flushUi()
-    expect(window.localStorage.getItem("lorevia-advisor-scan:book-1")).toContain("warn-1")
+    expect(window.localStorage.getItem("lorevia-advisor-scan:user-1:book-1")).toContain("warn-1")
 
     clickByText("Plan foreshadowing")
     await flushUi()
@@ -411,8 +428,8 @@ describe("AdvisorPage", () => {
       folderSegments: [],
     }))
 
-    clickByText("Continuity Scan")
-    clickByText("Check Story Health")
+    clickByText("Recommended checks")
+    clickByText("Refresh checks")
     await flushUi()
     expect(advisorSuggestionsScanMock).toHaveBeenCalledWith("book-1")
     expect(advisorSuggestionsMock).toHaveBeenCalled()

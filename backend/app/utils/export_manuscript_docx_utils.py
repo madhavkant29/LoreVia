@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, cast
+from typing import Any, BinaryIO, cast
 
 from app.utils.export_common_utils import _export_font_docx_name, _set_docx_core_properties
 from app.utils.export_manuscript_formatting_utils import (
@@ -25,7 +25,8 @@ def manuscript_docx(
     font_family: str | None = None,
     include_toc: bool = False,
     index_format: str = "arabic",
-) -> bytes:
+    output: BinaryIO | None = None,
+) -> bytes | None:
     from io import BytesIO
 
     from docx import Document
@@ -213,6 +214,8 @@ def manuscript_docx(
     ending.paragraph_format.first_line_indent = Pt(0)
     ending.add_run(_manuscript_end_marker())
 
-    buffer = BytesIO()
+    buffer = output or BytesIO()
     doc.save(buffer)
-    return buffer.getvalue()
+    if output is not None:
+        return None
+    return cast(Any, buffer).getvalue()

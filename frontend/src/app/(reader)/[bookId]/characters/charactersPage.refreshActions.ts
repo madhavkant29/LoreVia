@@ -4,7 +4,7 @@ import type { Character, RelationshipGraph as RelationshipGraphData } from "@/ty
 
 type WorkspaceMode = "profile" | "review" | "duplicates" | "repair"
 
-type QueryRefetch<T> = () => Promise<{ data?: T }>
+type QueryRefetch<T> = () => Promise<{ data?: T; error?: unknown }>
 
 type UseCharacterRefreshActionsArgs = {
   refetchCharacterReview: QueryRefetch<unknown>
@@ -30,7 +30,8 @@ export function useCharacterRefreshActions({
   const [refreshingGraph, setRefreshingGraph] = useState(false)
 
   const refreshCharacters = useCallback(async () => {
-    const { data: refreshed = [] } = await refetchCharacters()
+    const { data: refreshed, error } = await refetchCharacters()
+    if (error || !refreshed) throw new Error("Could not refresh characters.")
     await refetchCharacterReview()
     if (workspaceMode === "repair") {
       await refetchRepairPreview()
@@ -42,8 +43,8 @@ export function useCharacterRefreshActions({
   const refreshGraph = useCallback(async () => {
     setRefreshingGraph(true)
     try {
-      const { data: refreshed = null } = await refetchRelationshipGraph()
-      if (!refreshed) {
+      const { data: refreshed = null, error } = await refetchRelationshipGraph()
+      if (error || !refreshed) {
         setActionError("Could not rebuild the relationship graph.")
         return
       }

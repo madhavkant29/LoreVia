@@ -35,6 +35,24 @@ PAID_READING_TIERS = {AUTHOR_TIER, ARCHITECT_TIER}
 AUTHORING_SUBSCRIPTION_TIERS = {AUTHOR_TIER, ARCHITECT_TIER}
 UNLIMITED_OWNER_UPLOAD_TIERS = {ARCHITECT_TIER}
 DAILY_LIMIT_MESSAGE = "Your daily limit refreshes tomorrow. Want higher limits now? Upgrade."
+
+
+def advisor_daily_limit_message(limit: int) -> str:
+    return f"You've reached your daily limit of {limit} Story Advisor turns. It refreshes tomorrow."
+
+
+def continuity_daily_limit_message(limit: int) -> str:
+    return (
+        f"You've reached your daily limit of {limit} continuity and editorial scans. "
+        "It refreshes tomorrow."
+    )
+
+
+RENEWAL_REMINDER_DAYS_BEFORE = 3
+CURRENCY_CODE_USD = "USD"
+SUBSCRIPTION_EMAIL_RENEWAL_REMINDER = "renewal_reminder"
+SUBSCRIPTION_EMAIL_PAYMENT_FAILED = "payment_failed"
+SUBSCRIPTION_EMAIL_RENEWAL_SUCCEEDED = "renewal_succeeded"
 SUPPORTED_PADDLE_WEBHOOK_EVENTS = (
     "adjustment.created",
     "adjustment.updated",
@@ -176,7 +194,12 @@ def recommended_paddle_default_checkout_url() -> str:
     if "://" not in raw_app_url:
         raw_app_url = f"https://{raw_app_url.lstrip('/')}"
     parts = urlsplit(raw_app_url)
-    if not settings.DEBUG and parts.hostname in {"localhost", "127.0.0.1", "0.0.0.0"}:
+    # These are rejected URL hostnames; this code does not bind a network socket.
+    if not settings.DEBUG and parts.hostname in {  # nosec B104
+        "localhost",
+        "127.0.0.1",
+        "0.0.0.0",
+    }:
         raw_app_url = default_app_url
     return f"{raw_app_url.rstrip('/')}/checkout"
 
@@ -544,6 +567,103 @@ def billing_interval_for_plan(plan: str) -> str:
     if interval in {"monthly", "annual"}:
         return interval
     return "annual" if normalized.endswith("_annual") else "monthly"
+
+
+def plan_is_paid(plan: str | None) -> bool:
+    return normalize_plan_code(plan) in VALID_PAID_PLAN_CODES
+
+
+def plan_price_payload(plan: str | None) -> dict[str, Any]:
+    normalized = normalize_plan_code(plan)
+    return {
+        "amount": int(PLAN_PRICES_USD.get(normalized, 0)),
+        "currency": CURRENCY_CODE_USD,
+        "interval": "month" if billing_interval_for_plan(normalized) == "monthly" else "year",
+    }
+
+
+def plan_display_name(plan: str | None) -> str:
+    normalized = normalize_plan_code(plan)
+    if normalized in PLAN_DISPLAY_NAMES:
+        return PLAN_DISPLAY_NAMES[normalized]
+    return tier_display_label(tier_from_plan_code(normalized))
+
+
+def subscription_auto_renews(status: str | None, cancel_at_period_end: bool) -> bool:
+    return (status or "").strip().lower() == "active" and not cancel_at_period_end
+
+
+def subscription_display_state(
+    *,
+    status: str | None,
+    cancel_at_period_end: bool,
+    trial_active: bool,
+) -> str:
+    normalized = (status or "").strip().lower()
+    if normalized in {"active", "trialing"}:
+        return "cancellation_scheduled" if cancel_at_period_end else "active"
+    if normalized == "past_due":
+        return "past_due"
+    if normalized == "paused":
+        return "paused"
+    if normalized in {"canceled", "cancelled"}:
+        return "canceled"
+    if trial_active:
+        return "trial"
+    return "free"
+
+
+def parse_paddle_datetime(value: object | None) -> datetime | None:
+    if value is None:
+        return None
+    candidate = str(value).strip()
+    if not candidate:
+        return None
+    try:
+        parsed = datetime.fromisoformat(candidate.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
+
+
+def paddle_billing_period_bounds(
+    data: dict[str, Any],
+) -> tuple[datetime | None, datetime | None]:
+    for key in ("current_billing_period", "billing_period"):
+        period = data.get(key)
+        if not isinstance(period, dict):
+            continue
+        starts_at = parse_paddle_datetime(period.get("starts_at"))
+        ends_at = parse_paddle_datetime(period.get("ends_at"))
+        if starts_at is not None or ends_at is not None:
+            return starts_at, ends_at
+    return None, None
+
+
+def paddle_scheduled_cancellation(data: dict[str, Any]) -> tuple[bool, datetime | None]:
+    change = data.get("scheduled_change")
+    if not isinstance(change, dict):
+        return False, None
+    action = str(change.get("action") or "").strip().lower()
+    if action != "cancel":
+        return False, None
+    effective_at = parse_paddle_datetime(
+        change.get("effective_at") or change.get("scheduled_change_at")
+    )
+    return True, effective_at
+
+
+def format_minor_amount(total_minor: object | None, currency_code: str | None) -> str | None:
+    code = str(currency_code or "").strip().upper()
+    if not code:
+        return None
+    try:
+        amount = float(str(total_minor)) / 100
+    except (TypeError, ValueError):
+        return None
+    return f"{code} {amount:,.2f}"
 
 
 def paddle_plan_is_configured(plan: str) -> bool:

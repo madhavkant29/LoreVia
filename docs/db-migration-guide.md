@@ -29,6 +29,7 @@ It also covers prod backup and restore workflow, recovery from a broken `public`
 - Do not combine `unique=True` and `index=True` on the same mapped column just to preserve lookup performance.
 - If a unique field is also queried frequently, rely on the backing unique index created by PostgreSQL unless a separate non-unique index is explicitly justified by query plans.
 - When reviewing autogeneration output, treat index/constraint churn on the same column as a schema smell and fix the model declaration before accepting the migration.
+- Before designing the pending chunk, summary, and reading-progress uniqueness rollout, run the aggregate-only preflight from the configured backend container: `python scripts/check_release_data_preflight.py`. It forces the transaction read-only and reports only duplicate counts and constraint names. A nonzero result means the human maintainer must review and deduplicate the affected identity before adding a constraint; chapter-number duplicates are advisory because current ingestion flows can create them intentionally.
 
 ## Legacy bootstrap revisions
 

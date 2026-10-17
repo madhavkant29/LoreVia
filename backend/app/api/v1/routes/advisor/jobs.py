@@ -6,7 +6,6 @@ from typing import Any, cast
 from fastapi import APIRouter, Depends, HTTPException, Response
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import StreamingResponse
-from openai import AsyncOpenAI
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -20,8 +19,10 @@ from app.api.v1.routes.advisor.chat import (
 )
 from app.core.config import settings
 from app.core.database import get_db
+from app.core.llm import get_openai_client
 from app.core.redis import (
     get_series_advisor_response_cache,
+    get_series_cache_version,
     get_series_continuity_cache,
     set_series_continuity_cache,
 )
@@ -45,9 +46,11 @@ from app.utils.advisor_utils import (
     retrieve_series_continuity_passages,
 )
 from app.utils.billing_utils import require_author_access
-from app.utils.llm_usage_utils import create_tracked_chat_completion
+from app.utils.llm_usage_utils import (
+    create_tracked_chat_completion,
+    public_llm_http_error_message,
+)
 from app.utils.logging.errors import public_error_message
-from app.utils.retry_utils import LLM_MAX_RETRIES
 from app.utils.task_queue_errors import TASK_ENQUEUE_ERRORS
 from app.workers.tasks.intelligence_tasks import generate_series_advisor_reply_task
 
@@ -69,7 +72,12 @@ async def _enqueue_series_advisor_task(
     if not last_user_msg:
         raise HTTPException(400, detail="no user message found")
     cache_key = make_advisor_cache_key(f"series:{series.id}", last_user_msg)
-    cached = await get_series_advisor_response_cache(str(series.id), cache_key)
+    cache_version = await get_series_cache_version(str(series.id))
+    cached = await get_series_advisor_response_cache(
+        str(series.id),
+        cache_key,
+        version=cache_version,
+    )
     if cached is not None:
         return {**cached, "cached": True}
 
@@ -162,6 +170,8 @@ async def series_advisor_message_stream(
                 messages=[{"role": msg.role, "content": msg.content} for msg in body.messages],
             ):
                 yield _advisor_sse(item["event"], item["data"])
+        except HTTPException as exc:
+            yield _advisor_sse("error", {"error": public_llm_http_error_message(exc)})
         except ADVISOR_STREAM_ERRORS:
             yield _advisor_sse("error", {"error": public_error_message(500)})
 
@@ -239,8 +249,12 @@ async def series_continuity_check(
         body.text,
         body.chapter_num,
     )
+    cache_version = await get_series_cache_version(str(series.id))
     cached_series = await get_series_continuity_cache(
-        str(series.id), str(current_book.id), series_cache_key
+        str(series.id),
+        str(current_book.id),
+        series_cache_key,
+        version=cache_version,
     )
     if cached_series is not None:
         return {**cached_series, "cached": True}
@@ -333,7 +347,7 @@ async def series_continuity_check(
         f"--- RETRIEVED PASSAGES FROM EARLIER BOOKS ---\n{passages_block}"
     )
 
-    client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY, max_retries=LLM_MAX_RETRIES)
+    client = get_openai_client()
     try:
         response = await create_tracked_chat_completion(
             client=client,
@@ -368,7 +382,11 @@ async def series_continuity_check(
             "cached": False,
         }
         await set_series_continuity_cache(
-            str(series.id), str(current_book.id), series_cache_key, response_payload
+            str(series.id),
+            str(current_book.id),
+            series_cache_key,
+            response_payload,
+            expected_version=cache_version,
         )
         return response_payload
     finally:
@@ -395,7 +413,7 @@ async def series_continuity_check_stream(
             )
             yield _advisor_sse("done", cast(dict[str, Any], jsonable_encoder(payload)))
         except HTTPException as exc:
-            yield _advisor_sse("error", {"error": public_error_message(exc.status_code)})
+            yield _advisor_sse("error", {"error": public_llm_http_error_message(exc)})
         except ADVISOR_STREAM_ERRORS:
             yield _advisor_sse("error", {"error": public_error_message(500)})
 

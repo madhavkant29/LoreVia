@@ -1,15 +1,25 @@
 import React, { act, type ReactNode } from "react"
-import { createRoot, type Root } from "react-dom/client"
+import { createRoot, hydrateRoot, type Root } from "react-dom/client"
+import { renderToString } from "react-dom/server"
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest"
 
 import type { CollaborationPermissions } from "@/types/book"
+import type { BookPreset, UiPreferenceOperation, UserBookUiPreference, UserUiPreference } from "@/types/uiPreferences"
+
+type MockUiPreferencesState = {
+  preferences: UserUiPreference
+  bookPreferences: Record<string, UserBookUiPreference>
+  hydrateBook: ReturnType<typeof vi.fn>
+  setBookPreset: ReturnType<typeof vi.fn>
+  patchBook: ReturnType<typeof vi.fn>
+}
 
 const useQueryMock = vi.hoisted(() => vi.fn())
 const useQueryClientMock = vi.hoisted(() => vi.fn())
 const useAuthStoreMock = vi.hoisted(() => vi.fn())
 const canUseAuthorFeaturesMock = vi.hoisted(() => vi.fn())
 const uiPreferencesStoreMock = vi.hoisted(() => {
-  const makeGlobalPreference = () => ({
+  const makeGlobalPreference = (): UserUiPreference => ({
     schema_version: 1,
     revision: 1,
     complexity_mode: "standard",
@@ -25,7 +35,7 @@ const uiPreferencesStoreMock = vi.hoisted(() => {
     recommendation_snoozes: {},
     updated_at: null,
   })
-  const makeBookPreference = (bookId = "book-1", preset = "all", advancedToolOverride: "show" | "hide" | null = null) => ({
+  const makeBookPreference = (bookId = "book-1", preset: BookPreset = "all", advancedToolOverride: "show" | "hide" | null = null): UserBookUiPreference => ({
     book_id: bookId,
     schema_version: 1,
     revision: 1,
@@ -40,14 +50,14 @@ const uiPreferencesStoreMock = vi.hoisted(() => {
     updated_at: null,
   })
   const listeners = new Set<() => void>()
-  let state: any
+  let state: MockUiPreferencesState
   const notify = () => listeners.forEach((listener) => listener())
   const reset = () => {
     state = {
       preferences: makeGlobalPreference(),
       bookPreferences: { "book-1": makeBookPreference() },
       hydrateBook: vi.fn(),
-      setBookPreset: vi.fn(async (bookId: string, preset: string) => {
+      setBookPreset: vi.fn(async (bookId: string, preset: BookPreset) => {
         const current = state.bookPreferences[bookId] ?? makeBookPreference(bookId)
         state = {
           ...state,
@@ -58,18 +68,18 @@ const uiPreferencesStoreMock = vi.hoisted(() => {
         }
         notify()
       }),
-      patchBook: vi.fn(async (bookId: string, operations: Array<{ path: string; value?: unknown }>) => {
+      patchBook: vi.fn(async (bookId: string, operations: UiPreferenceOperation[]) => {
         const current = state.bookPreferences[bookId] ?? makeBookPreference(bookId)
         const next = { ...current }
         for (const operation of operations) {
           if (operation.path === "/advanced_tool_override") {
-            next.advanced_tool_override = operation.value
+            next.advanced_tool_override = operation.value as UserBookUiPreference["advanced_tool_override"]
           }
           if (operation.path === "/book_preset") {
-            next.book_preset = operation.value
+            next.book_preset = operation.value as BookPreset
           }
           if (operation.path === "/hidden_book_tools" && Array.isArray(operation.value)) {
-            next.hidden_book_tools = operation.value
+            next.hidden_book_tools = operation.value.filter((value): value is string => typeof value === "string")
           }
         }
         state = {
@@ -93,7 +103,7 @@ const uiPreferencesStoreMock = vi.hoisted(() => {
 })
 
 vi.mock("next/link", () => ({
-  default: ({ href, children, ...props }: { href: string; children: ReactNode }) => (
+  default: ({ href, children, prefetch: _prefetch, ...props }: { href: string; children: ReactNode; prefetch?: boolean | null }) => (
     <a href={href} {...props}>
       {children}
     </a>
@@ -127,7 +137,7 @@ vi.mock("@/lib/stores/uiPreferencesStore", async () => {
   const ReactModule = await vi.importActual<typeof import("react")>("react")
   return {
     defaultBookUiPreference: (bookId: string) => uiPreferencesStoreMock.makeBookPreference(bookId, "draft"),
-    useUiPreferencesStore: (selector: (state: any) => unknown) =>
+    useUiPreferencesStore: (selector: (state: MockUiPreferencesState) => unknown) =>
       ReactModule.useSyncExternalStore(
         uiPreferencesStoreMock.subscribe,
         () => selector(uiPreferencesStoreMock.getState()),
@@ -142,6 +152,19 @@ let container: HTMLDivElement | null = null
 let root: Root | null = null
 
 describe("AuthorToolsNav", () => {
+  it("hydrates cached author access without changing the server's initial navigation", async () => {
+    mockBaseState({ tier: "" })
+    canUseAuthorFeaturesMock.mockImplementation((tier) => tier === "pro")
+    const element = <AuthorToolsNav bookId="book-1" active="notes" isDark={true} variant="bar" />
+    container = document.createElement("div")
+    container.innerHTML = renderToString(element)
+    document.body.appendChild(container)
+    useAuthStoreMock.mockImplementation((selector) => selector({ user: { tier: "pro" } }))
+    const onRecoverableError = vi.fn()
+    await act(async () => { root = hydrateRoot(container!, element, { onRecoverableError }) })
+    expect(onRecoverableError).not.toHaveBeenCalled()
+    expect(findLink(container, "Story Bible")).toBeDefined()
+  })
   beforeAll(() => {
     ;(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
   })
@@ -226,6 +249,31 @@ describe("AuthorToolsNav", () => {
     expect(aside?.className ?? "").toContain("xl:group-hover/navwrap:w-[16.5rem]")
   })
 
+  it("renders a stable book bar with four author hubs and no helper paragraphs", () => {
+    mockBaseState()
+
+    const view = renderAuthorToolsNav({ variant: "bar" })
+
+    expect(view.querySelector('[data-testid="author-tools-nav-bar"]')).not.toBeNull()
+    expect(findLink(view, "Draft")?.getAttribute("href")).toBe("/book-1")
+    expect(findLink(view, "Story Bible")?.getAttribute("href")).toBe("/book-1/characters")
+    expect(findLink(view, "Review")?.getAttribute("href")).toBe("/book-1/advisor")
+    expect(findLink(view, "Share")?.getAttribute("href")).toBe("/book-1/collaboration")
+    expect(view.querySelector('[data-testid="author-nav-helper-overview"]')).toBeNull()
+  })
+
+  it("keeps the advanced toggle below the horizontally scrolling tool row", () => {
+    mockBaseState()
+
+    const view = renderAuthorToolsNav({ variant: "bar" })
+    const toggle = Array.from(view.querySelectorAll("button"))
+      .find((button) => button.textContent?.trim() === "Show advanced")
+
+    expect(toggle).not.toBeNull()
+    expect(toggle?.parentElement?.className).toContain("justify-end")
+    expect(toggle?.parentElement?.previousElementSibling?.className).toContain("overflow-x-auto")
+  })
+
   it("limits author navigation for a free owner when the book is in author mode", () => {
     mockBaseState({
       tier: "free",
@@ -238,7 +286,7 @@ describe("AuthorToolsNav", () => {
     expect(view.querySelector('[data-testid="author-nav-item-manuscript"]')).toBeNull()
     expect(view.querySelector('[data-testid="author-nav-item-characters"]')).toBeNull()
     expect(view.querySelector('[data-testid="author-nav-item-advisor"]')?.textContent).toContain("Story Advisor")
-    expect(view.querySelector('[data-testid="author-nav-item-export"]')?.textContent).toContain("Import & Export")
+    expect(view.querySelector('[data-testid="author-nav-item-export"]')?.textContent).toContain("Files & Export")
   })
 
   it("places notes workspace directly under the scene workspace", () => {
@@ -263,7 +311,7 @@ describe("AuthorToolsNav", () => {
     ).toBe(true)
   })
 
-  it("reveals the advanced author lens entry on request", () => {
+  it("keeps the contextual revision workflow out of the all-tools rail", () => {
     mockBaseState()
 
     const view = renderAuthorToolsNav()
@@ -271,7 +319,7 @@ describe("AuthorToolsNav", () => {
     const toggle = Array.from(view.querySelectorAll("button")).find((button) => button.textContent?.includes("Show advanced tools"))
     act(() => toggle?.dispatchEvent(new MouseEvent("click", { bubbles: true })))
 
-    expect(view.querySelector('[data-testid="author-nav-item-author-loop"]')?.textContent).toContain("Author Lens")
+    expect(view.querySelector('[data-testid="author-nav-item-author-loop"]')).toBeNull()
   })
 
   it("switches book presets from the author navigation", () => {
@@ -337,9 +385,35 @@ describe("AuthorToolsNav", () => {
 
     expect(view.querySelector('[data-testid="author-nav-rail-toggle"]')).not.toBeNull()
   })
+
+  it("links overview home back to the library", () => {
+    mockBaseState()
+
+    const view = renderAuthorToolsNav({ active: "overview" })
+
+    expect(view.querySelector('[data-testid="author-nav-home-link"]')?.getAttribute("href")).toBe("/library")
+  })
+
+  it("links child-route home back to the book overview", () => {
+    mockBaseState()
+
+    const view = renderAuthorToolsNav({ active: "characters" })
+
+    expect(view.querySelector('[data-testid="author-nav-home-link"]')?.getAttribute("href")).toBe("/book-1")
+  })
 })
 
-function renderAuthorToolsNav({ railSize, mode = "author" }: { railSize?: "default" | "compact"; mode?: "reader" | "author" } = {}) {
+function renderAuthorToolsNav({
+  active = "overview",
+  railSize,
+  mode = "author",
+  variant = "rail",
+}: {
+  active?: string
+  railSize?: "default" | "compact"
+  mode?: "reader" | "author"
+  variant?: "panel" | "rail" | "bar"
+} = {}) {
   container = document.createElement("div")
   document.body.appendChild(container)
   root = createRoot(container)
@@ -348,11 +422,11 @@ function renderAuthorToolsNav({ railSize, mode = "author" }: { railSize?: "defau
     root?.render(
       <AuthorToolsNav
         bookId="book-1"
-        active="overview"
+        active={active}
         isDark={false}
         currentChapter={2}
         mode={mode}
-        variant="rail"
+        variant={variant}
         railSize={railSize}
       />
     )
@@ -363,6 +437,10 @@ function renderAuthorToolsNav({ railSize, mode = "author" }: { railSize?: "defau
 
 function findButton(view: HTMLDivElement, label: string) {
   return Array.from(view.querySelectorAll("button")).find((button) => button.textContent?.includes(label))
+}
+
+function findLink(view: HTMLDivElement, label: string) {
+  return Array.from(view.querySelectorAll("a")).find((link) => link.textContent?.includes(label))
 }
 
 function mockBaseState({

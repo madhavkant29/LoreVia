@@ -60,9 +60,7 @@ export default function RegisterPage() {
   // Show loading state while validating existing session
   if (validatingSession) {
     return (
-      <div className={`rounded-lg border p-8 ${
-        isDark ? "border-white/10 bg-white/5" : "border-white/80 bg-white/92"
-      }`}>
+      <div className={`border-y py-8 ${isDark ? "border-white/10" : "border-stone-200"}`}>
         <div className="flex items-center justify-center py-12">
           <div className={`text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>
             Checking session...
@@ -119,10 +117,8 @@ export default function RegisterPage() {
   }
 
   return (
-    <div className={`rounded-lg border p-8 ${
-      isDark ? "border-white/10 bg-white/5" : "border-white/80 bg-white/92"
-    }`}>
-      <div className="mb-8 text-center">
+    <div className={`border-y py-8 ${isDark ? "border-white/10" : "border-stone-200"}`}>
+      <div className="mb-8">
         <h1 className={`text-3xl font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>Create account</h1>
         <p className={`mt-2 text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>
           Set up your LoreVia for authors account, then verify your email before opening your manuscript workspace.
@@ -138,7 +134,7 @@ export default function RegisterPage() {
 
       <div className="relative mb-6 flex items-center">
         <div className={`h-px flex-1 ${isDark ? "bg-white/[0.07]" : "bg-stone-200"}`} />
-        <span className={`px-3 text-3xs font-medium uppercase tracking-[0.18em] ${isDark ? "text-slate-600" : "text-stone-400"}`}>
+        <span className={`px-3 text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>
           or
         </span>
         <div className={`h-px flex-1 ${isDark ? "bg-white/[0.07]" : "bg-stone-200"}`} />
@@ -146,7 +142,7 @@ export default function RegisterPage() {
 
       <form onSubmit={submit} className="flex flex-col gap-4">
         <label className="flex flex-col gap-1.5">
-          <span className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-500"}`}>Email</span>
+          <span className={`text-sm font-medium ${isDark ? "text-slate-300" : "text-stone-700"}`}>Email</span>
           <input
             type="email"
             value={email}
@@ -159,7 +155,7 @@ export default function RegisterPage() {
           />
         </label>
         <label className="flex flex-col gap-1.5">
-          <span className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-500"}`}>Username</span>
+          <span className={`text-sm font-medium ${isDark ? "text-slate-300" : "text-stone-700"}`}>Username</span>
           <input
             type="text"
             value={username}
@@ -175,7 +171,7 @@ export default function RegisterPage() {
         </label>
         <div className="space-y-3">
           <label className="flex flex-col gap-1.5">
-            <span className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-500"}`}>Password</span>
+            <span className={`text-sm font-medium ${isDark ? "text-slate-300" : "text-stone-700"}`}>Password</span>
             <div className="relative">
               <input
                 type={showPassword ? "text" : "password"}
@@ -219,8 +215,8 @@ export default function RegisterPage() {
             {error}
           </p>
         )}
-        <label className={`flex items-start gap-3 rounded-md border px-4 py-3 text-sm ${
-          isDark ? "border-white/10 bg-white/[0.04] text-slate-300" : "border-stone-200 bg-stone-50 text-stone-700"
+        <label className={`flex items-start gap-3 border-l-2 px-4 py-2 text-sm ${
+          isDark ? "border-white/20 text-slate-300" : "border-stone-300 text-stone-700"
         }`}>
           <input
             type="checkbox"

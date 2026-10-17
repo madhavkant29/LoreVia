@@ -20,8 +20,8 @@ describe("ManuscriptWorkspaceSidebarHeader", () => {
   })
 
   it("shows manuscript metrics and exposes explicit creation actions", () => {
-    const onCreateChapter = vi.fn()
-    const onCreateScene = vi.fn()
+    const onCreateChapter = vi.fn<() => void>()
+    const onCreateScene = vi.fn<() => void>()
     const view = renderHeader(onCreateChapter, onCreateScene)
 
     expect(view.textContent).toContain("12,345 words")
@@ -34,7 +34,7 @@ describe("ManuscriptWorkspaceSidebarHeader", () => {
   })
 })
 
-function renderHeader(onCreateChapter: ReturnType<typeof vi.fn>, onCreateScene: ReturnType<typeof vi.fn>) {
+function renderHeader(onCreateChapter: () => void, onCreateScene: () => void) {
   container = document.createElement("div")
   document.body.appendChild(container)
   root = createRoot(container)

@@ -1,4 +1,4 @@
-import type { Book } from "@/types/book"
+import type { Book, BookSelector } from "@/types/book"
 import { getBookRouteSegment } from "@/lib/utils/bookRoutes"
 import type {
   BookPreset,
@@ -14,7 +14,7 @@ import { complexityRank, routeForTool, toolComplexityRank } from "./toolRegistry
 export interface ToolResolverContext {
   mode: ComplexityMode
   activePath?: string | null
-  book?: Book | null
+  book?: Book | BookSelector | null
   bookPreference?: UserBookUiPreference | null
   globalPreference?: UserUiPreference | null
   placement?: "dashboard" | "book" | "reader" | "public" | "command"
@@ -36,7 +36,7 @@ function normalizedActivePath(path: string | null | undefined) {
   return String(path || "").replace(/\/+$/, "") || "/"
 }
 
-function bookRouteSegment(book: Book | null | undefined) {
+function bookRouteSegment(book: Book | BookSelector | null | undefined) {
   if (!book) return undefined
   return book.title ? getBookRouteSegment(book) : book.id
 }
@@ -140,17 +140,17 @@ export function resolveWorkspaceTool(
       hidden: userVisibility !== "visible",
       reason: userVisibility === "user_hidden" ? "hidden_by_user" : undefined,
       }
-    } else if (tool.complexity === "advanced" && context.bookPreference?.advanced_tool_override) {
-      resolved = context.bookPreference.advanced_tool_override === "show"
-        ? { tool, href, access, visibility: "visible", hidden: false }
-        : {
-            tool,
-            href,
-            access,
-            visibility: "preset_hidden",
-            hidden: true,
-            reason: "hidden_by_advanced_override",
-          }
+    } else if (context.bookPreference?.advanced_tool_override === "show") {
+      resolved = { tool, href, access, visibility: "visible", hidden: false }
+    } else if (tool.complexity === "advanced" && context.bookPreference?.advanced_tool_override === "hide") {
+      resolved = {
+        tool,
+        href,
+        access,
+        visibility: "preset_hidden",
+        hidden: true,
+        reason: "hidden_by_advanced_override",
+      }
     } else {
       const byPreset = presetVisibility(tool, context.bookPreference?.book_preset)
       if (byPreset !== "visible" && context.mode !== "power") {

@@ -57,7 +57,6 @@ export function buildQuickVaultNoteFolder(scope: "chapter" | "book", chapterNumb
 type ManuscriptWriteRightRailProps = {
   isDark: boolean
   bookId: string
-  totalChapters: number | null
   activeRightPane: "context" | "advisor" | "notes" | "arcs" | "insights" | "character"
   onOpenRightPane: (pane: "context" | "advisor" | "notes" | "arcs" | "insights" | "character") => void
   selectedCharCard: Character | null
@@ -85,7 +84,6 @@ type ManuscriptWriteRightRailProps = {
 export function ManuscriptWriteRightRail({
   isDark,
   bookId,
-  totalChapters,
   activeRightPane,
   onOpenRightPane,
   selectedCharCard,
@@ -213,7 +211,6 @@ export function ManuscriptWriteRightRail({
       const response = await intelligenceApi.advisorMessageStream(
         bookId,
         nextMessages,
-        totalChapters ?? Math.max(activeChapterNumber, 1),
         {
           onDelta: (content) => {
             if (!content) return
@@ -240,7 +237,7 @@ export function ManuscriptWriteRightRail({
     } finally {
       setAdvisorLoading(false)
     }
-  }, [activeChapterNumber, advisorLoading, advisorMessages, bookId, totalChapters])
+  }, [advisorLoading, advisorMessages, bookId])
 
   const handleAdvisorKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === "Enter" && !event.shiftKey) {
@@ -271,7 +268,7 @@ export function ManuscriptWriteRightRail({
                     ? "border-teal-300 text-white"
                     : "border-teal-600 text-stone-950"
                   : isDark
-                    ? "border-transparent text-slate-400 hover:text-slate-200"
+                    ? "border-transparent text-slate-300 hover:text-slate-200"
                     : "border-transparent text-stone-600 hover:text-stone-900"
               }`}
             >
@@ -286,18 +283,18 @@ export function ManuscriptWriteRightRail({
           <button
             type="button"
             onClick={onClearSelectedCharCard}
-            className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}
+            className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-300" : "text-stone-600"}`}
           >
             Back to context
           </button>
           <div className="mt-4">
             <p className={`text-lg font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>{selectedCharCard.name}</p>
-            <p className={`mt-1 text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>
+            <p className={`mt-1 text-xs ${isDark ? "text-slate-300" : "text-stone-500"}`}>
               {selectedCharCard.role === "mc" ? "POV" : selectedCharCard.role === "sc" ? "Supporting" : "Background"} - Ch. {selectedCharCard.first_chapter}
               {selectedCharCard.last_seen_chapter ? ` to ${selectedCharCard.last_seen_chapter}` : ""}
             </p>
             {selectedCharCard.description ? <p className={`mt-4 text-sm leading-6 ${isDark ? "text-slate-300" : "text-stone-700"}`}>{selectedCharCard.description}</p> : null}
-            {selectedCharCard.arc_summary ? <p className={`mt-4 text-sm leading-6 ${isDark ? "text-slate-400" : "text-stone-600"}`}>{selectedCharCard.arc_summary}</p> : null}
+            {selectedCharCard.arc_summary ? <p className={`mt-4 text-sm leading-6 ${isDark ? "text-slate-300" : "text-stone-600"}`}>{selectedCharCard.arc_summary}</p> : null}
           </div>
         </div>
       ) : null}
@@ -306,7 +303,7 @@ export function ManuscriptWriteRightRail({
         <>
           <div className={`border-b p-5 ${isDark ? "border-white/10 bg-[#11171a]" : "border-stone-200 bg-white/90"}`}>
             <div className="flex items-center justify-between gap-3">
-              <p className={`text-3xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Active characters</p>
+              <p className={`text-3xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-300" : "text-stone-600"}`}>Active characters</p>
               <span className={`text-sm font-semibold ${isDark ? "text-slate-300" : "text-stone-700"}`}>{activeChapterContextCharacters.length || Math.min(4, characters.length)}</span>
             </div>
             <div className="mt-4 space-y-3">
@@ -324,17 +321,17 @@ export function ManuscriptWriteRightRail({
                     <span className="h-2.5 w-2.5 rounded-full bg-sky-400" />
                     <span className={`text-sm ${isDark ? "text-slate-100" : "text-stone-900"}`}>{character.name}</span>
                   </div>
-                  <span className={`text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>{character.role === "mc" ? "POV" : character.role === "sc" ? "Major" : "Supporting"}</span>
+                  <span className={`text-xs ${isDark ? "text-slate-300" : "text-stone-500"}`}>{character.role === "mc" ? "POV" : character.role === "sc" ? "Major" : "Supporting"}</span>
                 </button>
               ))}
-              {activeChapterContextCharacters.length === 0 && characters.length === 0 ? <p className={`text-sm ${isDark ? "text-slate-500" : "text-stone-500"}`}>No characters loaded yet.</p> : null}
+              {activeChapterContextCharacters.length === 0 && characters.length === 0 ? <p className={`text-sm ${isDark ? "text-slate-300" : "text-stone-500"}`}>No characters loaded yet.</p> : null}
             </div>
             <Link href={`/${bookId}/characters`} className={`mt-4 inline-flex text-sm ${isDark ? "text-sky-300" : "text-sky-700"}`}>View all characters -&gt;</Link>
           </div>
 
           <div className={`border-b p-5 ${isDark ? "border-white/10 bg-[#11171a]" : "border-stone-200 bg-white/90"}`}>
             <div className="flex items-center justify-between gap-3">
-              <p className={`text-3xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Unresolved threads</p>
+              <p className={`text-3xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-300" : "text-stone-600"}`}>Unresolved threads</p>
               <span className={`text-sm font-semibold ${isDark ? "text-slate-300" : "text-stone-700"}`}>{activeThreadSummary.length || Math.min(3, plotThreads.length)}</span>
             </div>
             <div className="mt-4 space-y-3">
@@ -344,14 +341,14 @@ export function ManuscriptWriteRightRail({
                   <p className={`text-sm leading-6 ${isDark ? "text-slate-200" : "text-stone-700"}`}>{thread}</p>
                 </div>
               ))}
-              {activeThreadSummary.length === 0 && plotThreads.length === 0 ? <p className={`text-sm ${isDark ? "text-slate-500" : "text-stone-500"}`}>No unresolved threads loaded yet.</p> : null}
+              {activeThreadSummary.length === 0 && plotThreads.length === 0 ? <p className={`text-sm ${isDark ? "text-slate-300" : "text-stone-500"}`}>No unresolved threads loaded yet.</p> : null}
             </div>
             <Link href={`/${bookId}/plot-threads`} className={`mt-4 inline-flex text-sm ${isDark ? "text-sky-300" : "text-sky-700"}`}>View all threads -&gt;</Link>
           </div>
 
           <div className={`border-b p-5 ${isDark ? "border-white/10 bg-[#11171a]" : "border-stone-200 bg-white/90"}`}>
             <div className="flex items-center justify-between gap-3">
-              <p className={`text-3xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Recent events</p>
+              <p className={`text-3xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-300" : "text-stone-600"}`}>Recent events</p>
               <span className={`text-sm font-semibold ${isDark ? "text-slate-300" : "text-stone-700"}`}>{recentEventSummary.length}</span>
             </div>
             <div className="mt-4 space-y-3">
@@ -359,19 +356,19 @@ export function ManuscriptWriteRightRail({
                 <div key={`${event.chapter_number}-${event.detail}`} className="flex items-start gap-3">
                   <span className="mt-1.5 h-2 w-2 rounded-full bg-emerald-400" />
                   <p className={`text-sm leading-6 ${isDark ? "text-slate-200" : "text-stone-700"}`}>
-                    <span className={isDark ? "text-slate-500" : "text-stone-500"}>Ch. {event.chapter_number}: </span>
+                    <span className={isDark ? "text-slate-300" : "text-stone-500"}>Ch. {event.chapter_number}: </span>
                     {event.detail}
                   </p>
                 </div>
               ))}
-              {recentEventSummary.length === 0 ? <p className={`text-sm ${isDark ? "text-slate-500" : "text-stone-500"}`}>Recent chapter events will appear here.</p> : null}
+              {recentEventSummary.length === 0 ? <p className={`text-sm ${isDark ? "text-slate-300" : "text-stone-500"}`}>Recent chapter events will appear here.</p> : null}
             </div>
             <Link href={`/${bookId}/timeline`} className={`mt-4 inline-flex text-sm ${isDark ? "text-sky-300" : "text-sky-700"}`}>View all timeline events -&gt;</Link>
           </div>
 
           <div className={`border-b p-5 ${isDark ? "border-white/10 bg-[#11171a]" : "border-stone-200 bg-white/90"}`}>
             <div className="flex items-center justify-between gap-3">
-              <p className={`text-3xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Continuity warnings</p>
+              <p className={`text-3xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-300" : "text-stone-600"}`}>Continuity warnings</p>
               <span className={`text-sm font-semibold ${isDark ? "text-slate-300" : "text-stone-700"}`}>{warningSummary.length || review?.continuity_issues.length || 0}</span>
             </div>
             <div className="mt-4 space-y-3">
@@ -381,13 +378,13 @@ export function ManuscriptWriteRightRail({
                   <p className={`text-sm leading-6 ${isDark ? "text-slate-200" : "text-stone-700"}`}>{warning.title}</p>
                 </div>
               ))}
-              {warningSummary.length === 0 && !review?.continuity_issues.length ? <p className={`text-sm ${isDark ? "text-slate-500" : "text-stone-500"}`}>No continuity warnings surfaced for this chapter.</p> : null}
+              {warningSummary.length === 0 && !review?.continuity_issues.length ? <p className={`text-sm ${isDark ? "text-slate-300" : "text-stone-500"}`}>No continuity warnings surfaced for this chapter.</p> : null}
             </div>
           </div>
 
           <div className={`p-5 ${isDark ? "bg-[#151a1a]" : "bg-sky-50/80"}`}>
             <div className="flex items-center justify-between gap-3">
-              <p className={`text-3xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-400" : "text-stone-500"}`}>Ask LoreVia</p>
+              <p className={`text-3xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-300" : "text-stone-600"}`}>Ask LoreVia</p>
               <span className={`rounded-sm px-2 py-0.5 text-3xs font-semibold ${isDark ? "bg-sky-500/15 text-sky-200" : "bg-sky-100 text-sky-700"}`}>Beta</span>
             </div>
             <p className={`mt-4 rounded-sm border px-3 py-3 text-sm ${isDark ? "border-white/10 bg-black/20 text-slate-300" : "border-stone-200 bg-white text-stone-700"}`}>
@@ -406,7 +403,7 @@ export function ManuscriptWriteRightRail({
         <>
           <div className={`border-b p-5 ${isDark ? "border-white/10 bg-[#11171a]" : "border-stone-200 bg-white/90"}`}>
             <div className="flex items-center justify-between gap-3">
-              <p className={`text-3xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Chapter advisor</p>
+              <p className={`text-3xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-300" : "text-stone-600"}`}>Chapter advisor</p>
               <Link href={`/${bookId}/advisor`} className={`text-sm ${isDark ? "text-sky-300" : "text-sky-700"}`}>Full advisor -&gt;</Link>
             </div>
             <div className={`mt-4 flex max-h-[28rem] flex-col gap-3 overflow-y-auto rounded-sm border p-3 ${isDark ? "border-white/10 bg-black/15" : "border-stone-200 bg-stone-50"}`}>
@@ -446,7 +443,7 @@ export function ManuscriptWriteRightRail({
                   <p className={`mt-2 whitespace-pre-wrap text-sm leading-6 ${isDark ? "text-slate-200" : "text-stone-700"}`}>{message.content}</p>
                 </div>
               ))}
-              {advisorLoading ? <p className={`rounded-sm border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-white/[0.03] text-slate-400" : "border-stone-200 bg-white text-stone-500"}`}>Advisor is thinking...</p> : null}
+              {advisorLoading ? <p className={`rounded-sm border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-white/[0.03] text-slate-300" : "border-stone-200 bg-white text-stone-500"}`}>Advisor is thinking...</p> : null}
               {advisorError ? <p className={`rounded-sm border px-3 py-2 text-sm ${isDark ? "border-amber-400/20 bg-amber-400/10 text-amber-200" : "border-amber-200 bg-amber-50 text-amber-700"}`}>{advisorError}</p> : null}
               <div ref={advisorBottomRef} />
             </div>
@@ -459,7 +456,7 @@ export function ManuscriptWriteRightRail({
                 disabled={advisorLoading}
                 aria-label="Ask advisor from manuscript"
                 placeholder="Ask about this chapter, continuity, transitions, or foreshadowing..."
-                className={`w-full resize-none bg-transparent text-sm leading-6 outline-none placeholder:text-slate-500 ${isDark ? "text-slate-100" : "text-stone-800"}`}
+                className={`w-full resize-none bg-transparent text-sm leading-6 outline-none placeholder:text-slate-300 ${isDark ? "text-slate-100" : "text-stone-800"}`}
               />
               <div className="mt-2 flex items-center justify-between gap-3">
                 <button
@@ -483,15 +480,15 @@ export function ManuscriptWriteRightRail({
           </div>
 
           <div className={`border-b p-5 ${isDark ? "border-white/10 bg-[#11171a]" : "border-stone-200 bg-white/90"}`}>
-            <p className={`text-3xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Review data</p>
+            <p className={`text-3xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-300" : "text-stone-600"}`}>Review data</p>
             <div className="mt-4 space-y-3">
               {suggestions.slice(0, 3).map((suggestion, index) => (
                 <div key={`${suggestion.title}-${index}`} className={`rounded-sm border p-3 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-stone-50"}`}>
                   <p className={`text-sm font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>{suggestion.title}</p>
-                  <p className={`mt-2 text-sm leading-6 ${isDark ? "text-slate-400" : "text-stone-600"}`}>{suggestion.description}</p>
+                  <p className={`mt-2 text-sm leading-6 ${isDark ? "text-slate-300" : "text-stone-600"}`}>{suggestion.description}</p>
                 </div>
               ))}
-              {suggestions.length === 0 ? <p className={`text-sm ${isDark ? "text-slate-500" : "text-stone-500"}`}>Advisor suggestions will appear here after review passes run.</p> : null}
+              {suggestions.length === 0 ? <p className={`text-sm ${isDark ? "text-slate-300" : "text-stone-500"}`}>Advisor suggestions will appear here after review passes run.</p> : null}
             </div>
           </div>
         </>
@@ -501,7 +498,7 @@ export function ManuscriptWriteRightRail({
         <>
           <div className={`border-b p-5 ${isDark ? "border-white/10 bg-[#11171a]" : "border-stone-200 bg-white/90"}`}>
             <div className="flex items-center justify-between gap-3">
-              <p className={`text-3xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>New note</p>
+              <p className={`text-3xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-300" : "text-stone-600"}`}>New note</p>
               <Link href={`/${bookId}/notes`} className={`text-sm ${isDark ? "text-sky-300" : "text-sky-700"}`}>All notes -&gt;</Link>
             </div>
             <div className="mt-4 space-y-3">
@@ -517,7 +514,7 @@ export function ManuscriptWriteRightRail({
                           ? "bg-teal-400/15 text-teal-100"
                           : "bg-white text-stone-950 shadow-sm"
                         : isDark
-                          ? "text-slate-400 hover:text-slate-200"
+                          ? "text-slate-300 hover:text-slate-200"
                           : "text-stone-500 hover:text-stone-800"
                     }`}
                   >
@@ -529,17 +526,17 @@ export function ManuscriptWriteRightRail({
                 value={noteTitle}
                 onChange={(event) => setNoteTitle(event.target.value)}
                 placeholder={noteScope === "chapter" ? `Chapter ${activeChapterNumber} note title` : "Book note title"}
-                className={`w-full rounded-sm border px-3 py-2 text-sm outline-none ${isDark ? "border-white/10 bg-black/20 text-slate-100 placeholder:text-slate-600 focus:border-teal-300/50" : "border-stone-200 bg-white text-stone-900 placeholder:text-stone-400 focus:border-teal-500"}`}
+                className={`w-full rounded-sm border px-3 py-2 text-sm outline-none ${isDark ? "border-white/10 bg-black/20 text-slate-100 placeholder:text-slate-600 focus:border-teal-300/50" : "border-stone-200 bg-white text-stone-900 placeholder:text-stone-600 focus:border-teal-500"}`}
               />
               <textarea
                 value={noteBody}
                 onChange={(event) => setNoteBody(event.target.value)}
                 rows={5}
                 placeholder="Capture a beat, fix, continuity concern, or draft thought..."
-                className={`w-full resize-none rounded-sm border px-3 py-2 text-sm leading-6 outline-none ${isDark ? "border-white/10 bg-black/20 text-slate-100 placeholder:text-slate-600 focus:border-teal-300/50" : "border-stone-200 bg-white text-stone-900 placeholder:text-stone-400 focus:border-teal-500"}`}
+                className={`w-full resize-none rounded-sm border px-3 py-2 text-sm leading-6 outline-none ${isDark ? "border-white/10 bg-black/20 text-slate-100 placeholder:text-slate-600 focus:border-teal-300/50" : "border-stone-200 bg-white text-stone-900 placeholder:text-stone-600 focus:border-teal-500"}`}
               />
               <div className="flex items-center justify-between gap-3">
-                <p className={`text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>Saves into manuscript notes and the notes workspace.</p>
+                <p className={`text-xs ${isDark ? "text-slate-300" : "text-stone-500"}`}>Saves into manuscript notes and the notes workspace.</p>
                 <button
                   type="button"
                   onClick={() => void saveQuickNote()}
@@ -555,7 +552,7 @@ export function ManuscriptWriteRightRail({
 
           <div className={`border-b p-5 ${isDark ? "border-white/10 bg-[#11171a]" : "border-stone-200 bg-white/90"}`}>
             <div className="flex items-center justify-between gap-3">
-              <p className={`text-3xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Notes workspace</p>
+              <p className={`text-3xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-300" : "text-stone-600"}`}>Notes workspace</p>
               <span className={`text-sm font-semibold ${isDark ? "text-slate-300" : "text-stone-700"}`}>{vaultNotes.length}</span>
             </div>
             <div className="mt-4 space-y-3">
@@ -563,48 +560,48 @@ export function ManuscriptWriteRightRail({
                 <article key={note.id || note.path} className={`rounded-sm border p-3 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-stone-50"}`}>
                   <div className="flex items-start justify-between gap-3">
                     <p className={`min-w-0 truncate text-sm font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>{note.path.split("/").pop()?.replace(/\.md$/i, "") || note.path}</p>
-                    <span className={`shrink-0 text-3xs ${isDark ? "text-slate-600" : "text-stone-400"}`}>{new Date(note.updated_at).toLocaleDateString()}</span>
+                    <span className={`shrink-0 text-3xs ${isDark ? "text-slate-600" : "text-stone-600"}`}>{new Date(note.updated_at).toLocaleDateString()}</span>
                   </div>
-                  <p className={`mt-1 truncate text-3xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>{note.path}</p>
-                  <p className={`mt-2 text-xs leading-5 ${isDark ? "text-slate-400" : "text-stone-600"}`}>{getNotePreview(note.content)}</p>
+                  <p className={`mt-1 truncate text-3xs ${isDark ? "text-slate-300" : "text-stone-500"}`}>{note.path}</p>
+                  <p className={`mt-2 text-xs leading-5 ${isDark ? "text-slate-300" : "text-stone-600"}`}>{getNotePreview(note.content)}</p>
                 </article>
               ))}
-              {vaultNotes.length === 0 ? <p className={`text-sm ${isDark ? "text-slate-500" : "text-stone-500"}`}>No notes workspace files saved yet.</p> : null}
+              {vaultNotes.length === 0 ? <p className={`text-sm ${isDark ? "text-slate-300" : "text-stone-500"}`}>No notes workspace files saved yet.</p> : null}
             </div>
           </div>
 
           <div className={`border-b p-5 ${isDark ? "border-white/10 bg-[#11171a]" : "border-stone-200 bg-white/90"}`}>
             <div className="flex items-center justify-between gap-3">
-              <p className={`text-3xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Chapter notes</p>
+              <p className={`text-3xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-300" : "text-stone-600"}`}>Chapter notes</p>
               <span className={`text-sm font-semibold ${isDark ? "text-slate-300" : "text-stone-700"}`}>{chapterManualNotes.length}</span>
             </div>
-            {chapterAnnotationsCount > 0 ? <p className={`mt-2 text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>{chapterAnnotationsCount} annotation{chapterAnnotationsCount === 1 ? "" : "s"} anchored to this chapter.</p> : null}
+            {chapterAnnotationsCount > 0 ? <p className={`mt-2 text-xs ${isDark ? "text-slate-300" : "text-stone-500"}`}>{chapterAnnotationsCount} annotation{chapterAnnotationsCount === 1 ? "" : "s"} anchored to this chapter.</p> : null}
             <div className="mt-4 space-y-3">
               {chapterManualNotes.slice(0, 4).map((note) => (
                 <div key={note.id} className={`rounded-sm border p-3 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-stone-50"}`}>
                   <p className={`text-sm font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>{note.title || `Chapter ${activeChapterNumber} note`}</p>
-                  <p className={`mt-2 text-xs leading-5 ${isDark ? "text-slate-400" : "text-stone-600"}`}>{getNotePreview(note.body, 110)}</p>
-                  <p className={`mt-2 text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>{new Date(note.updated_at).toLocaleString()}</p>
+                  <p className={`mt-2 text-xs leading-5 ${isDark ? "text-slate-300" : "text-stone-600"}`}>{getNotePreview(note.body, 110)}</p>
+                  <p className={`mt-2 text-xs ${isDark ? "text-slate-300" : "text-stone-500"}`}>{new Date(note.updated_at).toLocaleString()}</p>
                 </div>
               ))}
-              {chapterManualNotes.length === 0 ? <p className={`text-sm ${isDark ? "text-slate-500" : "text-stone-500"}`}>No notes saved for this chapter yet.</p> : null}
+              {chapterManualNotes.length === 0 ? <p className={`text-sm ${isDark ? "text-slate-300" : "text-stone-500"}`}>No notes saved for this chapter yet.</p> : null}
             </div>
           </div>
 
           <div className={`border-b p-5 ${isDark ? "border-white/10 bg-[#11171a]" : "border-stone-200 bg-white/90"}`}>
             <div className="flex items-center justify-between gap-3">
-              <p className={`text-3xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Book notes</p>
+              <p className={`text-3xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-300" : "text-stone-600"}`}>Book notes</p>
               <span className={`text-sm font-semibold ${isDark ? "text-slate-300" : "text-stone-700"}`}>{generalNotes.length}</span>
             </div>
             <div className="mt-4 space-y-3">
               {generalNotes.slice(0, 3).map((note) => (
                 <div key={note.id} className={`rounded-sm border p-3 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-stone-50"}`}>
                   <p className={`text-sm font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>{note.title || "Book note"}</p>
-                  <p className={`mt-2 text-xs leading-5 ${isDark ? "text-slate-400" : "text-stone-600"}`}>{getNotePreview(note.body, 110)}</p>
-                  <p className={`mt-2 text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>{new Date(note.updated_at).toLocaleString()}</p>
+                  <p className={`mt-2 text-xs leading-5 ${isDark ? "text-slate-300" : "text-stone-600"}`}>{getNotePreview(note.body, 110)}</p>
+                  <p className={`mt-2 text-xs ${isDark ? "text-slate-300" : "text-stone-500"}`}>{new Date(note.updated_at).toLocaleString()}</p>
                 </div>
               ))}
-              {generalNotes.length === 0 ? <p className={`text-sm ${isDark ? "text-slate-500" : "text-stone-500"}`}>No book-level notes saved yet.</p> : null}
+              {generalNotes.length === 0 ? <p className={`text-sm ${isDark ? "text-slate-300" : "text-stone-500"}`}>No book-level notes saved yet.</p> : null}
             </div>
           </div>
         </>
@@ -612,14 +609,14 @@ export function ManuscriptWriteRightRail({
 
       {activeRightPane === "arcs" ? (
         <div className={`border-b p-5 ${isDark ? "border-white/10 bg-[#11171a]" : "border-stone-200 bg-white/90"}`}>
-          <p className={`text-3xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Character emotional arc</p>
+          <p className={`text-3xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-300" : "text-stone-600"}`}>Character emotional arc</p>
           {arcSummaryCharacter ? (
             <div className="mt-4">
               <p className={`text-lg font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>{arcSummaryCharacter.character_name}</p>
               <div className="mt-4 space-y-3">
                 {arcSummaryCharacter.points.slice(-6).map((point) => (
                   <div key={`${point.chapter_number}-${point.label}`} className="grid grid-cols-[auto_1fr] gap-3">
-                    <span className={`text-xs font-semibold ${isDark ? "text-slate-500" : "text-stone-500"}`}>Ch. {point.chapter_number}</span>
+                    <span className={`text-xs font-semibold ${isDark ? "text-slate-300" : "text-stone-500"}`}>Ch. {point.chapter_number}</span>
                     <div className="flex items-center gap-3">
                       <span className={`h-2 w-full rounded-full ${point.sentiment >= 0 ? "bg-emerald-400/60" : "bg-rose-400/60"}`} />
                       <span className={`min-w-[7rem] text-sm ${isDark ? "text-slate-200" : "text-stone-700"}`}>{point.label}</span>
@@ -629,7 +626,7 @@ export function ManuscriptWriteRightRail({
               </div>
             </div>
           ) : (
-            <p className={`mt-4 text-sm ${isDark ? "text-slate-500" : "text-stone-500"}`}>Character arc tracking will appear once growth events are available.</p>
+            <p className={`mt-4 text-sm ${isDark ? "text-slate-300" : "text-stone-500"}`}>Character arc tracking will appear once growth events are available.</p>
           )}
         </div>
       ) : null}

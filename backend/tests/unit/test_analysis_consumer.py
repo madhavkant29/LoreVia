@@ -39,9 +39,10 @@ class FakeResult:
 
 
 class FakeAnalysisDb:
-    def __init__(self, chapter=None, book=None, results=None, scalar_results=None):
+    def __init__(self, chapter=None, book=None, user=None, results=None, scalar_results=None):
         self.chapter = chapter
         self.book = book
+        self.user = user
         self.results = list(results or [])
         self.scalar_results = list(scalar_results or [])
         self.added = []
@@ -54,6 +55,8 @@ class FakeAnalysisDb:
             return self.chapter
         if model is Book:
             return self.book
+        if model is User:
+            return self.user
         return None
 
     async def execute(self, statement):
@@ -91,6 +94,16 @@ class FakeSessionContext:
 
     async def __aexit__(self, exc_type, exc, traceback):
         return False
+
+
+@pytest.fixture(autouse=True)
+def _treat_books_as_not_frozen(monkeypatch):
+    """These tests predate the administrative-freeze guard; keep them unfrozen."""
+
+    async def _not_frozen(*_args, **_kwargs):
+        return False
+
+    monkeypatch.setattr(analysis_consumer, "book_is_frozen", _not_frozen)
 
 
 def test_inflight_lock_ttl_exceeds_hard_limit():
@@ -206,7 +219,7 @@ async def test_analyse_chapter_handles_missing_stale_and_inflight_work(monkeypat
 
 
 @pytest.mark.asyncio
-async def test_analyse_chapter_generates_all_summary_modes_and_cleans_queue_keys(monkeypatch):
+async def test_manual_analyse_chapter_refreshes_all_summary_modes_after_commit(monkeypatch):
     chapter = SimpleNamespace(
         id=uuid.uuid4(),
         book_id=uuid.uuid4(),
@@ -229,7 +242,13 @@ async def test_analyse_chapter_generates_all_summary_modes_and_cleans_queue_keys
             FakeResult(scalar=1),
             FakeResult(scalar=0),
             FakeResult(rows=[(1, {"status": "running"})]),
-            FakeResult(scalar_values=[]),
+            FakeResult(
+                scalar_values=[
+                    SimpleNamespace(mode="short"),
+                    SimpleNamespace(mode="detailed"),
+                    SimpleNamespace(mode="key_points"),
+                ]
+            ),
             FakeResult(scalar=1),
             FakeResult(scalar=1),
             FakeResult(rows=[(1, {"status": "succeeded"})]),
@@ -250,6 +269,11 @@ async def test_analyse_chapter_generates_all_summary_modes_and_cleans_queue_keys
     async def async_none(*args, **kwargs):
         return None
 
+    cache_commit_counts = []
+
+    async def cache_summary(*args, **kwargs):
+        cache_commit_counts.append(db.commit_count)
+
     async def generate(*args, **kwargs):
         return {
             "content": "Mara opens the gate and chooses trust.",
@@ -262,16 +286,32 @@ async def test_analyse_chapter_generates_all_summary_modes_and_cleans_queue_keys
     async def extract_threads(*args, **kwargs):
         return []
 
+    async def persist_summaries(fake_db, *, chapter_id, payloads):
+        for mode, payload in payloads.items():
+            fake_db.add(
+                SimpleNamespace(
+                    chapter_id=chapter_id,
+                    mode=mode,
+                    content=payload["content"],
+                )
+            )
+        return [mode for mode in ("short", "detailed", "key_points") if mode in payloads]
+
     deleted_keys = []
 
     async def cache_delete(key):
         deleted_keys.append(key)
 
     monkeypatch.setattr(analysis_consumer, "cache_set_if_absent", async_true)
-    monkeypatch.setattr(analysis_consumer, "cache_set", async_none)
+    monkeypatch.setattr(analysis_consumer, "cache_set", cache_summary)
     monkeypatch.setattr(analysis_consumer, "cache_del", cache_delete)
     monkeypatch.setattr(analysis_consumer, "generate_summary", generate)
     monkeypatch.setattr(analysis_consumer, "extract_plot_threads", extract_threads)
+    monkeypatch.setattr(
+        analysis_consumer,
+        "persist_chapter_summary_payloads",
+        persist_summaries,
+    )
     monkeypatch.setattr(analysis_consumer, "is_book_hidden", async_false)
     monkeypatch.setattr(analysis_consumer, "_upsert_plot_threads", async_none)
     monkeypatch.setattr(analysis_consumer, "link_summary_events", async_none)
@@ -285,19 +325,177 @@ async def test_analyse_chapter_generates_all_summary_modes_and_cleans_queue_keys
     monkeypatch.setattr("app.utils.advisor_utils.invalidate_advisor_caches_for_book", async_none)
 
     result = await analysis_consumer.analyse_chapter(
-        str(chapter.id), "Mara turns the key.", "Chapter 1"
+        str(chapter.id),
+        "Mara turns the key.",
+        "Chapter 1",
+        manual_reprocess=True,
     )
 
     assert result == {
         "chapter_id": str(chapter.id),
         "summaries": {"short": "generated", "detailed": "generated", "key_points": "generated"},
     }
-    assert len(db.added) == 3
+    assert len(db.added) == 4
+    assert next(row.content for row in db.added if row.mode == "editorial_note") == (
+        '{"concerns": [], "revision_question": null}'
+    )
     assert chapter.analysis_state["status"] == "succeeded"
     assert chapter.title == "Gate Opens"
     assert book.writer_workspace["processing"]["pipeline"]["analysis"]["status"] == "succeeded"
     assert db.commit_count == 4
+    assert cache_commit_counts == [3, 3, 3]
     assert len(deleted_keys) == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("existing_ready_payload", "expected_queue_calls"),
+    [
+        (None, 1),
+        ({"analysis_complete": True}, 0),
+    ],
+)
+async def test_analyse_chapter_queues_first_impression_only_on_first_ready_transition(
+    monkeypatch,
+    existing_ready_payload,
+    expected_queue_calls,
+):
+    chapter = SimpleNamespace(
+        id=uuid.uuid4(),
+        book_id=uuid.uuid4(),
+        number=1,
+        title="Chapter 1",
+        analysis_state={"status": "queued"},
+        word_count=120,
+        content_version=1,
+    )
+    book = SimpleNamespace(
+        id=chapter.book_id,
+        user_id=uuid.uuid4(),
+        title="The Gate",
+        is_editor_project=False,
+        mode="author",
+        writer_workspace={},
+    )
+    user = SimpleNamespace(id=book.user_id, email="author@example.com")
+    existing_ready_notification = (
+        None if existing_ready_payload is None else SimpleNamespace(data=existing_ready_payload)
+    )
+    db = FakeAnalysisDb(
+        chapter=chapter,
+        book=book,
+        user=user,
+        results=[
+            FakeResult(scalar=1),
+            FakeResult(scalar=0),
+            FakeResult(rows=[(1, {"status": "running"})]),
+            FakeResult(scalar_values=[]),
+            FakeResult(scalar=1),
+            FakeResult(scalar=1),
+            FakeResult(rows=[(1, {"status": "succeeded"})]),
+            FakeResult(scalar=existing_ready_notification),
+        ],
+    )
+    queue_calls = []
+    notifications = []
+    completed_books = []
+
+    async def complete_book(*args, **kwargs):
+        completed_books.append(kwargs)
+        return True
+
+    monkeypatch.setattr(
+        "app.services.pipeline_state_service.complete_book_after_analysis",
+        complete_book,
+    )
+
+    monkeypatch.setattr(analysis_consumer, "AsyncSessionLocal", lambda: FakeSessionContext(db))
+    monkeypatch.setattr(
+        "app.services.editor_project_service.get_rebuild_run_id", lambda value: None
+    )
+    monkeypatch.setattr(analysis_consumer.settings, "OPENAI_API_KEY", "")
+
+    async def async_true(*args, **kwargs):
+        return True
+
+    async def async_false(*args, **kwargs):
+        return False
+
+    async def async_none(*args, **kwargs):
+        return None
+
+    async def generate(*args, **kwargs):
+        return {
+            "content": "Mara opens the gate and chooses trust.",
+            "key_events": [],
+            "char_changes": [],
+            "clues": [],
+            "themes": [],
+        }
+
+    async def extract_threads(*args, **kwargs):
+        return []
+
+    async def persist_summaries(fake_db, *, chapter_id, payloads):
+        return [mode for mode in ("short", "detailed", "key_points") if mode in payloads]
+
+    async def upsert_notification(*args, **kwargs):
+        notifications.append(args)
+
+    async def queue_first_impression(*args, **kwargs):
+        queue_calls.append(kwargs)
+        return None
+
+    async def send_email(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(analysis_consumer, "cache_set_if_absent", async_true)
+    monkeypatch.setattr(analysis_consumer, "cache_set", async_none)
+    monkeypatch.setattr(analysis_consumer, "cache_del", async_none)
+    monkeypatch.setattr(analysis_consumer, "generate_summary", generate)
+    monkeypatch.setattr(analysis_consumer, "extract_plot_threads", extract_threads)
+    monkeypatch.setattr(
+        analysis_consumer,
+        "persist_chapter_summary_payloads",
+        persist_summaries,
+    )
+    monkeypatch.setattr(analysis_consumer, "is_book_hidden", async_false)
+    monkeypatch.setattr(analysis_consumer, "_upsert_plot_threads", async_none)
+    monkeypatch.setattr(analysis_consumer, "link_summary_events", async_none)
+    monkeypatch.setattr(analysis_consumer, "ingest_world_elements_from_chapter", async_none)
+    monkeypatch.setattr("app.services.editor_project_service.complete_rebuild_if_ready", async_none)
+    monkeypatch.setattr(
+        analysis_consumer,
+        "collect_book_ready_stats",
+        lambda *args, **kwargs: _ready_stats(True),
+    )
+    monkeypatch.setattr(analysis_consumer, "upsert_book_ready_notification", upsert_notification)
+    monkeypatch.setattr("app.utils.advisor_utils.invalidate_advisor_caches_for_book", async_none)
+    monkeypatch.setattr(
+        "app.services.first_impression_service.queue_first_impression",
+        queue_first_impression,
+    )
+    monkeypatch.setattr(
+        "app.services.continuity.scan_service.run_live_canon_guard_if_needed",
+        async_none,
+    )
+    monkeypatch.setattr(analysis_consumer, "send_processing_complete_with_stats", send_email)
+
+    result = await analysis_consumer.analyse_chapter(
+        str(chapter.id), "Mara turns the key.", "Chapter 1"
+    )
+
+    assert result["chapter_id"] == str(chapter.id)
+    assert len(notifications) == 1
+    assert len(queue_calls) == expected_queue_calls
+    assert len(completed_books) == 1
+    assert completed_books[0] == {"book_id": book.id}
+    if expected_queue_calls:
+        assert queue_calls[0] == {
+            "book_id": book.id,
+            "user_id": user.id,
+            "strict": False,
+        }
 
 
 @pytest.mark.asyncio

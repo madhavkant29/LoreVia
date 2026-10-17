@@ -1,13 +1,11 @@
 "use client"
 
-import { memo, useEffect, useMemo, useState } from "react"
+import { memo, useEffect, useMemo, useRef, useState } from "react"
 
-import { worldBuildingApi } from "@/lib/api/worldBuilding"
+import { useWorldbuildingCanonActions } from "./WorldbuildingWorkspace.canonActions"
 import type {
   WorldGapResult,
-  WorldIntegrationResult,
   WorldNote,
-  WorldQueryResponse,
 } from "@/types/world-building"
 import { SavedCleanupBacklogCard } from "./WorldbuildingWorkspace.backlog"
 import { CanonOverrideCard } from "./WorldbuildingWorkspace.canon"
@@ -27,8 +25,6 @@ import {
   buildUploadLimitNote,
   countWorldDocumentWords,
   findSelectedWorldDocument,
-  getApiErrorDetail,
-  getOpenGapIds,
   getSuggestionElements,
   getVisibleItems,
   getVisibleWorldElements,
@@ -43,6 +39,7 @@ const INITIAL_OPPORTUNITY_COUNT = 4
 const INITIAL_SUGGESTION_COUNT = 6
 const INITIAL_ELEMENT_COUNT = 6
 const INITIAL_WIKI_COUNT = 6
+type WorldbuildingView = "gaps" | "sources" | "canon"
 
 export const WorldbuildingWorkspace = memo(function WorldbuildingWorkspace({
   bookId,
@@ -53,7 +50,7 @@ export const WorldbuildingWorkspace = memo(function WorldbuildingWorkspace({
   isDark: boolean
   focus?: WorkspaceFocus
 }) {
-  const [selectedDocumentId, setSelectedDocumentId] = useState<string | null>(null)
+  const [selectedDocumentId, setSelectedDocumentId] = useState<string | null | undefined>(undefined)
   const [draftTitle, setDraftTitle] = useState("")
   const [draftText, setDraftText] = useState("")
   const [savingDocument, setSavingDocument] = useState(false)
@@ -63,18 +60,11 @@ export const WorldbuildingWorkspace = memo(function WorldbuildingWorkspace({
   const [replaceCorpusOnUpload, setReplaceCorpusOnUpload] = useState(false)
   const [uploadingFiles, setUploadingFiles] = useState(false)
   const [analysis, setAnalysis] = useState<WorldGapResult | null>(null)
-  const [integration, setIntegration] = useState<WorldIntegrationResult | null>(null)
-  const [loadingIntegration, setLoadingIntegration] = useState(false)
-  const [canonName, setCanonName] = useState("")
-  const [canonAliases, setCanonAliases] = useState("")
-  const [savingCanon, setSavingCanon] = useState(false)
-  const [wikiGenerating, setWikiGenerating] = useState(false)
-  const [logicQuery, setLogicQuery] = useState("")
-  const [logicResult, setLogicResult] = useState<WorldQueryResponse | null>(null)
-  const [logicLoading, setLogicLoading] = useState(false)
   const [noteSavingId, setNoteSavingId] = useState<string | null>(null)
   const [noteStatusId, setNoteStatusId] = useState<string | null>(null)
   const [statusMessage, setStatusMessage] = useState<string | null>(null)
+  const comparisonSourcesChanged = useRef(false)
+  const { integration, setIntegration, loadingIntegration, canonName, setCanonName, canonAliases, setCanonAliases, savingCanon, wikiGenerating, logicQuery, setLogicQuery, logicResult, logicLoading, submittedQuery, logicStale, busy: canonBusy, markSourcesChanged, runIntegration, saveCanonOverride, generateWiki, runLogicQuery } = useWorldbuildingCanonActions(bookId, setStatusMessage, () => { comparisonSourcesChanged.current = true; setAnalysis((current) => current ? { ...current, is_stale: true } : null) })
   const [documentDraftDirty, setDocumentDraftDirty] = useState(false)
   const [showAllDocuments, setShowAllDocuments] = useState(false)
   const [expandedGapGroups, setExpandedGapGroups] = useState<Record<string, boolean>>({})
@@ -85,7 +75,11 @@ export const WorldbuildingWorkspace = memo(function WorldbuildingWorkspace({
   const [chapterFilter, setChapterFilter] = useState("")
   const [chapterNotes, setChapterNotes] = useState<WorldNote[] | null>(null)
   const [loadingChapterNotes, setLoadingChapterNotes] = useState(false)
+  const [activeWorkspaceView, setActiveWorkspaceView] = useState<WorldbuildingView>("gaps")
+  const leaveGuard = useRef(false)
+  leaveGuard.current = canonBusy || documentDraftDirty || !!uploadFiles.length || !!uploadTitle.trim() || !!canonName.trim() || !!canonAliases.trim() || !!logicQuery.trim() || savingDocument || deletingDocument || uploadingFiles
   const {
+    bootstrapLoading, bootstrapReady, bootstrapError, refetchBootstrap, documentError, refreshErrors, availableChapters,
     analysisLoading,
     canonOverrides,
     documents,
@@ -109,14 +103,14 @@ export const WorldbuildingWorkspace = memo(function WorldbuildingWorkspace({
     uploadStats,
     wikiEntries,
     wikiEntriesLoading,
-  } = useWorldbuildingWorkspaceData(bookId, focus, selectedDocumentId)
+  } = useWorldbuildingWorkspaceData(bookId, focus, activeWorkspaceView === "sources" ? selectedDocumentId ?? null : null)
 
   const selectedDocument = useMemo(
-    () => findSelectedWorldDocument(documents, selectedDocumentId),
+    () => findSelectedWorldDocument(documents, selectedDocumentId ?? null),
     [documents, selectedDocumentId]
   )
   const openGapIds = useMemo(
-    () => getOpenGapIds(notes),
+    () => new Set(notes.filter((note) => note.linked_gap_id).map((note) => note.linked_gap_id!)),
     [notes]
   )
   const totalWorldWords = useMemo(
@@ -134,7 +128,7 @@ export const WorldbuildingWorkspace = memo(function WorldbuildingWorkspace({
     () => getSuggestionElements(integration, analysis),
     [analysis, integration]
   )
-  const visibleElements = useMemo(() => getVisibleWorldElements(extractedElements), [extractedElements])
+  const visibleElements = useMemo(() => getVisibleWorldElements(extractedElements, extractedElements.length), [extractedElements])
   const visibleDocuments = useMemo(
     () => getVisibleItems(documents, showAllDocuments, INITIAL_DOCUMENT_COUNT),
     [documents, showAllDocuments]
@@ -157,65 +151,46 @@ export const WorldbuildingWorkspace = memo(function WorldbuildingWorkspace({
   )
 
   const runAnalysis = async () => {
+    comparisonSourcesChanged.current = false
     try {
-      const { data: payload } = await refetchAnalysis()
-      if (!payload) {
-        setAnalysis(null)
-        return
-      }
-      setAnalysis(payload)
+      const { data: payload, error } = await refetchAnalysis()
+      if (error || !payload) return
+      setAnalysis({ ...payload, is_stale: payload.is_stale || comparisonSourcesChanged.current })
       await refetchElements()
     } catch {
-      setAnalysis(null)
-    }
-  }
-
-  const runIntegration = async () => {
-    setLoadingIntegration(true)
-    try {
-      const payload = await worldBuildingApi.getIntegration(bookId)
-      setIntegration(payload)
-      await refetchElements()
-    } finally {
-      setLoadingIntegration(false)
+      setStatusMessage("Could not refresh the comparison. The previous result is retained.")
     }
   }
 
   useEffect(() => {
-    if (!documents.length) {
-      setSelectedDocumentId(null)
-      if (!documentDraftDirty) {
-        setDraftTitle("")
-        setDraftText("")
-      }
-      return
-    }
-    if (selectedDocumentId && documents.some((document) => document.id === selectedDocumentId)) return
+    if (activeWorkspaceView !== "sources" || !bootstrapReady || selectedDocumentId !== undefined) return
     setSelectedDocumentId(documents[0]?.id ?? null)
-  }, [documentDraftDirty, documents, selectedDocumentId])
+  }, [activeWorkspaceView, bootstrapReady, documents, selectedDocumentId])
 
   useEffect(() => {
-    if (!selectedDocumentData || documentDraftDirty) return
+    if (!selectedDocumentData || selectedDocumentData.id !== selectedDocumentId || documentDraftDirty) return
     setDraftTitle(selectedDocumentData.title)
     setDraftText(selectedDocumentData.text)
-  }, [documentDraftDirty, selectedDocumentData])
+  }, [documentDraftDirty, selectedDocumentData, selectedDocumentId])
 
   useEffect(() => {
     if (focus !== "gap") return
-    if (!documents.length) {
-      setAnalysis(null)
-      return
-    }
     if (initialAnalysis) {
-      setAnalysis(initialAnalysis)
+      setAnalysis({ ...initialAnalysis, is_stale: initialAnalysis.is_stale || comparisonSourcesChanged.current })
     }
-  }, [documents.length, focus, initialAnalysis])
+  }, [focus, initialAnalysis])
 
   useEffect(() => {
-    if (!statusMessage) return
-    const handle = window.setTimeout(() => setStatusMessage(null), 3200)
-    return () => window.clearTimeout(handle)
-  }, [statusMessage])
+    const unload = (event: BeforeUnloadEvent) => { if (leaveGuard.current) { event.preventDefault(); event.returnValue = "" } }
+    const click = (event: MouseEvent) => {
+      const link = event.target instanceof Element ? event.target.closest<HTMLAnchorElement>("a[href]") : null
+      if (!leaveGuard.current || !link || link.target === "_blank" || link.hasAttribute("download") || event.ctrlKey || event.metaKey) return
+      if (new URL(link.href).pathname === location.pathname) return
+      if (!window.confirm("Leave World gaps? Unsaved source edits, selected files, and canon tool drafts will be lost.")) { event.preventDefault(); event.stopPropagation() }
+    }
+    window.addEventListener("beforeunload", unload); document.addEventListener("click", click, true)
+    return () => { window.removeEventListener("beforeunload", unload); document.removeEventListener("click", click, true) }
+  }, [])
 
   const {
     deleteDocument,
@@ -225,17 +200,18 @@ export const WorldbuildingWorkspace = memo(function WorldbuildingWorkspace({
     uploadDocumentFiles,
   } = useWorldbuildingDocumentActions({
     bookId,
+    documentDraftDirty,
+    onSourcesChanged: () => { comparisonSourcesChanged.current = true; markSourcesChanged(); setAnalysis((current) => current ? { ...current, is_stale: true } : null) },
     draftText,
     draftTitle,
     focus,
     replaceCorpusOnUpload,
     selectedDocument,
-    selectedDocumentId,
+    selectedDocumentId: selectedDocumentId ?? null,
     uploadFiles,
     uploadTitle,
     refetchDocuments,
     refetchElements,
-    refetchSelectedDocument,
     refetchUploadStats,
     runAnalysis,
     setDeletingDocument,
@@ -258,6 +234,7 @@ export const WorldbuildingWorkspace = memo(function WorldbuildingWorkspace({
     saveGapAsNote,
     saveIntegrationAsNote,
     setNoteStatus,
+    refreshNotes, notesMessage, appliedChapter,
   } = useWorldbuildingNoteActions({
     bookId,
     chapterFilter,
@@ -269,60 +246,20 @@ export const WorldbuildingWorkspace = memo(function WorldbuildingWorkspace({
     setNoteStatusId,
   })
 
-  const saveCanonOverride = async () => {
-    if (!canonName.trim()) return
-    setSavingCanon(true)
-    try {
-      const saved = await worldBuildingApi.saveCanonOverride(bookId, {
-        canonical_name: canonName.trim(),
-        aliases: canonAliases.split(",").map((item) => item.trim()).filter(Boolean),
-      })
-      await refetchCanonOverrides()
-      setCanonName("")
-      setCanonAliases("")
-      setStatusMessage(`Saved canon override for ${saved.canonical_name}.`)
-    } finally {
-      setSavingCanon(false)
-    }
-  }
-
-  const { acceptElementSuggestion } = useWorldbuildingElementActions({
+  const { acceptElementSuggestion, accepting } = useWorldbuildingElementActions({
     setAnalysis,
     setIntegration,
     setStatusMessage,
   })
 
-  const generateWiki = async () => {
-    setWikiGenerating(true)
-    try {
-      const payload = await worldBuildingApi.generateWiki(bookId)
-      await refetchWiki()
-      setStatusMessage(
-        payload.updated_names.length
-          ? `Generated or refreshed ${payload.generated_count} wiki entries from the manuscript, including ${payload.updated_names.slice(0, 3).join(", ")}.`
-          : `Generated or refreshed ${payload.generated_count} wiki entries from the manuscript.`
-      )
-    } finally {
-      setWikiGenerating(false)
-    }
-  }
-
-  const runLogicQuery = async (mode?: string) => {
-    if (!logicQuery.trim()) return
-    setLogicLoading(true)
-    try {
-      const payload = await worldBuildingApi.query(bookId, { query: logicQuery.trim(), mode: mode ?? "story_integration" })
-      setLogicResult(payload)
-      setStatusMessage(mode === "gap_detection" ? "Ran a canon stress test against the active world corpus." : "Ran the world logic simulator against the active canon.")
-    } finally {
-      setLogicLoading(false)
-    }
-  }
-
   const uploadLimitNote = buildUploadLimitNote(uploadStats)
 
+  if (!bootstrapReady) return <div className="py-6" role={bootstrapError ? "alert" : "status"}>{bootstrapError ? <><p>Worldbuilding data could not be loaded. Saved sources and cleanup notes have not been replaced.</p><button type="button" className="app-button-secondary mt-3" onClick={() => void refetchBootstrap()}>Retry worldbuilding workspace</button></> : <p>Loading canon sources, comparison, and saved cleanup notes…</p>}</div>
+
   return (
-    <div className="space-y-4">
+    <div>
+      {bootstrapError ? <div className="mb-4" role="alert"><p>The workspace could not refresh. Last loaded data is shown.</p><button type="button" className="app-button-secondary" disabled={bootstrapLoading} onClick={() => void refetchBootstrap()}>Retry worldbuilding workspace</button></div> : null}
+      {refreshErrors.map((error) => <div key={error.label} className="mb-3 border-l-2 border-amber-500 pl-3 text-sm" role="alert"><p>Could not refresh {error.label}. Previously loaded content is retained.</p><button type="button" className="app-button-secondary mt-2" disabled={error.busy} onClick={() => void (error.label === "comparison" ? runAnalysis() : error.retry())}>Retry {error.label}</button></div>)}
       <WorldbuildingMetricsStrip
         isDark={isDark}
         documentCount={documents.length}
@@ -331,22 +268,101 @@ export const WorldbuildingWorkspace = memo(function WorldbuildingWorkspace({
         openNoteCount={groupedNotes.open.length}
       />
 
-      <WorldbuildingStatusMessage isDark={isDark} message={statusMessage} />
+      <div className="mt-4">
+        <WorldbuildingStatusMessage isDark={isDark} message={statusMessage} />
+      </div>
 
-      <div className="grid gap-4 xl:grid-cols-[17.5rem_minmax(0,1fr)]">
-        <WorldbuildingDocumentSidebar
-          documentsLoading={documentsLoading}
-          documents={documents}
-          visibleDocuments={visibleDocuments}
-          selectedDocumentId={selectedDocumentId}
-          showAllDocuments={showAllDocuments}
-          isDark={isDark}
-          onNewDocument={startNewDocument}
-          onSelectDocument={selectDocument}
-          onToggleShowAllDocuments={() => setShowAllDocuments((current) => !current)}
-        />
+      <div className={`mt-4 flex gap-1 overflow-x-auto border-b ${isDark ? "border-white/10" : "border-stone-200"}`} role="tablist" aria-label="Worldbuilding workspace views">
+        {([
+          ["gaps", "Review gaps"],
+          ["sources", "Canon sources"],
+          ["canon", "Canon tools"],
+        ] as Array<[WorldbuildingView, string]>).map(([id, label]) => (
+          <button
+            key={id}
+            type="button"
+            role="tab"
+            id={`world-tab-${id}`}
+            aria-controls={`world-panel-${id}`}
+            tabIndex={activeWorkspaceView === id ? 0 : -1}
+            aria-selected={activeWorkspaceView === id}
+            onClick={() => setActiveWorkspaceView(id)}
+            onKeyDown={(event) => {
+              const views: WorldbuildingView[] = ["gaps", "sources", "canon"]
+              const index = views.indexOf(id)
+              const next = event.key === "ArrowRight" ? (index + 1) % 3 : event.key === "ArrowLeft" ? (index + 2) % 3 : event.key === "Home" ? 0 : event.key === "End" ? 2 : -1
+              if (next < 0) return
+              event.preventDefault(); setActiveWorkspaceView(views[next]); document.getElementById(`world-tab-${views[next]}`)?.focus()
+            }}
+            className={`shrink-0 border-b-2 px-4 py-3 text-sm font-medium transition-colors ${activeWorkspaceView === id
+              ? (isDark ? "border-teal-300 text-white" : "border-[#1f615d] text-stone-950")
+              : (isDark ? "border-transparent text-slate-400 hover:text-slate-200" : "border-transparent text-stone-500 hover:text-stone-800")}`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
 
-        <div className="space-y-4">
+      {activeWorkspaceView === "gaps" ? (
+        <div id="world-panel-gaps" role="tabpanel" aria-labelledby="world-tab-gaps" className="mt-5 space-y-6">
+          {notesMessage ? <p role="status" className="border-l-2 border-[rgb(var(--border))] pl-3 text-sm">{notesMessage}</p> : null}
+          <GapAnalysisCard
+            availableChapters={availableChapters}
+            bookId={bookId}
+            isDark={isDark}
+            analysis={analysis}
+            analysisLoading={analysisLoading}
+            runButtonLoading={loadingAnalysis}
+            documentsAvailable={documents.length > 0}
+            expandedGapGroups={expandedGapGroups}
+            openGapIds={openGapIds}
+            noteSavingId={noteSavingId ?? noteStatusId}
+            initialGapItemsPerGroup={INITIAL_GAP_ITEMS_PER_GROUP}
+            onRunAnalysis={() => void runAnalysis()}
+            onStartNewDocument={() => {
+              setActiveWorkspaceView("sources")
+              startNewDocument()
+            }}
+            onSaveGapAsNote={(item) => void saveGapAsNote(item)}
+            onToggleGapGroup={(groupKey) => setExpandedGapGroups((current) => ({ ...current, [groupKey]: !current[groupKey] }))}
+          />
+
+          <SavedCleanupBacklogCard
+            isDark={isDark}
+            notesLoading={notesLoading}
+            chapterFilter={chapterFilter}
+            loadingChapterNotes={loadingChapterNotes}
+            isChapterFiltered={chapterNotes !== null}
+            openNotes={groupedDisplayed.open}
+            addressedNotes={groupedDisplayed.addressed}
+            noteStatusId={noteStatusId ?? noteSavingId}
+            appliedChapter={appliedChapter}
+            onChapterFilterChange={setChapterFilter}
+            onFetchNotesByChapter={() => void handleFetchNotesByChapter()}
+            onClearChapterFilter={handleClearChapterFilter}
+            onRefreshNotes={() => void refreshNotes()}
+            onResolveNote={(noteId) => void setNoteStatus(noteId, "addressed")}
+            onReopenNote={(noteId) => void setNoteStatus(noteId, "open")}
+            onDeleteNote={(noteId) => void deleteNote(noteId)}
+          />
+        </div>
+      ) : null}
+
+      {activeWorkspaceView === "sources" ? (
+        <fieldset id="world-panel-sources" role="tabpanel" aria-labelledby="world-tab-sources" disabled={savingDocument || deletingDocument || uploadingFiles} className="mt-5 grid min-w-0 gap-4 border-0 p-0 xl:grid-cols-[17.5rem_minmax(0,1fr)]">
+          <WorldbuildingDocumentSidebar
+            documentsLoading={documentsLoading}
+            documents={documents}
+            visibleDocuments={visibleDocuments}
+            selectedDocumentId={selectedDocumentId ?? null}
+            showAllDocuments={showAllDocuments}
+            isDark={isDark}
+            onNewDocument={startNewDocument}
+            onSelectDocument={selectDocument}
+            onToggleShowAllDocuments={() => setShowAllDocuments((current) => !current)}
+          />
+          <div className="order-first min-w-0 space-y-4 xl:order-last">
+          <details><summary className="cursor-pointer py-3 font-semibold">Import reference files</summary>
           <WorldCorpusUploadCard
             bookId={bookId}
             focus={focus}
@@ -361,26 +377,43 @@ export const WorldbuildingWorkspace = memo(function WorldbuildingWorkspace({
             onReplaceCorpusOnUploadChange={setReplaceCorpusOnUpload}
             onUploadDocumentFiles={() => void uploadDocumentFiles()}
           />
+          </details>
 
           {loadingDocumentBody ? <DocumentBodyLoadingState isDark={isDark} /> : null}
-
-          <GapAnalysisCard
-            bookId={bookId}
+          {selectedDocumentId && documentError ? <div role="alert"><p>Source content could not be loaded or refreshed. Existing edits are retained.</p><button type="button" className="app-button-secondary mt-2" onClick={() => void refetchSelectedDocument()}>Retry source content</button></div> : null}
+          {selectedDocumentId && !selectedDocument ? <p role="status">This source is not in the current source list. Refresh the list before saving changes.</p> : null}
+          {!selectedDocumentId || (selectedDocumentData?.id === selectedDocumentId && !!selectedDocument) ? <WorldbuildingDocumentEditorCard
             isDark={isDark}
-            analysis={analysis}
-            analysisLoading={analysisLoading}
-            runButtonLoading={loadingAnalysis}
-            documentsAvailable={documents.length > 0}
-            expandedGapGroups={expandedGapGroups}
-            openGapIds={openGapIds}
-            noteSavingId={noteSavingId}
-            initialGapItemsPerGroup={INITIAL_GAP_ITEMS_PER_GROUP}
+            selectedDocument={selectedDocument}
+            draftTitle={draftTitle}
+            draftText={draftText}
+            savingDocument={savingDocument}
+            deletingDocument={deletingDocument}
+            analysisLoading={analysisLoading || loadingAnalysis}
+            hasDocuments={documents.length > 0}
+            onDraftTitleChange={(value) => {
+              setDraftTitle(value)
+              setDocumentDraftDirty(true)
+            }}
+            onDraftTextChange={(value) => {
+              setDraftText(value)
+              setDocumentDraftDirty(true)
+            }}
+            onSaveDocument={() => void saveDocument()}
+            onNewDocument={startNewDocument}
+            onDeleteDocument={() => void deleteDocument()}
             onRunAnalysis={() => void runAnalysis()}
-            onStartNewDocument={startNewDocument}
-            onSaveGapAsNote={(item) => void saveGapAsNote(item)}
-            onToggleGapGroup={(groupKey) => setExpandedGapGroups((current) => ({ ...current, [groupKey]: !current[groupKey] }))}
           />
+          : null}
+          <p className="text-sm text-[rgb(var(--muted-foreground))]">{documentDraftDirty ? "Unsaved source edits. " : ""}Source drafts stay on this page while you switch tabs. Save before leaving.</p>
+          <button type="button" className="app-button-secondary" onClick={() => void refetchDocuments()}>Refresh source list</button>
+          </div>
+        </fieldset>
+      ) : null}
 
+      {activeWorkspaceView === "canon" ? (
+        <fieldset id="world-panel-canon" role="tabpanel" aria-labelledby="world-tab-canon" disabled={canonBusy} className="mt-5 min-w-0 space-y-4 border-0 p-0">
+          {notesMessage ? <p role="status" className="border-l-2 border-[rgb(var(--border))] pl-3 text-sm">{notesMessage}</p> : null}
           <WorldbuildingOpportunitiesCard
             isDark={isDark}
             documentsAvailable={documents.length > 0}
@@ -409,6 +442,7 @@ export const WorldbuildingWorkspace = memo(function WorldbuildingWorkspace({
 
           <div className="grid gap-5 xl:grid-cols-2">
             <ElementSuggestionsCard
+              accepting={accepting}
               isDark={isDark}
               suggestionElements={suggestionElements}
               visibleSuggestionElements={visibleSuggestionElements}
@@ -437,6 +471,8 @@ export const WorldbuildingWorkspace = memo(function WorldbuildingWorkspace({
             logicQuery={logicQuery}
             logicLoading={logicLoading}
             logicResult={logicResult}
+            submittedQuery={submittedQuery}
+            logicStale={logicStale}
             wikiEntries={wikiEntries}
             wikiEntriesLoading={wikiEntriesLoading}
             wikiGenerating={wikiGenerating}
@@ -450,49 +486,8 @@ export const WorldbuildingWorkspace = memo(function WorldbuildingWorkspace({
             onGenerateWiki={() => void generateWiki()}
             onToggleShowAllWikiEntries={() => setShowAllWikiEntries((current) => !current)}
           />
-
-          <WorldbuildingDocumentEditorCard
-            isDark={isDark}
-            selectedDocument={selectedDocument}
-            draftTitle={draftTitle}
-            draftText={draftText}
-            savingDocument={savingDocument}
-            deletingDocument={deletingDocument}
-            analysisLoading={analysisLoading}
-            hasDocuments={documents.length > 0}
-            onDraftTitleChange={(value) => {
-              setDraftTitle(value)
-              setDocumentDraftDirty(true)
-            }}
-            onDraftTextChange={(value) => {
-              setDraftText(value)
-              setDocumentDraftDirty(true)
-            }}
-            onSaveDocument={() => void saveDocument()}
-            onNewDocument={startNewDocument}
-            onDeleteDocument={() => void deleteDocument()}
-            onRunAnalysis={() => void runAnalysis()}
-          />
-
-          <SavedCleanupBacklogCard
-            isDark={isDark}
-            notesLoading={notesLoading}
-            chapterFilter={chapterFilter}
-            loadingChapterNotes={loadingChapterNotes}
-            isChapterFiltered={chapterNotes !== null}
-            openNotes={groupedDisplayed.open}
-            addressedNotes={groupedDisplayed.addressed}
-            noteStatusId={noteStatusId}
-            onChapterFilterChange={setChapterFilter}
-            onFetchNotesByChapter={() => void handleFetchNotesByChapter()}
-            onClearChapterFilter={handleClearChapterFilter}
-            onRefreshNotes={() => void refetchNotes()}
-            onResolveNote={(noteId) => void setNoteStatus(noteId, "addressed")}
-            onReopenNote={(noteId) => void setNoteStatus(noteId, "open")}
-            onDeleteNote={(noteId) => void deleteNote(noteId)}
-          />
-        </div>
-      </div>
+        </fieldset>
+      ) : null}
     </div>
   )
 })

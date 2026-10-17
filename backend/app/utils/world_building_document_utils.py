@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import uuid
 
 from fastapi import HTTPException
@@ -51,7 +52,7 @@ async def load_world_building_document_payload(
     document: WorldBuildingDocument,
 ) -> dict[str, str | None]:
     try:
-        raw = download_book(document.s3_key)
+        raw = await asyncio.to_thread(download_book, document.s3_key)
     except STORAGE_IO_EXCEPTIONS as exc:
         raise HTTPException(404, "World-building document content is unavailable") from exc
     return deserialize_manuscript_content(raw)

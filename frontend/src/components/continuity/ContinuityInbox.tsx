@@ -13,6 +13,7 @@ type Props = {
   isDark: boolean
   revision: RevisionIntelligence
   onNavigate: (href: string) => void
+  onVerifiedClean?: () => void
 }
 
 type FindingDecision = "accepted" | "dismissed" | "intentional" | "resolved"
@@ -24,6 +25,7 @@ export function ContinuityInbox({
   isDark,
   revision,
   onNavigate,
+  onVerifiedClean,
 }: Props) {
   const [scan, setScan] = useState<ContinuityScan | null>(null)
   const [findings, setFindings] = useState<ContinuityFinding[]>([])
@@ -124,7 +126,14 @@ export function ContinuityInbox({
     }
     void load()
     return () => { cancelled = true }
-  }, [bookCreatedAt, bookId, revision.continuity_status])
+  }, [
+    bookCreatedAt,
+    bookId,
+    revision.continuity_completed_at,
+    revision.continuity_duration_ms,
+    revision.continuity_scan_id,
+    revision.continuity_status,
+  ])
 
   const continuityStatus = scan?.continuity_status ?? revision.continuity_status
   useEffect(() => {
@@ -132,7 +141,8 @@ export function ContinuityInbox({
     cleanViewedRef.current = true
     capture("clean_scan_viewed", { book_id: bookId, chapter_count: chapterCount })
     capture("activation_completed", { book_id: bookId, action: "verified_clean_scan" })
-  }, [bookId, chapterCount, continuityStatus])
+    onVerifiedClean?.()
+  }, [bookId, chapterCount, continuityStatus, onVerifiedClean])
 
   const openFinding = (finding: ContinuityFinding) => {
     setSelectedId(finding.id)

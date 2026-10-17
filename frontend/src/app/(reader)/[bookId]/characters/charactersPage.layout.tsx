@@ -1,12 +1,14 @@
 "use client"
 
 import dynamic from "next/dynamic"
-import type { ComponentProps, Dispatch, SetStateAction } from "react"
+import { useState, useSyncExternalStore, type ComponentProps, type Dispatch, type SetStateAction } from "react"
 
 import { CharacterProfileRightRail, type SidebarTab } from "@/components/reader/CharacterProfileRightRail"
 import type { CharacterProfileTab } from "@/components/reader/CharacterProfileTabs"
 import { CharacterWorkspaceHeader } from "@/components/reader/CharacterWorkspaceHeader"
+import { AuthorToolsNav } from "@/components/layout/AuthorToolsNav"
 import { CharacterWorkspaceSidebarHeader } from "@/components/reader/CharacterWorkspaceSidebarHeader"
+import { WorkspaceSidePanel } from "@/components/ui/WorkspaceSidePanel"
 import type { Book } from "@/types/book"
 import type {
   Character,
@@ -50,6 +52,8 @@ type CharacterMenuActions = ComponentProps<typeof CharacterProfileWorkspace>["ch
 type ShareState = ComponentProps<typeof CharacterProfileWorkspace>["shareState"]
 
 export type CharactersPageLayoutProps = {
+  queryIssues: Array<{ label: string; retry: () => Promise<unknown>; busy: boolean }>
+  repairUnavailable: boolean
   actionError: string | null
   activeTab: CharacterProfileTab
   atmosphere: string
@@ -109,7 +113,6 @@ export type CharactersPageLayoutProps = {
   onApproveCharacter: () => void
   onAttachCandidate: (candidate: CharacterCandidate) => void
   onAttachRelationshipCandidate: (candidate: CharacterRelationshipCandidate, side: "a" | "b") => void
-  onBack: () => void
   onCancelCreate: () => void
   onClearManualMerge: () => void
   onCompareEvidence: (characterId: string) => void
@@ -172,7 +175,7 @@ export type CharactersPageLayoutProps = {
 }
 
 export function CharactersPageLayout({
-  actionError,
+  queryIssues, repairUnavailable, actionError,
   activeTab,
   atmosphere,
   book,
@@ -231,7 +234,6 @@ export function CharactersPageLayout({
   onApproveCharacter,
   onAttachCandidate,
   onAttachRelationshipCandidate,
-  onBack,
   onCancelCreate,
   onClearManualMerge,
   onCompareEvidence,
@@ -285,24 +287,37 @@ export function CharactersPageLayout({
   setReviewNoteDraft,
   setRoleFilter,
   setSearch,
-  setSelectedId,
   setSelectedMergeKey,
   setSidebarTab,
   setShowAllCast,
   setStatusFilter,
-  setWorkspaceMode,
 }: CharactersPageLayoutProps) {
+  const [mobileRosterOpen, setMobileRosterOpen] = useState(false)
+  const [inspectorOpen, setInspectorOpen] = useState(false)
+
+  const desktop = useSyncExternalStore(subscribeDesktop, () => window.matchMedia("(min-width: 1280px)").matches, () => false)
+
   if (loading) {
     return <CharacterBibleSkeleton isDark={isDark} atmosphere={atmosphere} />
   }
 
   return (
-    <div className={`min-h-screen transition-colors ${atmosphere}`}>
+    <main data-character-workspace className={`min-h-screen transition-colors ${atmosphere}`}>
       <div className="mx-auto max-w-[1500px] px-4 pb-8 pt-5 sm:px-6 lg:px-8">
+        <div className="mb-5">
+          <AuthorToolsNav
+            active="characters"
+            bookData={book}
+            bookId={bookId}
+            isDark={isDark}
+            mode={book?.mode ?? "author"}
+            title={book?.title || "Character Bible"}
+            variant="bar"
+          />
+        </div>
         <CharacterWorkspaceHeader
           title="Character Bible"
           description="Manage cast, aliases, relationships, continuity, and duplicate review."
-          onBack={onBack}
           isDark={isDark}
           stats={<CharacterBibleHeaderStats isDark={isDark} stats={derived.dashboardStats} />}
           actions={(
@@ -324,12 +339,37 @@ export function CharactersPageLayout({
         />
 
         {mergeError ? <p className="mt-3 text-sm text-amber-400">{mergeError}</p> : null}
-        {error ? <p className="mt-3 text-sm text-rose-400">{error}</p> : null}
+        {actionError && workspaceMode !== "profile" ? <p role="alert" className={`mt-3 text-sm ${isDark ? "text-rose-300" : "text-rose-700"}`}>{actionError}</p> : null}
+        {queryIssues.map((issue) => <div key={issue.label} role="alert" className="mt-3 flex flex-wrap items-center gap-3 border border-amber-600/40 px-4 py-3 text-sm">
+          <span>{issue.label} could not be loaded. Try again to load current data.</span>
+          <button type="button" disabled={issue.busy} onClick={() => void issue.retry()} className="min-h-10 underline underline-offset-4 disabled:opacity-50">{issue.busy ? "Retrying…" : "Retry " + issue.label.toLowerCase()}</button>
+        </div>)}
+        {noteToast ? <p role="status" className="mt-3 text-sm">{noteToast}</p> : null}
 
         {!error && (chars.length > 0 || creating || workspaceMode !== "profile") ? (
-          <div className={`mt-5 overflow-hidden rounded-lg border ${isDark ? "border-[#202a38] bg-[#070c13]" : "border-stone-200 bg-white/94"}`}>
-            <div className="grid xl:h-[calc(100vh-12rem)] xl:grid-cols-[340px_minmax(0,1fr)_320px] 2xl:grid-cols-[350px_minmax(0,1fr)_330px]">
-              <aside className={`border-b xl:min-h-0 xl:overflow-y-auto xl:border-b-0 xl:border-r ${isDark ? "border-[#17202c]" : "border-stone-200"}`}>
+          <>
+            <div className="mt-4 flex items-center gap-2">
+              <button
+                type="button"
+                aria-expanded={mobileRosterOpen}
+                onClick={() => setMobileRosterOpen(true)}
+                className={`rounded-sm border px-3 py-2 text-sm font-medium xl:hidden ${isDark ? "border-[#202a38] text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}
+              >
+                Cast
+              </button>
+              <button
+                type="button"
+                aria-expanded={inspectorOpen}
+                onClick={() => setInspectorOpen((current) => !current)}
+                className={`rounded-sm border px-3 py-2 text-sm font-medium ${isDark ? "border-[#202a38] text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}
+              >
+                Details
+              </button>
+            </div>
+            <div className={`mt-4 rounded-sm border ${isDark ? "border-[#202a38] bg-[#070c13]" : "border-stone-200 bg-white/94"}`}>
+            <div className={`grid min-w-0 xl:h-[calc(100vh-12rem)] ${inspectorOpen ? "xl:grid-cols-[310px_minmax(0,1fr)_320px]" : "xl:grid-cols-[310px_minmax(0,1fr)]"}`}>
+              {desktop || mobileRosterOpen ? <WorkspaceSidePanel title="Character roster" side="left" onClose={() => setMobileRosterOpen(false)}>
+              <aside className={`h-full min-h-0 overflow-y-auto xl:border-r ${isDark ? "border-[#17202c] bg-[#070c13]" : "border-stone-200 bg-white"}`}>
                 <CharacterWorkspaceSidebarHeader
                   castFilter={castFilter}
                   isDark={isDark}
@@ -371,13 +411,17 @@ export function CharactersPageLayout({
                   onRejectCandidate={onRejectCandidate}
                   onRejectRelationshipCandidate={onRejectRelationshipCandidate}
                   onResolveRelationshipCandidate={onResolveRelationshipCandidate}
-                  onSelectCharacter={onSelectCharacter}
+                  onSelectCharacter={(characterId) => {
+                    onSelectCharacter(characterId)
+                    setMobileRosterOpen(false)
+                  }}
                   onSelectMergeSuggestion={setSelectedMergeKey}
                   onShowAllCastChange={setShowAllCast}
                 />
               </aside>
+              </WorkspaceSidePanel> : null}
 
-              <section className={`border-b xl:min-h-0 xl:overflow-y-auto xl:border-b-0 xl:border-r ${isDark ? "border-[#17202c]" : "border-stone-200"}`}>
+              <section className={`min-w-0 border-b xl:min-h-0 xl:overflow-y-auto xl:border-b-0 xl:border-r ${isDark ? "border-[#17202c]" : "border-stone-200"}`}>
                 {workspaceMode === "profile" && creating ? (
                   <CharacterCreateForm
                     actionError={actionError}
@@ -423,6 +467,7 @@ export function CharactersPageLayout({
                     relationshipDraft={relationshipDraft}
                     relationshipGraph={(
                       <RelationshipGraph
+                        inspectorPlacement="inline"
                         bookId={bookId}
                         upToChapter={relationshipChapter}
                         authorMode={isAuthorMode}
@@ -432,7 +477,7 @@ export function CharactersPageLayout({
                         onGraphDataChange={onGraphDataChange}
                         onSelectCharacterId={(characterId) => {
                           if (characterId) {
-                            setSelectedId(characterId)
+                            onSelectCharacter(characterId)
                             setActiveTab("relationships")
                           }
                         }}
@@ -454,7 +499,7 @@ export function CharactersPageLayout({
                     onOpenEvidence={onOpenEvidence}
                     onRejectCharacter={onRejectCharacter}
                     onReviewHiddenNode={(nodeId) => {
-                      setSelectedId(nodeId)
+                      onSelectCharacter(nodeId)
                       setActiveTab("overview")
                     }}
                     onReviewNoteChange={setReviewNoteDraft}
@@ -515,6 +560,7 @@ export function CharactersPageLayout({
                     reprocessAllowDemote={reprocessAllowDemote}
                     reprocessAllowMerge={reprocessAllowMerge}
                     reprocessBusy={reprocessBusy}
+                    repairUnavailable={repairUnavailable}
                     onApplyRepairPlan={onApplyRepairPlan}
                     onRefreshPreview={onRefreshRepairPreview}
                     onRepairRelationships={onRepairRelationships}
@@ -549,7 +595,8 @@ export function CharactersPageLayout({
                 ) : null}
               </section>
 
-              <aside className="xl:min-h-0 xl:overflow-y-auto">
+              {inspectorOpen ? <WorkspaceSidePanel title="Character details" side="right" onClose={() => setInspectorOpen(false)}>
+              <aside className={`h-full min-h-0 overflow-y-auto ${isDark ? "bg-[#070c13]" : "bg-white"}`}>
                 {workspaceMode === "profile" && creating ? (
                   <CharacterCreateSidePanel isDark={isDark} />
                 ) : null}
@@ -566,10 +613,11 @@ export function CharactersPageLayout({
                     mergeSuggestionCount={derived.mergeSuggestions.length}
                     partitioning={partitioning}
                     selectedTab={sidebarTab}
-                    onFindEvidence={onOpenEvidence}
+                    onFindEvidence={() => { onOpenEvidence(); setInspectorOpen(false) }}
                     onManualMerge={() => onManualMerge(derived.selectedCharacter?.id)}
-                    onOpenNotes={() => setActiveTab("notes")}
-                    onOpenRelationships={onOpenRelationships}
+                    onOpenNotes={() => { setActiveTab("notes"); setInspectorOpen(false) }}
+                    onOpenContinuity={() => { setActiveTab("continuity"); setInspectorOpen(false) }}
+                    onOpenRelationships={() => { onOpenRelationships(); setInspectorOpen(false) }}
                     onPartition={onPartitionCharacter}
                     onRefreshEvidence={() => {
                       if (derived.selectedCharacter) onRefreshEvidence(derived.selectedCharacter, true)
@@ -620,8 +668,10 @@ export function CharactersPageLayout({
                   />
                 ) : null}
               </aside>
+              </WorkspaceSidePanel> : null}
             </div>
           </div>
+          </>
         ) : !error ? (
           <CharacterWorkspaceEmptyState
             bookStatus={book?.status}
@@ -634,6 +684,12 @@ export function CharactersPageLayout({
           />
         ) : null}
       </div>
-    </div>
+    </main>
   )
+}
+
+function subscribeDesktop(callback: () => void) {
+  const media = window.matchMedia("(min-width: 1280px)")
+  media.addEventListener("change", callback)
+  return () => media.removeEventListener("change", callback)
 }

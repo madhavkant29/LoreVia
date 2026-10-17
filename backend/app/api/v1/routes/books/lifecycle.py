@@ -10,7 +10,7 @@ from fastapi.responses import Response
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-# â”€â”€â”€ Upload limits â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ─── Upload limits ────────────────────────────────────────────────────────────
 MAX_BOOK_UPLOAD_BYTES = 100 * 1024 * 1024  # 100 MB
 MAX_COVER_UPLOAD_BYTES = 5 * 1024 * 1024  # 5 MB
 
@@ -53,7 +53,6 @@ from app.utils.books.notes import (
 )
 from app.utils.books.serialization import (
     book_out,
-    ensure_book_cover,
 )
 from app.utils.public.serialization import (
     ensure_public_mode_enabled,
@@ -193,7 +192,7 @@ async def permanently_delete_book(
     )
 
 
-# â”€â”€â”€ Cover management â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ─── Cover management ─────────────────────────────────────────────────────────
 
 
 @router.put("/{book_id}/cover", response_model=BookOut)
@@ -216,7 +215,12 @@ async def update_book_cover(
         content_type,
     )
     book.cover_s3_key = next_cover_s3_key
-    await db.commit()
+    try:
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        await delete_storage_key_best_effort(next_cover_s3_key, context="book_cover")
+        raise
     await db.refresh(book)
     if previous_cover_s3_key and previous_cover_s3_key != next_cover_s3_key:
         await delete_storage_key_best_effort(previous_cover_s3_key, context="book_cover")
@@ -241,7 +245,7 @@ async def remove_book_cover(
     return await book_out(db, book, current_user.id)
 
 
-# â”€â”€â”€ Public asset endpoints (not router-decorated; used directly by router.py) â”€
+# ─── Public asset endpoints (not router-decorated; used directly by router.py) ─
 
 
 async def get_book_cover_public(
@@ -260,7 +264,6 @@ async def get_book_cover_public(
     ):
         raise HTTPException(401, "Invalid cover token")
 
-    await ensure_book_cover(db, book)
     if not book.cover_s3_key:
         raise HTTPException(404, "Cover not found")
 
@@ -269,7 +272,7 @@ async def get_book_cover_public(
     return Response(
         content=raw,
         media_type=media_type,
-        headers={"Cache-Control": "public, max-age=86400"},
+        headers={"Cache-Control": "private, no-store"},
     )
 
 

@@ -83,6 +83,16 @@ afterEach(() => {
 })
 
 describe("shared accessible primitives", () => {
+  it("exposes explicit focus, disabled, and reduced-motion states on primary controls", async () => {
+    await render(<Button disabled>Unavailable</Button>)
+    const button = container?.querySelector("button") as HTMLButtonElement
+
+    expect(button.disabled).toBe(true)
+    expect(button.className).toContain("focus-visible:ring-2")
+    expect(button.className).toContain("disabled:opacity-50")
+    expect(button.className).toContain("motion-reduce:transition-none")
+  })
+
   it("traps dialog focus, closes with Escape, and restores the trigger", async () => {
     await render(<DialogHarness />)
     const trigger = container?.querySelector("button") as HTMLButtonElement

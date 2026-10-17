@@ -104,6 +104,9 @@ class GapAnalysisRequest(BaseModel):
 
 class GapAnalysisResponse(BaseModel):
     mode: str
+    status: str = "ready"
+    is_stale: bool = False
+    refresh_job_id: str | None = None
     generated_at: datetime | None = None
     gap_categories: dict[str, list[dict]]
     gap_groups: list[WorldGapGroupOut] = Field(default_factory=list)
@@ -115,6 +118,9 @@ class GapAnalysisResponse(BaseModel):
 
 class IntegrationAnalysisResponse(BaseModel):
     mode: str
+    status: str = "ready"
+    is_stale: bool = False
+    refresh_job_id: str | None = None
     generated_at: datetime | None = None
     integration_opportunities: list[dict] = Field(default_factory=list)
     consistency_flags: list[dict] = Field(default_factory=list)

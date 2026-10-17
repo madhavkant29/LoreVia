@@ -1,3 +1,4 @@
+import asyncio
 import uuid
 from typing import BinaryIO
 
@@ -23,7 +24,7 @@ async def create_book(
     filename: str,
     isbn: str | None = None,
 ) -> Book:
-    s3_key = upload_book(file, str(user_id), filename)
+    s3_key = await asyncio.to_thread(upload_book, file, str(user_id), filename)
     book = Book(
         user_id=user_id,
         title=title,
@@ -51,7 +52,7 @@ async def create_editor_project(
     work_type: str,
 ) -> Book:
     s3_key = _editor_project_s3_key(user_id, book_id)
-    upload_text(s3_key, "")
+    await asyncio.to_thread(upload_text, s3_key, "")
 
     workspace = normalize_writer_workspace(None)
     workspace["processing"] = {"is_fully_ready": True}

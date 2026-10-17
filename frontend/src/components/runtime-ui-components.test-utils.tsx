@@ -1,4 +1,4 @@
-import { act, type ReactElement, type ReactNode } from "react"
+import { act, type ReactElement } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { afterEach, beforeEach, vi } from "vitest"
 
@@ -27,12 +27,13 @@ vi.mock("next/navigation", () => ({
 }))
 
 vi.mock("@tanstack/react-query", () => ({ useQuery: useQueryMock }))
-vi.mock("@/lib/api/books", () => ({ booksApi: { list: vi.fn() } }))
+vi.mock("@/lib/api/books", () => ({ booksApi: { listSelector: vi.fn() } }))
 vi.mock("@/lib/query/cacheKeys", () => ({
   asQueryKey: (value: unknown) => value,
-  booksListCacheKey: () => "books:list",
+  booksSelectorCacheKey: () => "books:selector",
 }))
 vi.mock("@/lib/hooks/useReader", () => ({ useReader: useReaderMock }))
+vi.mock("@/lib/hooks/useBookDetail", () => ({ useBookDetail: () => ({ data: { access_class: "owner", mode: "author" } }) }))
 vi.mock("@/lib/stores/authStore", () => ({
   useAuthStore: (selector: (state: typeof authState) => unknown) => selector(authState),
 }))

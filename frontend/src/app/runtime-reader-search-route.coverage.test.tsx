@@ -28,7 +28,7 @@ describe("reader search runtime route", () => {
     ])
     await render(<SearchPage />)
     await flush()
-    expect(text()).toContain("Search Your Writing")
+    expect(text()).toContain("Search the manuscript")
     expect(text()).toContain("Mara finds the gate")
 
     await click("Themes")
@@ -42,13 +42,31 @@ describe("reader search runtime route", () => {
         },
       ],
     })
-    setInputValue('input[aria-label="Search manuscript"]', "ash motif")
+    setInputValue('input[type="search"]', "ash motif")
     await click("Search manuscript")
     expect(text()).toContain("The ash theme returns")
 
     readerApiMock.thematicSearch.mockRejectedValueOnce(new Error("boom"))
-    setInputValue('input[aria-label="Search manuscript"]', "broken")
+    setInputValue('input[type="search"]', "broken")
     await click("Search manuscript")
     expect(text()).toContain("Search failed. Please try again.")
+    expect(text()).toContain("The ash theme returns")
+    await click("Passages")
+    expect(text()).toContain("Mara finds the gate")
+    expect(text()).not.toContain("Results for “broken”")
+  })
+
+  it("honors chapter scope from a link and rejects malformed chapter input", async () => {
+    searchParamsState.value = new URLSearchParams("q=gate&chapter=2")
+    readerApiMock.search.mockResolvedValueOnce([])
+    await render(<SearchPage />)
+    await flush()
+    expect(readerApiMock.search).toHaveBeenCalledWith("book-1", "gate", 2)
+    expect(text()).toContain("chapters 1–2")
+    setInputValue('input[inputmode="numeric"]', "-1")
+    await flush()
+    expect(text()).toContain("Enter a whole chapter number")
+    await click("Search manuscript")
+    expect(readerApiMock.search).toHaveBeenCalledTimes(1)
   })
 })

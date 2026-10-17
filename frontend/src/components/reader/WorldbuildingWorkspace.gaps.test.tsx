@@ -71,14 +71,11 @@ describe("Worldbuilding gap analysis card", () => {
       />
     )
 
-    expect(markup).toContain("Grouped inconsistencies and cleanup notes")
+    expect(markup).toContain("Canon conflicts")
     expect(markup).toContain("Canon conflicts")
     expect(markup).toContain("Moon gate cost conflict")
-    expect(markup).toContain("Chapter 4")
-    expect(markup).toContain("World bible says blood cost.")
-    expect(markup).toContain("Chapter says silver cost.")
-    expect(markup).toContain("Suggested fix")
-    expect(markup).toContain("Saved to notes")
+    expect(markup).toContain("Review evidence")
+    expect(markup).not.toContain("World bible says blood cost.")
     expect(markup).toContain("Show all 2 items")
   })
 
@@ -105,7 +102,7 @@ describe("Worldbuilding gap analysis card", () => {
       />
     )
 
-    expect(markup).toContain("Consistency flags")
+    expect(markup).toContain("Source consistency")
     expect(markup).toContain("name conflict")
     expect(markup).toContain("River oath mismatch")
     expect(markup).toContain("Show fewer items")
@@ -149,7 +146,7 @@ describe("Worldbuilding gap analysis card", () => {
       />
     )
 
-    expect(loadingMarkup).toContain("Comparing the world corpus")
+    expect(loadingMarkup).toContain("Comparing canon sources")
     expect(noDocumentsMarkup).toContain("Reference docs are missing")
     expect(noDocumentsMarkup).toContain("Start a reference doc")
   })
@@ -179,7 +176,7 @@ describe("Worldbuilding gap analysis card", () => {
       />
     )
 
-    expect(markup).toContain("Gap results need reference documents")
-    expect(markup).toContain("Running...")
+    expect(markup).toContain("No gaps were flagged in this comparison.")
+    expect(markup).toContain("Refreshing...")
   })
 })

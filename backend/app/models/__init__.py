@@ -7,6 +7,7 @@ from app.models.book import (
     BookForumInterest,
     BookForumPost,
     BookNote,
+    BookSection,
     BookUploadCharge,
     Chapter,
     ChapterMedia,
@@ -37,6 +38,7 @@ from app.models.character import (
     CharacterState,
     CharacterSuppression,
 )
+from app.models.generation import BookDataGeneration
 from app.models.intelligence import (
     AdvisorJob,
     BookChunk,
@@ -49,16 +51,21 @@ from app.models.intelligence import (
     Notification,
     PlotThread,
     QuoteEntry,
+    ReaderEvent,
     WikiEntry,
+    WorldAnalysisState,
     WorldBuildingDocument,
     WorldElement,
     WorldGapAnalysis,
     WorldNote,
+    WorldSourceObservation,
 )
 from app.models.moderation import ContentReport, CreatorStrike, ModerationAction
 from app.models.operations import (
     AiQualityEvent,
     BookProcessingRun,
+    ManuscriptExportJob,
+    ManuscriptImportJob,
     RevenueLedgerEvent,
     SupportIncident,
     TaskDispatchOutbox,

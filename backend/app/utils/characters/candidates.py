@@ -1,5 +1,5 @@
 """
-Character utility helpers â€” shared across route modules.
+Character utility helpers — shared across route modules.
 Covers display filtering, status derivation, relationship summaries,
 and text-sanitization helpers used on character data.
 """

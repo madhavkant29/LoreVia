@@ -25,7 +25,7 @@ describe("CharacterWorkspaceSidebarHeader", () => {
     const view = renderHeader("profile")
     expect(view.textContent).toContain("Cast")
     expect(view.querySelector('input[aria-label="Search characters"]')).not.toBeNull()
-    expect(view.querySelector('button[aria-pressed="true"]')?.textContent).toContain("All")
+    expect(view.querySelector<HTMLSelectElement>('select[aria-label="Filter cast"]')?.value).toBe("all")
   })
 
   it("uses focused search copy outside profile mode", () => {
@@ -33,6 +33,17 @@ describe("CharacterWorkspaceSidebarHeader", () => {
     expect(view.textContent).toContain("Duplicate review")
     expect(view.querySelector('input[aria-label="Search merge suggestions"]')).not.toBeNull()
     expect(view.querySelector("button")).toBeNull()
+  })
+
+  it("clears search and every active cast filter together", () => {
+    renderHeader("profile")
+    const changeSearch = vi.fn(), changeCast = vi.fn(), changeStatus = vi.fn(), changeRole = vi.fn()
+    act(() => root?.render(<CharacterWorkspaceSidebarHeader isDark mode="profile" search="Mira" castFilter="main" statusFilter="flagged" roleFilter="mc" summary="1 character" onSearchChange={changeSearch} onCastFilterChange={changeCast} onStatusFilterChange={changeStatus} onRoleFilterChange={changeRole} />))
+    act(() => container?.querySelector<HTMLButtonElement>("button")?.click())
+    expect(changeSearch).toHaveBeenCalledWith("")
+    expect(changeCast).toHaveBeenCalledWith("all")
+    expect(changeStatus).toHaveBeenCalledWith("all")
+    expect(changeRole).toHaveBeenCalledWith("all")
   })
 })
 

@@ -69,6 +69,40 @@ def test_redact_sensitive_text_scrubs_secret_values() -> None:
     assert "[REDACTED]" in redacted
 
 
+def test_redact_sensitive_text_scrubs_capability_jwt_in_path() -> None:
+    token = (
+        "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9."
+        "eyJzdWIiOiJ1c2VyLTEiLCJ0eXBlIjoiYXNzZXQifQ."
+        "c2lnbmF0dXJlLXRoYXQtbXVzdC1ub3QtYmUtbG9nZ2Vk"
+    )
+
+    redacted = redact_sensitive_text(f"/api/v1/beta-review/{token}/progress")
+
+    assert token not in redacted
+    assert redacted == "/api/v1/beta-review/[REDACTED]/progress"
+
+
+def test_request_log_context_scrubs_capability_jwt_from_path() -> None:
+    token = (
+        "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9."
+        "eyJzdWIiOiJ1c2VyLTEiLCJ0eXBlIjoiYXNzZXQifQ."
+        "c2lnbmF0dXJlLXRoYXQtbXVzdC1ub3QtYmUtbG9nZ2Vk"
+    )
+    request = Request(
+        {
+            "type": "http",
+            "method": "GET",
+            "path": f"/api/v1/beta-review/{token}",
+            "headers": [],
+        }
+    )
+
+    context = request_log_context(request)
+
+    assert token not in context["path"]
+    assert context["path"] == "/api/v1/beta-review/[REDACTED]"
+
+
 def test_scrub_sensitive_data_redacts_sensitive_keys_recursively() -> None:
     payload = {
         "authorization": "Bearer abc123",
