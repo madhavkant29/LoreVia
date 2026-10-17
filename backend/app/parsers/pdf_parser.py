@@ -128,9 +128,13 @@ def parse_pdf_structure(
                     pages.append(page_number)
                     text_count += len(cleaned.split())
                 else:
-                    marker = "[[IMAGE:" + hashlib.sha256(
-                        item["bytes"] + f":{page_number}:{len(images)}".encode()
-                    ).hexdigest()[:24] + "]]"
+                    marker = (
+                        "[[IMAGE:"
+                        + hashlib.sha256(
+                            item["bytes"] + f":{page_number}:{len(images)}".encode()
+                        ).hexdigest()[:24]
+                        + "]]"
+                    )
                     parts.append(marker)
                     pages.append(page_number)
                     images.append({**item, "marker": marker})
@@ -151,14 +155,23 @@ def parse_pdf_structure(
             section["start_page"] = start_page
             section["end_page"] = end_page
             section["source_location"] = (
-                f"page {start_page}" if start_page == end_page else f"pages {start_page}–{end_page}"
-            ) if start_page else None
+                (
+                    f"page {start_page}"
+                    if start_page == end_page
+                    else f"pages {start_page}–{end_page}"
+                )
+                if start_page
+                else None
+            )
             section["images"] = [image for image in images if image["marker"] in section["text"]]
         return sections, {
             "detected_language": language or detect_language(text[:5000])["detected"],
             "chapter_count": sum(section.get("section_type") == "chapter" for section in sections),
             "toc_detected": any(section.get("section_type") == "toc" for section in sections),
-            "front_matter_count": sum(section.get("section_type") in {"notes", "chronology", "preface", "foreword"} for section in sections),
+            "front_matter_count": sum(
+                section.get("section_type") in {"notes", "chronology", "preface", "foreword"}
+                for section in sections
+            ),
             "multi_column_pages": multi_column_pages,
             "total_pages": doc.page_count,
             "anomalies": ["no_extractable_text"] if text_count == 0 else [],
@@ -352,7 +365,9 @@ def _page_blocks(page: fitz.Page, *, diagnostics_state: dict[str, Any] | None = 
 
     ordered, two_columns = _order_two_column_page_items(items, float(page_any.rect.width or 0))
     if two_columns and diagnostics_state is not None:
-        diagnostics_state["multi_column_pages"] = int(diagnostics_state.get("multi_column_pages") or 0) + 1
+        diagnostics_state["multi_column_pages"] = (
+            int(diagnostics_state.get("multi_column_pages") or 0) + 1
+        )
     return ordered
 
 
@@ -380,14 +395,23 @@ def _order_two_column_page_items(items: list[dict], page_width: float) -> tuple[
         return by_position, False
     if min(len(left_text), len(right_text)) < len(text_items) * 0.25:
         return by_position, False
-    if min(
-        _median([item["bbox"][2] - item["bbox"][0] for item in left_text]),
-        _median([item["bbox"][2] - item["bbox"][0] for item in right_text]),
-    ) < page_width * 0.18:
+    if (
+        min(
+            _median([item["bbox"][2] - item["bbox"][0] for item in left_text]),
+            _median([item["bbox"][2] - item["bbox"][0] for item in right_text]),
+        )
+        < page_width * 0.18
+    ):
         return by_position, False
 
-    left_top, left_bottom = min(item["bbox"][1] for item in left_text), max(item["bbox"][3] for item in left_text)
-    right_top, right_bottom = min(item["bbox"][1] for item in right_text), max(item["bbox"][3] for item in right_text)
+    left_top, left_bottom = (
+        min(item["bbox"][1] for item in left_text),
+        max(item["bbox"][3] for item in left_text),
+    )
+    right_top, right_bottom = (
+        min(item["bbox"][1] for item in right_text),
+        max(item["bbox"][3] for item in right_text),
+    )
     overlap = max(0.0, min(left_bottom, right_bottom) - max(left_top, right_top))
     if overlap < min(left_bottom - left_top, right_bottom - right_top) * 0.4:
         return by_position, False
@@ -408,6 +432,7 @@ def _order_two_column_page_items(items: list[dict], page_width: float) -> tuple[
 
     def position_key(item: dict) -> tuple[float, float]:
         return item["bbox"][1], item["bbox"][0]
+
     return (
         sorted(headers, key=position_key)
         + sorted((item for item in items if side(item) == "left"), key=position_key)

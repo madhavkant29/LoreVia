@@ -25,25 +25,8 @@ function findListeningPids(port) {
 }
 
 class WindowsExitReporter {
-  failed = false
-  finished = 0
-  total = 0
-
-  onBegin(_, suite) {
-    this.total = suite.allTests().length
-  }
-
-  onTestEnd(_, result) {
-    this.finished += 1
-    if (result.status !== "passed" && result.status !== "skipped") {
-      this.failed = true
-    }
-
-    if (this.finished < this.total) {
-      return
-    }
-
-    const exitCode = this.failed ? 1 : 0
+  onEnd(result) {
+    const exitCode = result.status === "passed" ? 0 : 1
     const port = process.env.E2E_PORT ?? "3001"
 
     if (process.platform !== "win32") {
@@ -63,7 +46,7 @@ class WindowsExitReporter {
       }
 
       process.exit(exitCode)
-    }, 5_000).unref()
+    }, 5_000)
   }
 }
 

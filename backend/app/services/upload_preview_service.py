@@ -16,21 +16,30 @@ log = logging.getLogger(__name__)
 UPLOAD_PREVIEW_CACHE_TTL_SECONDS = 15 * 60
 
 
-def import_word_totals(preview: dict[str, Any], accepted_plan: dict[str, Any] | None = None) -> tuple[int, int]:
+def import_word_totals(
+    preview: dict[str, Any], accepted_plan: dict[str, Any] | None = None
+) -> tuple[int, int]:
     """Count readable storage words separately from words sent for analysis."""
     if not preview.get("parser_version"):
         total = int(preview.get("total_words") or 0)
         return total, total
     sections = (accepted_plan or preview).get("sections") or []
-    readable = sum(int(item.get("word_count") or 0) for item in sections if item.get("type") not in {"part", "toc"})
+    readable = sum(
+        int(item.get("word_count") or 0)
+        for item in sections
+        if item.get("type") not in {"part", "toc"}
+    )
     analyzed = sum(
-        int(item.get("word_count") or 0) for item in sections
+        int(item.get("word_count") or 0)
+        for item in sections
         if item.get("type") not in {"part", "toc"} and item.get("include_in_analysis")
     )
     return readable, analyzed
 
 
-def upload_preview_cache_key(user_id: uuid.UUID, raw: bytes, format_name: str, work_type: str) -> str:
+def upload_preview_cache_key(
+    user_id: uuid.UUID, raw: bytes, format_name: str, work_type: str
+) -> str:
     return (
         f"upload-preview:{PARSER_VERSION}:{user_id}:{format_name}:{work_type}:"
         f"{hashlib.sha256(raw).hexdigest()}"
@@ -58,7 +67,10 @@ async def load_or_build_upload_preview(
 
 
 def accept_upload_structure_plan(
-    *, preview: dict[str, Any], raw: bytes, submitted: str | None,
+    *,
+    preview: dict[str, Any],
+    raw: bytes,
+    submitted: str | None,
 ) -> dict[str, Any] | None:
     """Bind the confirmed outline to the exact source before queueing a worker."""
     if not preview.get("parser_version"):
@@ -88,14 +100,19 @@ def accept_upload_structure_plan(
         start = int(section["start_block"])
         end = int(section["end_block"])
         section["word_count"] = sum(counts[start:end])
-        section["opening_excerpt"] = openings[start] if end > start and start < len(openings) else ""
-        section["closing_excerpt"] = closings[end - 1] if end > start and end - 1 < len(closings) else ""
+        section["opening_excerpt"] = (
+            openings[start] if end > start and start < len(openings) else ""
+        )
+        section["closing_excerpt"] = (
+            closings[end - 1] if end > start and end - 1 < len(closings) else ""
+        )
         first = locations[start] if start < len(locations) else None
         last = locations[end - 1] if end > start and end - 1 < len(locations) else first
         if first:
             section["source_location"] = first if not last or first == last else f"{first} – {last}"
     validated["warnings"] = [
         {"message": warning, "section_id": section["id"], "severity": "warning"}
-        for section in validated["sections"] for warning in section.get("warnings", [])
+        for section in validated["sections"]
+        for warning in section.get("warnings", [])
     ]
     return {key: value for key, value in validated.items() if key != "blocks"}

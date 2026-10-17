@@ -164,11 +164,15 @@ async def execute_manuscript_import_request(
         accepted_plan = None
         if structure_plan is not None:
             preview = await load_or_build_upload_preview(
-                user_id=current_user.id, raw=raw,
-                format_name=format_name, work_type=upload_work_type,
+                user_id=current_user.id,
+                raw=raw,
+                format_name=format_name,
+                work_type=upload_work_type,
             )
             accepted_plan = accept_upload_structure_plan(
-                preview=preview, raw=raw, submitted=structure_plan,
+                preview=preview,
+                raw=raw,
+                submitted=structure_plan,
             )
         parsed_payload = await parse_book_upload_for_ingestion(
             format_name=format_name,
@@ -212,15 +216,23 @@ async def execute_manuscript_import_request(
             start_number=base_number,
             replace_existing=replace_flag and len(parsed) == 1,
             chunk_long_documents=False if upload_work_type == "screenplay" else chunk_flag,
-            preserve_exact_structure=preserve_exact_structure or bool(parsed_payload.get("structure_plan")),
+            preserve_exact_structure=preserve_exact_structure
+            or bool(parsed_payload.get("structure_plan")),
         )
         import_jobs.extend(new_jobs)
-        if upload_work_type != "screenplay" and split_flag and not replace_flag:
-            structure_batches.append({
-                "scope": str(uuid.uuid4()),
-                "plan": parsed_payload["structure_plan"],
-                "jobs": new_jobs,
-            })
+        if (
+            upload_work_type != "screenplay"
+            and split_flag
+            and not replace_flag
+            and parsed_payload.get("structure_plan")
+        ):
+            structure_batches.append(
+                {
+                    "scope": str(uuid.uuid4()),
+                    "plan": parsed_payload["structure_plan"],
+                    "jobs": new_jobs,
+                }
+            )
         if upload_work_type == "screenplay" and screenplay_payload is not None:
             screenplay_batches.append(
                 {

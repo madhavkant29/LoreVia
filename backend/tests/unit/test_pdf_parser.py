@@ -28,27 +28,47 @@ from app.parsers.pdf_parser import (
 def test_clear_two_column_pages_read_down_each_column_before_crossing():
     title = {"type": "text", "text": "Chapter 1", "bbox": (40.0, 30.0, 550.0, 50.0)}
     left = [
-        {"type": "text", "text": f"left-{index}", "bbox": (50.0, 80.0 + index * 24, 265.0, 95.0 + index * 24)}
+        {
+            "type": "text",
+            "text": f"left-{index}",
+            "bbox": (50.0, 80.0 + index * 24, 265.0, 95.0 + index * 24),
+        }
         for index in range(6)
     ]
     right = [
-        {"type": "text", "text": f"right-{index}", "bbox": (325.0, 80.0 + index * 24, 540.0, 95.0 + index * 24)}
+        {
+            "type": "text",
+            "text": f"right-{index}",
+            "bbox": (325.0, 80.0 + index * 24, 540.0, 95.0 + index * 24),
+        }
         for index in range(6)
     ]
 
     ordered, detected = _order_two_column_page_items([*left, *right, title], 595.0)
 
     assert detected is True
-    assert [item["text"] for item in ordered] == ["Chapter 1", *[item["text"] for item in left], *[item["text"] for item in right]]
+    assert [item["text"] for item in ordered] == [
+        "Chapter 1",
+        *[item["text"] for item in left],
+        *[item["text"] for item in right],
+    ]
 
 
 def test_ambiguous_spanning_text_keeps_original_vertical_reading_order():
     left = [
-        {"type": "text", "text": f"left-{index}", "bbox": (50.0, 80.0 + index * 24, 265.0, 95.0 + index * 24)}
+        {
+            "type": "text",
+            "text": f"left-{index}",
+            "bbox": (50.0, 80.0 + index * 24, 265.0, 95.0 + index * 24),
+        }
         for index in range(6)
     ]
     right = [
-        {"type": "text", "text": f"right-{index}", "bbox": (325.0, 80.0 + index * 24, 540.0, 95.0 + index * 24)}
+        {
+            "type": "text",
+            "text": f"right-{index}",
+            "bbox": (325.0, 80.0 + index * 24, 540.0, 95.0 + index * 24),
+        }
         for index in range(6)
     ]
     middle = {"type": "text", "text": "ambiguous", "bbox": (40.0, 130.0, 550.0, 145.0)}

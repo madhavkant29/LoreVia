@@ -126,6 +126,7 @@ async def upload_book_endpoint(
         raise HTTPException(400, "Invalid mode")
     if not title.strip():
         raise HTTPException(400, "Title is required")
+    submitted_structure_plan = structure_plan if isinstance(structure_plan, str) else None
 
     fmt, resolved_work_type = resolve_upload_format_and_work_type(file.filename, work_type)
 
@@ -148,7 +149,7 @@ async def upload_book_endpoint(
         work_type=resolved_work_type,
     )
     accepted_structure = accept_upload_structure_plan(
-        preview=preview, raw=raw, submitted=structure_plan
+        preview=preview, raw=raw, submitted=submitted_structure_plan
     )
     total_words, _analysis_words = import_word_totals(preview, accepted_structure)
     if total_words <= 0:
@@ -312,6 +313,7 @@ async def import_manuscript_content(
         raise HTTPException(409, frozen_conflict_message())
     await ensure_project_writable(db, book)
     assert_editor_project_not_rebuilding(book)
+    submitted_structure_plan = structure_plan if isinstance(structure_plan, str) else None
     manuscript_files = [upload for upload in (files or []) if upload.filename]
     if manuscript_files:
         await enforce_manuscript_import_rate_limit(db, current_user.id)
@@ -329,7 +331,7 @@ async def import_manuscript_content(
         expected_content_version=expected_content_version,
         chunk_long_documents=chunk_long_documents,
         split_into_chapters=split_into_chapters,
-        structure_plan=structure_plan,
+        structure_plan=submitted_structure_plan,
     )
     if accepted and response is not None:
         response.status_code = 202

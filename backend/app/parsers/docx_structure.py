@@ -43,14 +43,17 @@ def parse_docx_structure(raw: bytes) -> list[dict]:
             lines.append(line)
             line_locations.append(location)
     sections = parse_text_structure(
-        "\n".join(lines), heading_hint_lines=heading_lines,
+        "\n".join(lines),
+        heading_hint_lines=heading_lines,
         chapter_hint_lines=chapter_heading_lines,
         source_name="paragraph",
     )
     for section in sections:
         first_index = max(0, int(section.get("start_line") or 1) - 1)
         last_index = max(first_index, int(section.get("end_line") or 1) - 1)
-        first = line_locations[min(first_index, len(line_locations) - 1)] if line_locations else None
+        first = (
+            line_locations[min(first_index, len(line_locations) - 1)] if line_locations else None
+        )
         last = line_locations[min(last_index, len(line_locations) - 1)] if line_locations else first
         section["source_location"] = first if first == last else f"{first}–{last}"
     return sections

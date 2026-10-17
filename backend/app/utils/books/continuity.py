@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import bisect
+import json
 import uuid
 from collections.abc import Sequence
 from typing import Any
@@ -26,7 +27,9 @@ from app.models.intelligence import (
 )
 from app.schemas.books import (
     ChapterConsistencyReport,
+    ChapterEditorialConcern,
     ChapterReportCharacter,
+    ChapterRevisionQuestion,
 )
 from app.utils.books import (
     normalization,
@@ -37,6 +40,45 @@ from app.utils.books.character_cards import (
 from app.utils.books.imports import (
     report_sentence,
 )
+
+
+def parse_chapter_editorial_note(
+    content: str | None,
+) -> tuple[list[ChapterEditorialConcern] | None, ChapterRevisionQuestion | None]:
+    if not content:
+        return None, None
+    try:
+        payload = json.loads(content)
+    except (TypeError, ValueError):
+        return None, None
+    items = (
+        payload
+        if isinstance(payload, list)
+        else payload.get("concerns")
+        if isinstance(payload, dict)
+        else None
+    )
+    question_data = payload.get("revision_question") if isinstance(payload, dict) else None
+    if not isinstance(items, list):
+        return None, None
+    concerns: list[ChapterEditorialConcern] = []
+    for item in items[:3]:
+        if not isinstance(item, dict):
+            continue
+        issue = " ".join(str(item.get("issue") or "").split()).strip()
+        evidence = " ".join(str(item.get("evidence") or "").split()).strip()
+        suggestion = " ".join(str(item.get("suggestion") or "").split()).strip()
+        if issue and evidence:
+            concerns.append(
+                ChapterEditorialConcern(issue=issue, evidence=evidence, suggestion=suggestion)
+            )
+    question: ChapterRevisionQuestion | None = None
+    if isinstance(question_data, dict):
+        question_text = " ".join(str(question_data.get("question") or "").split()).strip()
+        evidence = " ".join(str(question_data.get("evidence") or "").split()).strip()
+        if question_text.endswith("?") and evidence:
+            question = ChapterRevisionQuestion(question=question_text, evidence=evidence)
+    return concerns, question
 
 
 def as_bool(value: str | None) -> bool:
@@ -111,6 +153,7 @@ async def _load_chapter_consistency_context(
         return {
             "chapters_by_number": {},
             "summary_by_chapter_id": {},
+            "editorial_by_chapter_id": {},
             "new_characters_by_chapter": {},
             "names_by_id": {},
             "relationships_by_chapter": {},
@@ -140,7 +183,7 @@ async def _load_chapter_consistency_context(
             await db.execute(
                 select(ChapterSummary).where(
                     ChapterSummary.chapter_id.in_(chapter_ids),
-                    ChapterSummary.mode == "short",
+                    ChapterSummary.mode.in_(("short", "editorial_note")),
                 )
             )
         )
@@ -149,7 +192,12 @@ async def _load_chapter_consistency_context(
         if chapter_ids
         else []
     )
-    summary_by_chapter_id = {summary.chapter_id: summary for summary in summary_rows}
+    summary_by_chapter_id = {
+        summary.chapter_id: summary for summary in summary_rows if summary.mode == "short"
+    }
+    editorial_by_chapter_id = {
+        summary.chapter_id: summary for summary in summary_rows if summary.mode == "editorial_note"
+    }
 
     new_characters = (
         (
@@ -277,6 +325,7 @@ async def _load_chapter_consistency_context(
     return {
         "chapters_by_number": chapters_by_number,
         "summary_by_chapter_id": summary_by_chapter_id,
+        "editorial_by_chapter_id": editorial_by_chapter_id,
         "new_characters_by_chapter": new_characters_by_chapter,
         "names_by_id": names_by_id,
         "relationships_by_chapter": relationships_by_chapter,

@@ -41,9 +41,9 @@ from app.utils.books.imports import (
     build_import_preview,
     normalize_imported_chapters,
     parse_book_upload_for_ingestion,
-    require_extractable_manuscript_text,
     parse_import_upload,
     parse_screenplay_upload,
+    require_extractable_manuscript_text,
 )
 from app.utils.books.manuscript import (
     clean_manuscript_html,
@@ -2116,7 +2116,15 @@ async def test_chapter_consistency_reports_load_full_context(db):
             ChapterSummary(
                 chapter_id=chapters[1].id,
                 mode="editorial_note",
-                content=json.dumps([{"issue": "The reconciliation is abrupt.", "evidence": "Mara confronts Jon.", "suggestion": "Show what changes Mara's mind."}]),
+                content=json.dumps(
+                    [
+                        {
+                            "issue": "The reconciliation is abrupt.",
+                            "evidence": "Mara confronts Jon.",
+                            "suggestion": "Show what changes Mara's mind.",
+                        }
+                    ]
+                ),
             ),
             CharacterRelationship(
                 book_id=book.id,

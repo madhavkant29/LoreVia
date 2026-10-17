@@ -18,6 +18,7 @@ from app.utils.books import (
 )
 from app.utils.books.continuity import (
     _load_chapter_consistency_context,
+    parse_chapter_editorial_note,
 )
 from app.utils.books.imports import (
     report_sentence,
@@ -50,6 +51,10 @@ async def list_chapter_consistency_reports(
         if chapter is None:
             continue
         short_summary = context["summary_by_chapter_id"].get(chapter.id)
+        editorial_note = context["editorial_by_chapter_id"].get(chapter.id)
+        editorial_concerns, revision_question = (
+            parse_chapter_editorial_note(editorial_note.content) if editorial_note else (None, None)
+        )
         new_characters = context["new_characters_by_chapter"].get(chapter_number, [])
         names_by_id = context["names_by_id"]
         relationship_changes: list[str] = []
@@ -118,6 +123,8 @@ async def list_chapter_consistency_reports(
                     dict.fromkeys(thread.title for thread in resolved_threads[:6])
                 ),
                 continuity_flags=list(dict.fromkeys(continuity_flags[:6])),
+                editorial_concerns=editorial_concerns,
+                revision_question=revision_question,
             )
         )
     return reports

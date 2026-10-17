@@ -458,7 +458,9 @@ async def dispatch_rebuild(
         await _transition_to_ready(db, book)
         return 0, 0
 
-    book.total_chapters = sum(bool(chapter.word_count and chapter.word_count > 0) for chapter in readable_chapters)
+    book.total_chapters = sum(
+        bool(chapter.word_count and chapter.word_count > 0) for chapter in readable_chapters
+    )
     workspace = dict(book.writer_workspace) if isinstance(book.writer_workspace, dict) else {}
     if isinstance(workspace.get("processing"), dict):
         workspace["processing"]["chapters_total"] = len(chapter_numbers)

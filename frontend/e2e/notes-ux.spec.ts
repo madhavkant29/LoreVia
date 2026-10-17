@@ -79,6 +79,7 @@ test("leaving notes flushes pending autosave and stays in place if saving fails"
   await page.getByRole("link", { name: /Book overview/ }).click()
   await expect(page.getByRole("alert").filter({ hasText: "Could not save" })).toBeVisible()
   await expect(page).toHaveURL(/\/notes$/)
+  await expect(page.locator("fieldset").first()).toBeEnabled()
   failed = false
   await page.getByRole("link", { name: /Book overview/ }).click()
   await expect(page).not.toHaveURL(/\/notes$/)

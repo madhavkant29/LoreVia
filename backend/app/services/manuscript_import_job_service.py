@@ -171,18 +171,25 @@ async def create_manuscript_import_job(
             accepted_plan = None
             if structure_plan is not None:
                 preview = await load_or_build_upload_preview(
-                    user_id=current_user.id, raw=raw,
-                    format_name=format_name, work_type=upload_work_type,
+                    user_id=current_user.id,
+                    raw=raw,
+                    format_name=format_name,
+                    work_type=upload_work_type,
                 )
                 accepted_plan = accept_upload_structure_plan(
-                    preview=preview, raw=raw, submitted=structure_plan,
+                    preview=preview,
+                    raw=raw,
+                    submitted=structure_plan,
                 )
             if upload_work_type != "screenplay":
                 staged = await parse_book_upload_for_ingestion(
-                    format_name=format_name, work_type=upload_work_type, raw=raw,
+                    format_name=format_name,
+                    work_type=upload_work_type,
+                    raw=raw,
                     preserve_chapter_numbers=bool(book.preserve_chapter_numbers),
                     preserve_source_chapters=bool(book.preserve_source_chapters),
-                    filename=filename, proposed_plan=accepted_plan,
+                    filename=filename,
+                    proposed_plan=accepted_plan,
                 )
                 accepted_plan = cast(dict[str, Any], staged["structure_plan"])
             scope = str(uuid.uuid4())
@@ -563,15 +570,22 @@ async def process_manuscript_import_job(db: AsyncSession, job_id: uuid.UUID) -> 
                     if upload_work_type == "screenplay"
                     else bool(request.get("chunk_long_documents"))
                 ),
-                preserve_exact_structure=preserve_exact_structure or bool(parsed_payload.get("structure_plan")),
+                preserve_exact_structure=preserve_exact_structure
+                or bool(parsed_payload.get("structure_plan")),
             )
             import_jobs.extend(new_jobs)
-            if upload_work_type != "screenplay" and bool(request.get("split_into_chapters", True)) and not replace_existing:
-                structure_batches.append({
-                    "scope": str(source["structure_scope"]),
-                    "plan": parsed_payload["structure_plan"],
-                    "jobs": new_jobs,
-                })
+            if (
+                upload_work_type != "screenplay"
+                and bool(request.get("split_into_chapters", True))
+                and not replace_existing
+            ):
+                structure_batches.append(
+                    {
+                        "scope": str(source["structure_scope"]),
+                        "plan": parsed_payload["structure_plan"],
+                        "jobs": new_jobs,
+                    }
+                )
             if upload_work_type == "screenplay" and screenplay_payload is not None:
                 screenplay_batches.append(
                     {

@@ -215,7 +215,11 @@ async def persist_manuscript_import(
                 update_reprocess_metadata(book, add_pending_chapters=[job_number])
             elif queue_extraction_after_import and job.get("include_in_analysis", True):
                 queued_extraction_chapters.append((chapter.id, job_number))
-            if not getattr(book, "is_editor_project", False) and not queue_extraction_after_import and job.get("include_in_analysis", True):
+            if (
+                not getattr(book, "is_editor_project", False)
+                and not queue_extraction_after_import
+                and job.get("include_in_analysis", True)
+            ):
                 analysis_candidate_numbers.append(job_number)
         else:
             await _process_chapter(
@@ -280,15 +284,24 @@ async def persist_manuscript_import(
         batch_jobs = cast(list[dict[str, Any]], batch["jobs"])
         if not batch_jobs:
             continue
-        chapter_rows = (await db.execute(
-            select(Chapter).where(
-                Chapter.book_id == book.id,
-                Chapter.number.in_([int(item["number"]) for item in batch_jobs]),
+        chapter_rows = (
+            (
+                await db.execute(
+                    select(Chapter).where(
+                        Chapter.book_id == book.id,
+                        Chapter.number.in_([int(item["number"]) for item in batch_jobs]),
+                    )
+                )
             )
-        )).scalars().all()
+            .scalars()
+            .all()
+        )
         await persist_book_sections(
-            db, book=book, plan=cast(dict[str, Any], batch["plan"]),
-            chapter_rows=chapter_rows, chapters=batch_jobs,
+            db,
+            book=book,
+            plan=cast(dict[str, Any], batch["plan"]),
+            chapter_rows=chapter_rows,
+            chapters=batch_jobs,
             import_scope=str(batch["scope"]),
         )
 

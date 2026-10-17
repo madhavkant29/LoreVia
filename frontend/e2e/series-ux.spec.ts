@@ -34,6 +34,7 @@ test("series stays readable at four widths and both themes with keyboard Help", 
   await expect(page.getByRole("dialog")).toBeVisible(); await page.keyboard.press("Escape")
   await expect(page.getByRole("button", { name: "Help", exact: true })).toBeFocused()
   await page.getByRole("button", { name: "Toggle theme", exact: true }).click()
+  await page.waitForTimeout(250)
   expect(await criticalAccessibilityViolations(page)).toEqual([])
   await page.screenshot({ path: info.outputPath("series-light-mobile.png"), fullPage: true })
   await page.getByLabel("Selected series", { exact: true }).selectOption("series-2")

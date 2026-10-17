@@ -48,15 +48,15 @@ afterEach(() => {
 })
 
 describe("runtime editor components", () => {
-  it("edits import structure with quick marks, merge, delete, cancel, and save", async () => {
+  it("edits import structure with Part grouping, cancel, and save", async () => {
     const onSave = vi.fn()
     const onCancel = vi.fn()
     await render(
       <ImportStructureEditor
         sections={[
-          { id: "s1", type: "preface", title: "Opening", number: 1, confidence: 0.8, include_in_analysis: true },
-          { id: "s2", type: "chapter", title: "Chapter One", number: 2, confidence: 0.7, include_in_analysis: true },
-          { id: "s3", type: "toc", title: "Contents", number: 3, confidence: 0.4, include_in_analysis: false },
+          { id: "s1", type: "preface", title: "Opening", number: 1, confidence: 0.8, include_in_analysis: true, start_block: 0, end_block: 1 },
+          { id: "s2", type: "chapter", title: "Chapter One", number: 2, confidence: 0.7, include_in_analysis: true, start_block: 1, end_block: 2 },
+          { id: "s3", type: "toc", title: "Contents", number: 3, confidence: 0.4, include_in_analysis: false, start_block: 2, end_block: 2 },
         ] as never}
         onCancel={onCancel}
         onSave={onSave}
@@ -65,16 +65,15 @@ describe("runtime editor components", () => {
 
     expect(text()).toContain("Edit section structure")
     setInputValue('input[aria-label="Section 1 title"]', "Updated Opening")
-    await click("All chapters")
-    await click("Merge")
-    await click("Merge with #2")
-    await click("Delete")
+    await click("Make this a Part opening")
+    await click("Remove Part grouping")
     await click("Cancel")
     await click("Save changes")
 
     expect(onCancel).toHaveBeenCalled()
     expect(onSave).toHaveBeenCalled()
-    expect(onSave.mock.calls[0][0]).toHaveLength(1)
+    expect(onSave.mock.calls[0][0]).toHaveLength(3)
+    expect(onSave.mock.calls[0][0][0]).toMatchObject({ title: "Updated Opening", type: "chapter" })
   })
 
   it("renders editorial review results and drives save and continuity report actions", async () => {

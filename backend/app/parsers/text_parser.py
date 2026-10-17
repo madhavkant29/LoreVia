@@ -208,11 +208,26 @@ def parse_text_structure(
     accepted: list[tuple[int, str, str]] = []
     for index, (line_index, heading, kind) in enumerate(candidates):
         next_index = candidates[index + 1][0] if index + 1 < len(candidates) else len(raw_lines)
-        body = " ".join(line.strip() for line in raw_lines[line_index + 1 : next_index] if line.strip())
+        body = " ".join(
+            line.strip() for line in raw_lines[line_index + 1 : next_index] if line.strip()
+        )
         words = len(body.split())
         if kind in {"part", "toc"}:
             accepted.append((line_index, heading, kind))
-        elif kind in {"notes", "chronology", "preface", "foreword", "appendix", "afterword", "glossary", "acknowledgements", "dedication", "prologue", "epilogue", "interlude"}:
+        elif kind in {
+            "notes",
+            "chronology",
+            "preface",
+            "foreword",
+            "appendix",
+            "afterword",
+            "glossary",
+            "acknowledgements",
+            "dedication",
+            "prologue",
+            "epilogue",
+            "interlude",
+        }:
             if words or kind in {"dedication", "prologue", "epilogue"}:
                 accepted.append((line_index, heading, kind))
         elif words >= MIN_SHORT_CHAPTER_WORDS or (
@@ -220,15 +235,23 @@ def parse_text_structure(
         ):
             if not has_toc_signals(raw_lines[line_index + 1 : min(next_index, line_index + 9)]):
                 accepted.append((line_index, heading, kind))
-        elif words and not has_toc_signals(raw_lines[line_index + 1 : min(next_index, line_index + 9)]):
+        elif words and not has_toc_signals(
+            raw_lines[line_index + 1 : min(next_index, line_index + 9)]
+        ):
             accepted.append((line_index, heading, "unknown"))
 
     if not accepted:
-        return [{
-            "title": title, "text": text.strip(), "number": 1,
-            "section_type": "unknown", "source_location": f"{source_name} 1",
-            "start_line": 1, "end_line": len(raw_lines),
-        }]
+        return [
+            {
+                "title": title,
+                "text": text.strip(),
+                "number": 1,
+                "section_type": "unknown",
+                "source_location": f"{source_name} 1",
+                "start_line": 1,
+                "end_line": len(raw_lines),
+            }
+        ]
 
     from app.parsers.pdf_parser import _extract_source_number_from_heading
 
@@ -236,23 +259,31 @@ def parse_text_structure(
     if accepted[0][0] > 0:
         leading = "\n".join(raw_lines[: accepted[0][0]]).strip()
         if leading:
-            sections.append({
-                "title": "Opening material", "text": leading, "section_type": "unknown",
-                "source_location": f"{source_name} 1–{accepted[0][0]}",
-                "start_line": 1, "end_line": accepted[0][0],
-            })
+            sections.append(
+                {
+                    "title": "Opening material",
+                    "text": leading,
+                    "section_type": "unknown",
+                    "source_location": f"{source_name} 1–{accepted[0][0]}",
+                    "start_line": 1,
+                    "end_line": accepted[0][0],
+                }
+            )
     for index, (line_index, heading, kind) in enumerate(accepted):
         end = accepted[index + 1][0] if index + 1 < len(accepted) else len(raw_lines)
         body = "\n".join(raw_lines[line_index + 1 : end]).strip()
-        sections.append({
-            "number": len(sections) + 1,
-            "title": heading,
-            "text": body,
-            "section_type": kind,
-            "source_number": _extract_source_number_from_heading(heading),
-            "source_location": f"{source_name} {line_index + 1}–{end}",
-            "start_line": line_index + 1, "end_line": end,
-        })
+        sections.append(
+            {
+                "number": len(sections) + 1,
+                "title": heading,
+                "text": body,
+                "section_type": kind,
+                "source_number": _extract_source_number_from_heading(heading),
+                "source_location": f"{source_name} {line_index + 1}–{end}",
+                "start_line": line_index + 1,
+                "end_line": end,
+            }
+        )
     return sections
 
 

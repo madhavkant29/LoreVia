@@ -11,7 +11,20 @@ from app.parsers.text_parser import parse_text_chapters
 
 PARAGRAPH_SPLIT_TARGET_WORDS = 7000
 MIN_EPUB_BODY_CHARS = 24
-EPUB_BLOCK_TAGS = {"article", "blockquote", "div", "h1", "h2", "h3", "h4", "h5", "h6", "li", "p", "section"}
+EPUB_BLOCK_TAGS = {
+    "article",
+    "blockquote",
+    "div",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "li",
+    "p",
+    "section",
+}
 
 
 def _extract_epub_blocks(soup: BeautifulSoup) -> list[str]:
@@ -141,7 +154,9 @@ def parse_epub_structure(raw_bytes: bytes) -> list[dict]:
             if item is not None and item.get_type() == ebooklib.ITEM_DOCUMENT:
                 ordered.append(item)
         if not ordered:
-            ordered = [item for item in book.get_items() if item.get_type() == ebooklib.ITEM_DOCUMENT]
+            ordered = [
+                item for item in book.get_items() if item.get_type() == ebooklib.ITEM_DOCUMENT
+            ]
 
         lines: list[str] = []
         locations: list[str] = []
@@ -151,7 +166,9 @@ def parse_epub_structure(raw_bytes: bytes) -> list[dict]:
             soup = BeautifulSoup(item.get_content(), "html.parser")
             for navigation in soup.find_all("nav"):
                 entries = [" ".join(entry.stripped_strings) for entry in navigation.find_all("li")]
-                navigation_entries.extend((entry, str(item.get_name() or item.get_id())) for entry in entries if entry)
+                navigation_entries.extend(
+                    (entry, str(item.get_name() or item.get_id())) for entry in entries if entry
+                )
             for tag in soup(["script", "style", "nav"]):
                 tag.decompose()
             location = str(item.get_name() or item.get_id())
@@ -164,7 +181,8 @@ def parse_epub_structure(raw_bytes: bytes) -> list[dict]:
                 lines.append(content)
                 locations.append(location)
         sections = parse_text_structure(
-            "\n".join(lines), heading_hint_lines=heading_lines,
+            "\n".join(lines),
+            heading_hint_lines=heading_lines,
             source_name="EPUB line",
         )
         for section in sections:
@@ -173,13 +191,18 @@ def parse_epub_structure(raw_bytes: bytes) -> list[dict]:
             first = locations[min(start, len(locations) - 1)] if locations else "EPUB"
             last = locations[min(end, len(locations) - 1)] if locations else first
             section["source_location"] = first if first == last else f"{first}–{last}"
-        if navigation_entries and not any(section.get("section_type") == "toc" for section in sections):
-            sections.insert(0, {
-                "title": "Contents",
-                "text": "\n".join(entry for entry, _location in navigation_entries),
-                "section_type": "toc",
-                "source_location": navigation_entries[0][1],
-            })
+        if navigation_entries and not any(
+            section.get("section_type") == "toc" for section in sections
+        ):
+            sections.insert(
+                0,
+                {
+                    "title": "Contents",
+                    "text": "\n".join(entry for entry, _location in navigation_entries),
+                    "section_type": "toc",
+                    "source_location": navigation_entries[0][1],
+                },
+            )
         return sections
     finally:
         os.unlink(path)

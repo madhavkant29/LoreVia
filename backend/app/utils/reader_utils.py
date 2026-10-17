@@ -806,11 +806,22 @@ async def build_chapter_list_payload(
     )
     section_by_chapter: dict[uuid.UUID, BookSection] = {}
     parts_by_id: dict[uuid.UUID, BookSection] = {}
-    if (book.import_structure or {}).get("parser_version") or (book.import_structure or {}).get("additional_imports"):
-        outline = (await db.execute(
-            select(BookSection).where(BookSection.book_id == book.id).order_by(BookSection.display_order)
-        )).scalars().all()
-        section_by_chapter = {section.chapter_id: section for section in outline if section.chapter_id}
+    import_structure = getattr(book, "import_structure", None) or {}
+    if import_structure.get("parser_version") or import_structure.get("additional_imports"):
+        outline = (
+            (
+                await db.execute(
+                    select(BookSection)
+                    .where(BookSection.book_id == book.id)
+                    .order_by(BookSection.display_order)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        section_by_chapter = {
+            section.chapter_id: section for section in outline if section.chapter_id
+        }
         parts_by_id = {section.id: section for section in outline if section.kind == "part"}
     return {
         "read_upto": read_upto,
@@ -821,17 +832,23 @@ async def build_chapter_list_payload(
                 "title": chapter.title,
                 "chapter_kind": getattr(chapter, "chapter_kind", "chapter"),
                 "printed_label": section_by_chapter[chapter.id].source_label
-                if chapter.id in section_by_chapter else None,
+                if chapter.id in section_by_chapter
+                else None,
                 "parent_part_id": str(section_by_chapter[chapter.id].parent_id)
-                if chapter.id in section_by_chapter and section_by_chapter[chapter.id].parent_id else None,
+                if chapter.id in section_by_chapter and section_by_chapter[chapter.id].parent_id
+                else None,
                 "parent_part_title": parts_by_id[section_by_chapter[chapter.id].parent_id].title
-                if chapter.id in section_by_chapter and section_by_chapter[chapter.id].parent_id in parts_by_id else None,
+                if chapter.id in section_by_chapter
+                and section_by_chapter[chapter.id].parent_id in parts_by_id
+                else None,
                 "analysis_included": section_by_chapter[chapter.id].include_in_analysis
-                if chapter.id in section_by_chapter else None,
+                if chapter.id in section_by_chapter
+                else None,
                 "word_count": getattr(chapter, "word_count", None),
                 "processed": chapter.processed,
                 "intelligence_available": (
-                    False if chapter.id in section_by_chapter
+                    False
+                    if chapter.id in section_by_chapter
                     and not section_by_chapter[chapter.id].include_in_analysis
                     else intelligence_map.get(chapter.number, True)
                 ),

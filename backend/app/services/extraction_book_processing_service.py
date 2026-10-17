@@ -150,8 +150,12 @@ async def process_book_ingestion_and_queue(
         raw=raw,
         preserve_chapter_numbers=book.preserve_chapter_numbers,
         preserve_source_chapters=book.preserve_source_chapters,
-        proposed_plan=(book.import_structure if isinstance(book.import_structure, dict)
-                       and book.import_structure.get("parser_version") else None),
+        proposed_plan=(
+            book.import_structure
+            if isinstance(book.import_structure, dict)
+            and book.import_structure.get("parser_version")
+            else None
+        ),
     )
     chapters = cast(list[dict[str, Any]], parsed_payload["chapters"])
     screenplay_payload = cast(dict[str, Any] | None, parsed_payload.get("screenplay_payload"))
@@ -166,7 +170,8 @@ async def process_book_ingestion_and_queue(
     if structure_plan:
         additional_imports = (
             book.import_structure.get("additional_imports")
-            if isinstance(book.import_structure, dict) else None
+            if isinstance(book.import_structure, dict)
+            else None
         )
         book.import_structure = {
             **structure_plan,
@@ -205,8 +210,10 @@ async def process_book_ingestion_and_queue(
     all_chapters = apply_chapter_number_strategy(
         chapters,
         preserve_chapter_numbers=(book.preserve_chapter_numbers or book.preserve_source_chapters)
-        and book.work_type != "screenplay" and not structure_plan,
-        generic_titles=book.work_type != "screenplay" and not structure_plan
+        and book.work_type != "screenplay"
+        and not structure_plan,
+        generic_titles=book.work_type != "screenplay"
+        and not structure_plan
         and not (book.preserve_chapter_numbers or book.preserve_source_chapters),
     )
 
@@ -247,7 +254,9 @@ async def process_book_ingestion_and_queue(
     user = await db.get(User, book.user_id)
 
     budget_started = time.perf_counter()
-    ai_candidates = [chapter for chapter in all_chapters if chapter.get("include_in_analysis", True)]
+    ai_candidates = [
+        chapter for chapter in all_chapters if chapter.get("include_in_analysis", True)
+    ]
     budget_result = await apply_ingestion_token_budget(
         db,
         book=book,
@@ -366,8 +375,11 @@ async def process_book_ingestion_and_queue(
     )
     if structure_plan and not book.force_single_manuscript:
         await persist_book_sections(
-            db, book=book, plan=structure_plan,
-            chapter_rows=chapter_rows, chapters=all_chapters,
+            db,
+            book=book,
+            plan=structure_plan,
+            chapter_rows=chapter_rows,
+            chapters=all_chapters,
         )
         await db.commit()
     chapters_by_number = {int(chapter.number): chapter for chapter in chapter_rows}
@@ -384,8 +396,12 @@ async def process_book_ingestion_and_queue(
         processing_run.completed_at = datetime.now(UTC)
         book.status = "ready"
         book.writer_workspace = update_book_processing_state(
-            book, status="ready", stage="analysis", total_chapters=0,
-            completed_chapters=0, started_at=processing_started_at,
+            book,
+            status="ready",
+            stage="analysis",
+            total_chapters=0,
+            completed_chapters=0,
+            started_at=processing_started_at,
             queue_wait_ms=queue_wait_ms,
         )
         await db.commit()

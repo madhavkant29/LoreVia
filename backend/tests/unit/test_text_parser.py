@@ -26,7 +26,10 @@ def test_markdown_chapter_headings_split_without_losing_short_real_chapters():
         language="en",
     )
 
-    assert [chapter["title"] for chapter in chapters] == ["Chapter 1: The Bell", "Chapter 2: The Gate"]
+    assert [chapter["title"] for chapter in chapters] == [
+        "Chapter 1: The Bell",
+        "Chapter 2: The Gate",
+    ]
     assert first in chapters[0]["text"]
     assert second in chapters[1]["text"]
 

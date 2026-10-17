@@ -109,7 +109,9 @@ def parse_scrivener_archive(raw: bytes, *, include_structure: bool = False) -> l
             chapters = []
             for item in candidates:
                 item_type = str(item.attrib.get("Type") or "").lower()
-                if item is draft or item_type not in ({"text", "folder", "draftfolder"} if include_structure else {"text"}):
+                if item is draft or item_type not in (
+                    {"text", "folder", "draftfolder"} if include_structure else {"text"}
+                ):
                     continue
                 item_id = str(item.attrib.get("UUID") or item.attrib.get("ID") or "").strip()
                 if not item_id:
@@ -137,8 +139,7 @@ def parse_scrivener_archive(raw: bytes, *, include_structure: bool = False) -> l
                 if text.strip() or (include_structure and item_type != "text"):
                     chapter = {"number": len(chapters) + 1, "title": title, "text": text}
                     if include_structure:
-                        if item_type != "text":
-                            chapter["section_type"] = "part"
+                        chapter["section_type"] = "part" if item_type != "text" else "chapter"
                         chapter["source_location"] = content_name or f"Scrivener binder {item_id}"
                     chapters.append(chapter)
             if not chapters:

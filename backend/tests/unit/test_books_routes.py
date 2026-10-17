@@ -6,6 +6,7 @@ from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
+import fitz
 import pytest
 from fastapi import HTTPException, UploadFile
 
@@ -48,6 +49,15 @@ from app.services import (
 from app.utils.books import overview as books_overview
 from tests.unit.route_facades import books
 from tests.unit.route_patch_helpers import patch_route_dependency
+
+
+def _valid_pdf_bytes() -> bytes:
+    document = fitz.open()
+    page = document.new_page()
+    page.insert_text((72, 72), "Chapter 1\nA complete sample chapter for import preview.")
+    raw = document.tobytes()
+    document.close()
+    return raw
 
 
 @pytest.mark.asyncio
@@ -1356,7 +1366,7 @@ async def test_import_manuscript_content_preserves_source_chapter_count_for_long
         text=None,
         html=None,
         title=None,
-        files=[_upload("story.pdf", b"%PDF-1.4\nmock body\n%%EOF")],
+        files=[_upload("story.pdf", _valid_pdf_bytes())],
         work_type=None,
         chapter_number=None,
         replace_existing="false",
@@ -1479,7 +1489,7 @@ async def test_import_manuscript_content_preserves_images_and_extracts_pdf_cover
         text=None,
         html=None,
         title=None,
-        files=[_upload("story.pdf", b"%PDF-1.4\nmock body\n%%EOF")],
+        files=[_upload("story.pdf", _valid_pdf_bytes())],
         work_type=None,
         chapter_number=None,
         replace_existing="false",

@@ -499,6 +499,17 @@ class ChapterReportCharacter(BaseModel):
     arc_summary: str | None = None
 
 
+class ChapterEditorialConcern(BaseModel):
+    issue: str
+    evidence: str
+    suggestion: str = ""
+
+
+class ChapterRevisionQuestion(BaseModel):
+    question: str
+    evidence: str
+
+
 class ChapterConsistencyReport(BaseModel):
     chapter_number: int
     chapter_title: str | None = None
@@ -508,6 +519,8 @@ class ChapterConsistencyReport(BaseModel):
     plot_threads_opened: list[str]
     plot_threads_resolved: list[str]
     continuity_flags: list[str]
+    editorial_concerns: list[ChapterEditorialConcern] | None = None
+    revision_question: ChapterRevisionQuestion | None = None
 
 
 class StoryHealthMetricOut(BaseModel):

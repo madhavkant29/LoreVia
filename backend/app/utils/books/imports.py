@@ -171,7 +171,10 @@ def _sample_epub_text(raw: bytes) -> str:
 
 
 def parse_structured_prose_upload(
-    *, format_name: str, raw: bytes, filename: str,
+    *,
+    format_name: str,
+    raw: bytes,
+    filename: str,
     proposed_plan: dict[str, Any] | None = None,
     language: str | None = None,
     include_block_context: bool = False,
@@ -181,7 +184,9 @@ def parse_structured_prose_upload(
     if format_name == "pdf":
         from app.parsers.pdf_parser import parse_pdf_structure
 
-        parsed, diagnostics = parse_document_or_400(parse_pdf_structure, raw, filename=filename, language=language)
+        parsed, diagnostics = parse_document_or_400(
+            parse_pdf_structure, raw, filename=filename, language=language
+        )
     elif format_name == "epub":
         from app.parsers.epub_parser import parse_epub_structure
 
@@ -194,19 +199,25 @@ def parse_structured_prose_upload(
         from app.parsers.text_parser import parse_text_structure
 
         source_text = decode_manuscript_text(raw)
-        heading_language = language or ("en" if re.search(r"(?im)^\s*chapter\s+\d+\b", source_text) else None)
-        parsed = parse_text_structure(source_text, language=heading_language, title=os.path.splitext(filename)[0])
+        heading_language = language or (
+            "en" if re.search(r"(?im)^\s*chapter\s+\d+\b", source_text) else None
+        )
+        parsed = parse_text_structure(
+            source_text, language=heading_language, title=os.path.splitext(filename)[0]
+        )
     elif format_name == "scrivener":
         from app.utils.scrivener_utils import parse_scrivener_archive
 
-        parsed = parse_document_or_400(parse_scrivener_archive, raw, filename=filename, include_structure=True)
+        parsed = parse_document_or_400(
+            parse_scrivener_archive, raw, filename=filename, include_structure=True
+        )
     else:
         raise ValueError(f"Unsupported format: {format_name}")
     require_extractable_manuscript_text(parsed, format_name)
     sample = " ".join(str(section.get("text") or "") for section in parsed)[:5000]
-    detected_language = language or (
-        diagnostics.get("detected_language") if diagnostics else None
-    ) or "en"
+    detected_language = (
+        language or (diagnostics.get("detected_language") if diagnostics else None) or "en"
+    )
     if diagnostics is None and language is None:
         from app.utils.language_utils import detect_language
 
@@ -216,14 +227,20 @@ def parse_structured_prose_upload(
     detected = build_structure_plan(raw, parsed, language=detected_language)
     plan = validate_structure_plan(proposed_plan, detected)
     chapters = materialize_structure_plan(plan)
-    persisted_plan = {key: value for key, value in plan.items() if key not in {"blocks", "block_locations", "images_by_marker"}}
+    persisted_plan = {
+        key: value
+        for key, value in plan.items()
+        if key not in {"blocks", "block_locations", "images_by_marker"}
+    }
     persisted_plan["toc_entries"] = {
-        section["id"]: plan["blocks"][section["start_block"]:section["end_block"]]
-        for section in plan["sections"] if section["type"] == "toc"
+        section["id"]: plan["blocks"][section["start_block"] : section["end_block"]]
+        for section in plan["sections"]
+        if section["type"] == "toc"
     }
     persisted_plan["warnings"] = [
         {"message": warning, "section_id": section["id"], "severity": "warning"}
-        for section in plan["sections"] for warning in section.get("warnings", [])
+        for section in plan["sections"]
+        for warning in section.get("warnings", [])
     ]
     result = {
         "chapters": chapters,
@@ -233,12 +250,14 @@ def parse_structured_prose_upload(
         "block_count": len(detected["blocks"]),
     }
     if include_block_context:
-        result.update({
-            "block_word_counts": [len(block.split()) for block in plan["blocks"]],
-            "block_openings": [block[:180] for block in plan["blocks"]],
-            "block_closings": [block[-180:] for block in plan["blocks"]],
-            "block_locations": plan["block_locations"],
-        })
+        result.update(
+            {
+                "block_word_counts": [len(block.split()) for block in plan["blocks"]],
+                "block_openings": [block[:180] for block in plan["blocks"]],
+                "block_closings": [block[-180:] for block in plan["blocks"]],
+                "block_locations": plan["block_locations"],
+            }
+        )
     return result
 
 
@@ -529,7 +548,9 @@ def normalize_imported_chapters(
                     "html": html if len(parts) == 1 else manuscript.manuscript_text_to_html(part),
                     "description": description,
                     "chapter_kind": chapter_kind if len(parts) == 1 else "chapter",
-                    "structure_section_id": chapter.get("structure_section_id") if len(parts) == 1 else None,
+                    "structure_section_id": chapter.get("structure_section_id")
+                    if len(parts) == 1
+                    else None,
                     "include_in_analysis": chapter.get("include_in_analysis", True),
                     "images": images
                     if len(parts) == 1
@@ -608,7 +629,8 @@ def build_import_preview(
             require_extractable_manuscript_text(parsed_pages, "pdf")
             source_text = "\n\n".join(
                 str(chapter.get("text") or "").strip()
-                for chapter in parsed_pages if chapter.get("text")
+                for chapter in parsed_pages
+                if chapter.get("text")
             )
         elif format_name in ("txt", "md", "fountain", "screenplay", "script"):
             source_text = decode_manuscript_text(raw)
@@ -634,16 +656,21 @@ def build_import_preview(
 
     try:
         parsed = parse_structured_prose_upload(
-            format_name=format_name, raw=raw, filename="preview", language=language,
+            format_name=format_name,
+            raw=raw,
+            filename="preview",
+            language=language,
             include_block_context=True,
         )
     except HTTPException as exc:
         if format_name != "pdf" or "No extractable text" not in str(exc.detail):
             raise
         preview.raw_diagnostics = {"anomalies": ["no_extractable_text"]}
-        preview.warnings = [ImportWarning(
-            message="This PDF has no extractable text. Export a text-based PDF or OCR it before importing."
-        )]
+        preview.warnings = [
+            ImportWarning(
+                message="This PDF has no extractable text. Export a text-based PDF or OCR it before importing."
+            )
+        ]
         preview.source_size_bytes = len(raw)
         return preview.model_dump()
     plan = parsed["structure_plan"]
@@ -671,14 +698,25 @@ def build_import_preview(
     preview.raw_diagnostics = parsed["parser_diagnostics"]
     preview.warnings = [
         ImportWarning(message=warning, section_id=section.id)
-        for section in sections for warning in section.warnings
+        for section in sections
+        for warning in section.warnings
     ]
+    preview.warnings.extend(
+        ImportWarning(
+            message="Table of contents detected; its entries are structural hints, not story chapters.",
+            section_id=section.id,
+        )
+        for section in sections
+        if section.type == "toc"
+    )
     for anomaly in (parsed["parser_diagnostics"] or {}).get("anomalies", []):
         preview.warnings.append(ImportWarning(message=f"Source extraction needs review: {anomaly}"))
     if any(section.type == "unknown" for section in sections):
-        preview.warnings.append(ImportWarning(
-            message="Unclassified text will be imported for reading and included in AI analysis. It may include supplemental material."
-        ))
+        preview.warnings.append(
+            ImportWarning(
+                message="Unclassified text will be imported for reading and included in AI analysis. It may include supplemental material."
+            )
+        )
     preview.confidence = round(
         1 - min(0.75, 0.25 * sum(section.type == "unknown" for section in sections)), 2
     )

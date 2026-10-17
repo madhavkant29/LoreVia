@@ -94,8 +94,7 @@ def test_docx_extraction_preserves_paragraph_and_table_order():
     text = _parse_docx_text(output.getvalue())
 
     assert text == (
-        "Chapter 1\n\nThe sealed gate opened.\n\n"
-        "Mara | holds the key\n\nThe guard followed her."
+        "Chapter 1\n\nThe sealed gate opened.\n\nMara | holds the key\n\nThe guard followed her."
     )
 
 
@@ -103,12 +102,16 @@ def test_docx_extraction_preserves_paragraph_and_table_order():
 async def test_docx_import_keeps_table_content_in_its_source_chapter():
     document = Document()
     document.add_paragraph("Chapter 1")
-    document.add_paragraph("Mara carries the archive key into the old harbor while the watch closes the gates.")
+    document.add_paragraph(
+        "Mara carries the archive key into the old harbor while the watch closes the gates."
+    )
     table = document.add_table(rows=1, cols=2)
     table.cell(0, 0).text = "Archive key"
     table.cell(0, 1).text = "Mara"
     document.add_paragraph("Chapter 2")
-    document.add_paragraph("The guard returns to the harbor at dawn and discovers the archive door is open.")
+    document.add_paragraph(
+        "The guard returns to the harbor at dawn and discovers the archive door is open."
+    )
     output = BytesIO()
     document.save(output)
 

@@ -15,8 +15,14 @@ from app.schemas.section import SectionMeta, SectionTypeLiteral
 PARSER_VERSION = "prose-structure-2"
 SECTION_TYPES = set(SectionTypeLiteral.__args__)
 NON_STORY_TYPES = {
-    "toc", "notes", "chronology", "title_page", "copyright", "dedication",
-    "acknowledgements", "glossary",
+    "toc",
+    "notes",
+    "chronology",
+    "title_page",
+    "copyright",
+    "dedication",
+    "acknowledgements",
+    "glossary",
 }
 
 
@@ -46,7 +52,9 @@ def build_structure_plan(
         explicit_kind = parsed.get("section_type") or parsed.get("chapter_kind")
         raw_kind = str(explicit_kind or "unknown")
         detected_kind, _ = classify_heading_type(title, language)
-        kind = raw_kind if raw_kind in SECTION_TYPES and explicit_kind is not None else detected_kind
+        kind = (
+            raw_kind if raw_kind in SECTION_TYPES and explicit_kind is not None else detected_kind
+        )
         if kind not in SECTION_TYPES:
             kind = "unknown"
         text = str(parsed.get("text") or "").strip()
@@ -56,22 +64,35 @@ def build_structure_plan(
         parts = _paragraph_blocks(text)
         start = len(blocks)
         if kind == "toc" and not parts:
-            sections.append(SectionMeta(
-                id=_section_id(source_hash, index, "toc"), type="toc", title=title or "Contents",
-                start_block=start, end_block=start, include_in_analysis=False,
-                source_location=parsed.get("source_location"),
-            ))
+            sections.append(
+                SectionMeta(
+                    id=_section_id(source_hash, index, "toc"),
+                    type="toc",
+                    title=title or "Contents",
+                    start_block=start,
+                    end_block=start,
+                    include_in_analysis=False,
+                    source_location=parsed.get("source_location"),
+                )
+            )
             continue
         if kind == "part":
             part_id = _section_id(source_hash, index, "part")
-            sections.append(SectionMeta(
-                id=part_id, type="part", title=title or f"Part {index + 1}",
-                number=parsed.get("source_number"),
-                source_label=title or None,
-                source_location=parsed.get("source_location"),
-                start_page=parsed.get("start_page"), end_page=parsed.get("end_page"),
-                start_block=start, end_block=start, include_in_analysis=False,
-            ))
+            sections.append(
+                SectionMeta(
+                    id=part_id,
+                    type="part",
+                    title=title or f"Part {index + 1}",
+                    number=parsed.get("source_number"),
+                    source_label=title or None,
+                    source_location=parsed.get("source_location"),
+                    start_page=parsed.get("start_page"),
+                    end_page=parsed.get("end_page"),
+                    start_block=start,
+                    end_block=start,
+                    include_in_analysis=False,
+                )
+            )
             active_part_id = part_id
             if not parts:
                 continue
@@ -85,19 +106,25 @@ def build_structure_plan(
         section_id = _section_id(source_hash, index, kind)
         warning = (
             "The section type is uncertain. It will be readable and analyzed; review it if it contains supplemental material."
-            if kind == "unknown" else None
+            if kind == "unknown"
+            else None
         )
         section = SectionMeta(
-            id=section_id, type=kind, title=title or f"Section {len(sections) + 1}",
+            id=section_id,
+            type=kind,
+            title=title or f"Section {len(sections) + 1}",
             number=parsed.get("source_number"),
             parent_id=active_part_id,
             source_label=str(parsed.get("title") or "").strip() or None,
             source_location=parsed.get("source_location"),
-            start_page=parsed.get("start_page"), end_page=parsed.get("end_page"),
-            start_block=start, end_block=end,
+            start_page=parsed.get("start_page"),
+            end_page=parsed.get("end_page"),
+            start_block=start,
+            end_block=end,
             include_in_analysis=kind not in NON_STORY_TYPES,
             word_count=len(text.split()),
-            opening_excerpt=parts[0][:180], closing_excerpt=parts[-1][-180:],
+            opening_excerpt=parts[0][:180],
+            closing_excerpt=parts[-1][-180:],
             warnings=[warning] if warning else [],
         )
         sections.append(section)
@@ -124,7 +151,9 @@ def validate_structure_plan(
         proposed = detected
     for key in ("source_sha256", "content_sha256", "parser_version"):
         if proposed.get(key) != detected[key]:
-            raise HTTPException(409, "The import preview is stale. Preview this file again before importing.")
+            raise HTTPException(
+                409, "The import preview is stale. Preview this file again before importing."
+            )
     raw_sections = proposed.get("sections")
     if not isinstance(raw_sections, list) or not raw_sections:
         raise HTTPException(400, "The import outline must contain at least one section.")
@@ -134,9 +163,7 @@ def validate_structure_plan(
         raise HTTPException(400, "The import outline is invalid.") from exc
     seen_ids: set[str] = set()
     part_ids: set[str] = set()
-    detected_toc_ids = {
-        item["id"] for item in detected["sections"] if item["type"] == "toc"
-    }
+    detected_toc_ids = {item["id"] for item in detected["sections"] if item["type"] == "toc"}
     cursor = 0
     readable_count = 0
     for section in sections:
@@ -169,29 +196,55 @@ def validate_structure_plan(
     accepted: list[dict[str, Any]] = []
     for section in sections:
         item = section.model_dump()
-        matching = next((original for original in detected["sections"] if original["id"] == section.id), None)
-        if matching and section.start_block == matching["start_block"] and section.end_block == matching["end_block"]:
+        matching = next(
+            (original for original in detected["sections"] if original["id"] == section.id), None
+        )
+        if (
+            matching
+            and section.start_block == matching["start_block"]
+            and section.end_block == matching["end_block"]
+        ):
             for field in ("source_location", "start_page", "end_page"):
                 item[field] = matching.get(field)
         else:
             locations = detected.get("block_locations") or []
-            span_locations = [location for location in locations[section.start_block:section.end_block] if location]
-            if section.type == "part" and not span_locations and section.start_block < len(locations):
-                span_locations = [locations[section.start_block]] if locations[section.start_block] else []
+            span_locations = [
+                location
+                for location in locations[section.start_block : section.end_block]
+                if location
+            ]
+            if (
+                section.type == "part"
+                and not span_locations
+                and section.start_block < len(locations)
+            ):
+                span_locations = (
+                    [locations[section.start_block]] if locations[section.start_block] else []
+                )
             item["source_location"] = (
-                span_locations[0] if len(set(span_locations)) <= 1 else
-                f"{span_locations[0]} – {span_locations[-1]}"
-            ) if span_locations else None
+                (
+                    span_locations[0]
+                    if len(set(span_locations)) <= 1
+                    else f"{span_locations[0]} – {span_locations[-1]}"
+                )
+                if span_locations
+                else None
+            )
             item["start_page"] = None
             item["end_page"] = None
         if detected["blocks"] and detected["blocks"][0] is not None:
-            block_text = [str(block) for block in detected["blocks"][section.start_block:section.end_block]]
+            block_text = [
+                str(block) for block in detected["blocks"][section.start_block : section.end_block]
+            ]
             item["word_count"] = sum(len(block.split()) for block in block_text)
             item["opening_excerpt"] = block_text[0][:180] if block_text else ""
             item["closing_excerpt"] = block_text[-1][-180:] if block_text else ""
         item["warnings"] = (
-            ["The section type is uncertain. It will be readable and analyzed; review it if it contains supplemental material."]
-            if section.type == "unknown" else []
+            [
+                "The section type is uncertain. It will be readable and analyzed; review it if it contains supplemental material."
+            ]
+            if section.type == "unknown"
+            else []
         )
         if section.type in NON_STORY_TYPES or section.type == "part":
             item["include_in_analysis"] = False
@@ -210,19 +263,22 @@ def materialize_structure_plan(plan: dict[str, Any]) -> list[dict[str, Any]]:
         text = "\n\n".join(blocks[section.start_block : section.end_block])
         if not text.strip():
             continue
-        output.append({
-            "number": len(output) + 1,
-            "title": section.title,
-            "text": text,
-            "section_type": section.type,
-            "source_number": section.number,
-            "structure_section_id": section.id,
-            "parent_part_id": section.parent_id,
-            "source_label": section.source_label,
-            "include_in_analysis": section.include_in_analysis,
-            "images": [
-                image for marker, image in plan.get("images_by_marker", {}).items()
-                if marker in text
-            ],
-        })
+        output.append(
+            {
+                "number": len(output) + 1,
+                "title": section.title,
+                "text": text,
+                "section_type": section.type,
+                "source_number": section.number,
+                "structure_section_id": section.id,
+                "parent_part_id": section.parent_id,
+                "source_label": section.source_label,
+                "include_in_analysis": section.include_in_analysis,
+                "images": [
+                    image
+                    for marker, image in plan.get("images_by_marker", {}).items()
+                    if marker in text
+                ],
+            }
+        )
     return output

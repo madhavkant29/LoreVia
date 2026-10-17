@@ -48,18 +48,29 @@ def _synthetic_plan():
         "Chapter 1\n"
         "At sunrise, Mara returned the key and crossed the bridge.\n"
     )
-    return build_structure_plan(manuscript.encode(), parse_text_structure(manuscript, language="en"))
+    return build_structure_plan(
+        manuscript.encode(), parse_text_structure(manuscript, language="en")
+    )
 
 
 def test_nested_parts_keep_source_order_and_local_numbering():
     plan = _synthetic_plan()
     sections = plan["sections"]
     assert [section["type"] for section in sections] == [
-        "notes", "chronology", "part", "part_opening", "chapter", "chapter", "part", "chapter"
+        "notes",
+        "chronology",
+        "part",
+        "part_opening",
+        "chapter",
+        "chapter",
+        "part",
+        "chapter",
     ]
     chapters = materialize_structure_plan(plan)
     assert [chapter["number"] for chapter in chapters] == [1, 2, 3, 4, 5, 6]
-    assert [chapter["source_number"] for chapter in chapters if chapter["section_type"] == "chapter"] == [1, 2, 1]
+    assert [
+        chapter["source_number"] for chapter in chapters if chapter["section_type"] == "chapter"
+    ] == [1, 2, 1]
     assert chapters[0]["include_in_analysis"] is False
     assert chapters[1]["include_in_analysis"] is False
     assert chapters[2]["section_type"] == "part_opening"
@@ -70,10 +81,14 @@ def test_nested_parts_keep_source_order_and_local_numbering():
 def test_boundary_move_preserves_every_block_once():
     detected = _synthetic_plan()
     proposed = deepcopy(detected)
-    first = next(i for i, section in enumerate(proposed["sections"]) if section["type"] == "chapter")
+    first = next(
+        i for i, section in enumerate(proposed["sections"]) if section["type"] == "chapter"
+    )
     left = proposed["sections"][first]
     right = proposed["sections"][first + 1]
-    assert right["end_block"] - right["start_block"] > 1 or left["end_block"] - left["start_block"] > 1
+    assert (
+        right["end_block"] - right["start_block"] > 1 or left["end_block"] - left["start_block"] > 1
+    )
     if right["end_block"] - right["start_block"] > 1:
         left["end_block"] += 1
         right["start_block"] += 1
@@ -82,7 +97,9 @@ def test_boundary_move_preserves_every_block_once():
         right["start_block"] -= 1
     accepted = validate_structure_plan(proposed, detected)
     materialized = materialize_structure_plan(accepted)
-    assert "\n\n".join(chapter["text"] for chapter in materialized) == "\n\n".join(detected["blocks"])
+    assert "\n\n".join(chapter["text"] for chapter in materialized) == "\n\n".join(
+        detected["blocks"]
+    )
 
 
 @pytest.mark.parametrize("corruption", ["stale", "gap", "overlap", "fake_toc", "no_readable"])
@@ -99,7 +116,12 @@ def test_rejects_stale_or_lossy_outline(corruption):
         chapter["type"] = "toc"
     else:
         proposed["sections"] = [
-            {**proposed["sections"][0], "type": "toc", "start_block": 0, "end_block": len(detected["blocks"])}
+            {
+                **proposed["sections"][0],
+                "type": "toc",
+                "start_block": 0,
+                "end_block": len(detected["blocks"]),
+            }
         ]
     with pytest.raises(HTTPException):
         validate_structure_plan(proposed, detected)
@@ -108,7 +130,11 @@ def test_rejects_stale_or_lossy_outline(corruption):
 def test_uncertain_region_is_flat_analyzed_and_warned_without_downgrading_confident_chapter():
     parsed = [
         {"title": "Chapter 1", "section_type": "chapter", "text": "Mara entered the tower."},
-        {"title": "Uncertain leaf", "section_type": "unknown", "text": "A detached slip recorded the tide."},
+        {
+            "title": "Uncertain leaf",
+            "section_type": "unknown",
+            "text": "A detached slip recorded the tide.",
+        },
         {"title": "Chapter 2", "section_type": "chapter", "text": "Mara returned home."},
     ]
     plan = build_structure_plan(b"source", parsed)
@@ -147,7 +173,9 @@ def test_contents_entries_are_metadata_not_story_chapters():
     assert sum(chapter["include_in_analysis"] for chapter in parsed["chapters"]) == 2
     preview = build_import_preview(format_name="txt", work_type="novel", raw=source)
     readable, analyzed = import_word_totals(preview)
-    assert readable == analyzed == sum(len(chapter["text"].split()) for chapter in parsed["chapters"])
+    assert (
+        readable == analyzed == sum(len(chapter["text"].split()) for chapter in parsed["chapters"])
+    )
     assert preview["total_words"] == readable
 
 
@@ -173,11 +201,16 @@ def test_scrivener_folder_becomes_part_without_losing_child_text():
     output = BytesIO()
     with ZipFile(output, "w", ZIP_DEFLATED) as archive:
         archive.writestr("Harbor.scriv/Harbor.scrivx", project)
-        archive.writestr("Harbor.scriv/Files/Data/chapter/content.txt", "Mara carried the chart to the harbor.")
+        archive.writestr(
+            "Harbor.scriv/Files/Data/chapter/content.txt", "Mara carried the chart to the harbor."
+        )
     parsed = parse_structured_prose_upload(
         format_name="scrivener", raw=output.getvalue(), filename="Harbor.scrivzip"
     )
-    assert [section["type"] for section in parsed["structure_plan"]["sections"]] == ["part", "chapter"]
+    assert [section["type"] for section in parsed["structure_plan"]["sections"]] == [
+        "part",
+        "chapter",
+    ]
     assert parsed["chapters"][0]["text"] == "Mara carried the chart to the harbor."
     assert parsed["chapters"][0]["parent_part_id"] == parsed["structure_plan"]["sections"][0]["id"]
 
@@ -195,9 +228,13 @@ async def test_edited_preview_reaches_worker_parser_unchanged():
     edited["sections"][0]["title"] = "The bridge"
     accepted = accept_upload_structure_plan(preview=preview, raw=raw, submitted=json.dumps(edited))
     worker = await parse_book_upload_for_ingestion(
-        format_name="txt", work_type="novel", raw=raw,
-        preserve_chapter_numbers=False, preserve_source_chapters=False,
-        filename="manuscript.txt", proposed_plan=accepted,
+        format_name="txt",
+        work_type="novel",
+        raw=raw,
+        preserve_chapter_numbers=False,
+        preserve_source_chapters=False,
+        filename="manuscript.txt",
+        proposed_plan=accepted,
     )
     assert worker["chapters"][0]["title"] == "The bridge"
     assert worker["structure_plan"]["sections"][0]["id"] == preview["sections"][0]["id"]
@@ -227,9 +264,12 @@ def test_epub_spine_order_overrides_zip_item_order():
     parsed = parse_structured_prose_upload(format_name="epub", raw=raw, filename="Harbor.epub")
     assert [chapter["title"] for chapter in parsed["chapters"]] == ["Chapter 1", "Chapter 2"]
     assert [chapter["text"] for chapter in parsed["chapters"]] == [
-        "Mara crossed the bridge.", "She returned at dawn.",
+        "Mara crossed the bridge.",
+        "She returned at dawn.",
     ]
-    first_chapter = next(section for section in parsed["structure_plan"]["sections"] if section["type"] == "chapter")
+    first_chapter = next(
+        section for section in parsed["structure_plan"]["sections"] if section["type"] == "chapter"
+    )
     assert "first.xhtml" in first_chapter["source_location"]
 
 
@@ -246,7 +286,9 @@ def test_docx_heading_styles_preserve_part_and_chapter_hierarchy():
         format_name="docx", raw=buffer.getvalue(), filename="harbor.docx"
     )
     assert [section["type"] for section in parsed["structure_plan"]["sections"]] == [
-        "part", "part_opening", "chapter"
+        "part",
+        "part_opening",
+        "chapter",
     ]
     assert parsed["chapters"][1]["parent_part_id"] == parsed["structure_plan"]["sections"][0]["id"]
     assert "paragraph" in parsed["structure_plan"]["sections"][2]["source_location"]
@@ -272,6 +314,11 @@ def test_preview_acceptance_recomputes_boundary_details_and_excludes_corrected_n
     second["type"] = "notes"
     second["include_in_analysis"] = True
     accepted = accept_upload_structure_plan(preview=preview, raw=raw, submitted=json.dumps(edited))
-    assert accepted["sections"][0]["word_count"] == sum(preview["block_word_counts"][:first["end_block"]])
-    assert accepted["sections"][1]["opening_excerpt"] == preview["block_openings"][second["start_block"]]
+    assert accepted["sections"][0]["word_count"] == sum(
+        preview["block_word_counts"][: first["end_block"]]
+    )
+    assert (
+        accepted["sections"][1]["opening_excerpt"]
+        == preview["block_openings"][second["start_block"]]
+    )
     assert accepted["sections"][1]["include_in_analysis"] is False
