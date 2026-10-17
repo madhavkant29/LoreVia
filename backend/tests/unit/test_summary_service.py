@@ -1,3 +1,4 @@
+import json
 import uuid
 
 import pytest
@@ -14,8 +15,9 @@ from app.services.summary_service import (
 
 
 def test_summary_modes_to_generate_can_force_refresh_existing_modes():
-    assert summary_modes_to_generate({"detailed"}) == ["short", "key_points"]
-    assert summary_modes_to_generate({"short", "detailed", "key_points"}) == []
+    assert summary_modes_to_generate({"detailed"}) == ["short", "key_points", "detailed"]
+    assert summary_modes_to_generate({"short", "detailed", "key_points"}) == ["detailed"]
+    assert summary_modes_to_generate({"short", "detailed", "key_points", "editorial_note"}) == []
     assert summary_modes_to_generate(
         {"short", "detailed", "key_points"},
         force_regenerate=True,
@@ -115,6 +117,7 @@ async def test_persist_chapter_summary_payloads_updates_existing_and_inserts_mis
                 "themes": [{"theme": "trust"}],
             },
             "short": {"content": "Replacement short summary"},
+            "editorial_note": {"content": json.dumps([{"issue": "The gate opens without a choice.", "evidence": "The gate opened.", "suggestion": "Show the choice."}])},
         },
     )
     await db.commit()
@@ -130,9 +133,10 @@ async def test_persist_chapter_summary_payloads_updates_existing_and_inserts_mis
         .scalars()
         .all()
     )
-    assert persisted == ["short", "detailed"]
+    assert persisted == ["short", "detailed", "editorial_note"]
     assert [(row.mode, row.content) for row in rows] == [
         ("detailed", "Replacement summary"),
+        ("editorial_note", json.dumps([{"issue": "The gate opens without a choice.", "evidence": "The gate opened.", "suggestion": "Show the choice."}])),
         ("short", "Replacement short summary"),
     ]
     assert rows[0].id == existing.id

@@ -5,7 +5,6 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest"
 const replaceMock = vi.hoisted(() => vi.fn())
 const prefetchChatsSidebarDataMock = vi.hoisted(() => vi.fn())
 const prefetchNotificationsSidebarDataMock = vi.hoisted(() => vi.fn())
-const supportConfigMock = vi.hoisted(() => vi.fn(() => Promise.resolve({ community_url: null })))
 let currentPathname = "/library"
 
 const authState = {
@@ -51,12 +50,6 @@ vi.mock("@/lib/api/books", () => ({
   },
 }))
 
-vi.mock("@/lib/api/support", () => ({
-  supportApi: {
-    config: supportConfigMock,
-  },
-}))
-
 vi.mock("@/lib/query/queryClient", () => ({
   queryClient: {
     prefetchQuery: vi.fn(),
@@ -84,7 +77,7 @@ vi.mock("@/lib/stores/preferencesStore", () => ({
 vi.mock("@/lib/stores/uiPreferencesStore", () => ({
   useUiPreferencesStore: (selector: (state: {
     preferences: {
-      complexity_mode: "standard"
+      complexity_mode: "focused"
       dashboard_visibility: Record<string, unknown>
       dashboard_order: string[]
       public_tool_visibility: Record<string, unknown>
@@ -92,7 +85,7 @@ vi.mock("@/lib/stores/uiPreferencesStore", () => ({
   }) => unknown) =>
     selector({
       preferences: {
-        complexity_mode: "standard",
+        complexity_mode: "focused",
         dashboard_visibility: {},
         dashboard_order: [],
         public_tool_visibility: {},
@@ -120,7 +113,6 @@ describe("DashboardSidebar", () => {
     replaceMock.mockReset()
     prefetchChatsSidebarDataMock.mockReset()
     prefetchNotificationsSidebarDataMock.mockReset()
-    supportConfigMock.mockReset().mockResolvedValue({ community_url: null })
     currentPathname = "/library"
     container = null
     root = null
@@ -143,6 +135,14 @@ describe("DashboardSidebar", () => {
     expect(prefetchNotificationsSidebarDataMock).not.toHaveBeenCalled()
   })
 
+  it("keeps standard dashboard tools visible when the workspace mode is focused", () => {
+    const view = renderSidebar()
+
+    for (const label of ["Notes", "Quotes", "Series", "Beta Reads", "Public Uploads", "Stats", "Pricing"]) {
+      expect(view.textContent).toContain(label)
+    }
+  })
+
   it("links the bottom profile card to the public writer profile", () => {
     const view = renderSidebar()
     const profileLink = view.querySelector('a[aria-label="Open author public profile"]')
@@ -163,7 +163,6 @@ describe("DashboardSidebar", () => {
     expect(view.querySelector('a[aria-label="Return to LoreVia workspace"]')?.getAttribute("href")).toBe("/library")
     expect(view.textContent).toContain("Back to workspace")
     expect(view.textContent).toContain("Page content")
-    expect(supportConfigMock).not.toHaveBeenCalled()
   })
 })
 

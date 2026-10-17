@@ -40,7 +40,10 @@ describe("revision workflow actions", () => {
   it("restores an existing task decision when undoing a dismissal", async () => {
     const view = mount()
     await act(async () => { await view.current().handleIssueStatus("issue-1", "task_created") })
+    expect(view.current().taskCreated).toBe(true)
+    expect(view.args.setStatusMessage).toHaveBeenLastCalledWith("Added to your revision queue.")
     await act(async () => { await view.current().handleIssueStatus("issue-1", "ignored") })
+    expect(view.current().taskCreated).toBe(false)
     await act(async () => { await view.current().handleIssueStatus("issue-1", "pending") })
     const saved = view.client.getQueryData<WriterWorkspace>(["book:book-1:writer-workspace"])!
     expect(saved.revision_board.items[0].status).toBe("task_created")

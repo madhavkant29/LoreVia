@@ -22,6 +22,7 @@ export function useAuthorLoopActions({ bookId, totalChapters, writerWorkspace, i
   const [copyingLink, setCopyingLink] = useState(false)
   const [guestLink, setGuestLink] = useState<{ assignmentId: string; url: string } | null>(null)
   const [lastDismissedId, setLastDismissedId] = useState<string | null>(null)
+  const [taskCreated, setTaskCreated] = useState(false)
   const dismissedStatus = useRef<"pending" | "task_created">("pending")
   const workspaceKey = asQueryKey(bookCacheKey(bookId, "writer-workspace"))
   const currentWorkspace = () => client.getQueryData<WriterWorkspace>(workspaceKey) ?? writerWorkspace
@@ -35,7 +36,7 @@ export function useAuthorLoopActions({ bookId, totalChapters, writerWorkspace, i
   async function handleIssueStatus(issueId: string, status: "ignored" | "task_created" | "pending") {
     const workspace = currentWorkspace()
     if (lock.current || !workspace) return
-    lock.current = true; setSavingIssueId(issueId); setStatusMessage(null)
+    lock.current = true; setSavingIssueId(issueId); setStatusMessage(null); setTaskCreated(false)
     try {
       let calendar = workspace.goal_calendar
       let taskId: string | undefined
@@ -51,6 +52,7 @@ export function useAuthorLoopActions({ bookId, totalChapters, writerWorkspace, i
       await saveWorkspacePatch({ revision_board: board, goal_calendar: calendar })
       if (status === "ignored") dismissedStatus.current = previousStatus === "task_created" ? "task_created" : "pending"
       setLastDismissedId(status === "ignored" ? issueId : null)
+      setTaskCreated(status === "task_created")
       setStatusMessage(status === "task_created" ? "Added to your revision queue." : status === "ignored" ? "Dismissed from the active queue. You can undo this decision below." : "Restored the finding to the active queue.")
     } catch (error) { setStatusMessage(`${getApiErrorDetail(error) ?? "Could not update that finding."} Your previous decision is retained. Refresh the revision queue before retrying.`) }
     finally { lock.current = false; setSavingIssueId(null) }
@@ -60,7 +62,7 @@ export function useAuthorLoopActions({ bookId, totalChapters, writerWorkspace, i
     if (lock.current) return
     const validation = validateAuthorLoopInvite(draft, totalChapters)
     if (validation) { setStatusMessage(validation); return }
-    lock.current = true; setCreatingAssignment(true); setStatusMessage(null)
+    lock.current = true; setCreatingAssignment(true); setStatusMessage(null); setTaskCreated(false)
     try {
       const created = await betaReadsApi.createAssignment(bookId, {
         readerEmail: draft.readerEmail.trim(), taskLabel: draft.scopeKind === "full_book" ? "Focused beta read" : `Scoped beta read: chapters ${draft.chapterStart}-${draft.chapterEnd}`,
@@ -77,7 +79,7 @@ export function useAuthorLoopActions({ bookId, totalChapters, writerWorkspace, i
 
   async function handleCopyGuestLink() {
     if (lock.current || !selectedAssignment) return
-    lock.current = true; setCopyingLink(true); setStatusMessage(null)
+    lock.current = true; setCopyingLink(true); setStatusMessage(null); setTaskCreated(false)
     const id = selectedAssignment.assignment.id
     try {
       const result = await betaReadsApi.getGuestLink(bookId, id)
@@ -91,7 +93,7 @@ export function useAuthorLoopActions({ bookId, totalChapters, writerWorkspace, i
   async function handleFeedbackStatus(item: BetaReadFeedbackItem, status: "resolved" | "archived" | "task_created" | "open") {
     const workspace = currentWorkspace()
     if (lock.current || !selectedAssignment || (status === "task_created" && !workspace)) return
-    lock.current = true; setSavingFeedbackId(item.id); setStatusMessage(null)
+    lock.current = true; setSavingFeedbackId(item.id); setStatusMessage(null); setTaskCreated(false)
     const assignmentId = selectedAssignment.assignment.id
     let taskSaved = false
     try {
@@ -104,10 +106,11 @@ export function useAuthorLoopActions({ bookId, totalChapters, writerWorkspace, i
       }
       const updated = await betaReadsApi.updateBookFeedbackItem(bookId, assignmentId, item.id, { authorStatus: status, authorTaskId: taskId })
       client.setQueryData(asQueryKey(`author-loop:${bookId}:beta-detail:${assignmentId}`), updated)
+      setTaskCreated(status === "task_created")
       setStatusMessage(status === "task_created" ? "Added to your revision queue." : status === "resolved" ? "Feedback resolved. This does not edit the manuscript." : status === "open" ? "Feedback reopened." : "Feedback archived. Reopen it here if needed.")
     } catch (error) { setStatusMessage(taskSaved ? "The revision task was saved, but the feedback status could not update. Retry to link the existing task without creating another." : `${getApiErrorDetail(error) ?? "Could not update that feedback item."} The previous feedback remains available. Try again.`) }
     finally { lock.current = false; setSavingFeedbackId(null) }
   }
 
-  return { creatingAssignment, savingIssueId, savingFeedbackId, copyingLink, guestLink, lastDismissedId, busy: creatingAssignment || !!savingIssueId || !!savingFeedbackId || copyingLink, handleIssueStatus, handleCreateAssignment, handleCopyGuestLink, handleFeedbackStatus }
+  return { creatingAssignment, savingIssueId, savingFeedbackId, copyingLink, guestLink, lastDismissedId, taskCreated, busy: creatingAssignment || !!savingIssueId || !!savingFeedbackId || copyingLink, handleIssueStatus, handleCreateAssignment, handleCopyGuestLink, handleFeedbackStatus }
 }

@@ -124,6 +124,70 @@ test("chapter report filters update summary counts and tabs work from the keyboa
   await expect(page.getByRole("button", { name: "Help", exact: true })).toBeFocused()
 })
 
+test("the full report opens with an evidence-based review and shows chapter-specific editorial notes", async ({ page }) => {
+  await page.route("**/api/v1/books/book-1/continuity-findings**", (request) => request.fulfill({ json: [] }))
+  await page.route("**/api/v1/books/book-1/chapter-reports**", (request) => request.fulfill({ json: [
+    { chapter_number: 2, chapter_title: "The Gate", summary: "Mara reaches the gate.", new_characters: [], relationship_changes: [], plot_threads_opened: [], plot_threads_resolved: [], continuity_flags: [], editorial_concerns: [{ issue: "Mara's decision arrives before its cause.", evidence: "Mara turned the key.", suggestion: "Show the moment she decides to act." }] },
+    { chapter_number: 1, chapter_title: "Ashfall", summary: "The city falls quiet.", new_characters: [], relationship_changes: [], plot_threads_opened: [], plot_threads_resolved: [], continuity_flags: [], editorial_concerns: null },
+  ] }))
+  await page.goto(route)
+  await expect(page.getByRole("region", { name: "Review in brief" })).toContainText("Chapter 2 deserves another pass")
+  await expect(page.getByRole("region", { name: "Review in brief" })).toContainText("1 chapter has no editorial note yet")
+  await page.getByRole("tab", { name: "Chapter reports", exact: true }).click()
+  await expect(page.getByRole("region", { name: "Chapter 2 review concerns" })).toContainText("Mara turned the key.")
+  await expect(page.getByRole("region", { name: "Chapter 2 review concerns" })).toContainText("Show the moment she decides")
+  await expect(page.locator("article").filter({ has: page.getByRole("heading", { name: "Chapter 1 — Ashfall" }) })).toContainText("not been recorded")
+})
+
+test("a chapter without a verified problem shows its quoted revision question", async ({ page }) => {
+  await page.route("**/api/v1/books/book-1/continuity-findings**", (request) => request.fulfill({ json: [] }))
+  await page.route("**/api/v1/books/book-1/chapter-reports**", (request) => request.fulfill({ json: [
+    { chapter_number: 1, chapter_title: "Departure", summary: "Mara leaves at dawn.", new_characters: [], relationship_changes: [], plot_threads_opened: [], plot_threads_resolved: [], continuity_flags: [], editorial_concerns: [], revision_question: { question: "What does Mara hope her departure will change?", evidence: "Mara left the harbor at dawn." } },
+  ] }))
+  await page.goto(route)
+  await expect(page.getByRole("region", { name: "Review in brief" })).toContainText("What does Mara hope her departure will change?")
+  await expect(page.getByRole("region", { name: "Review in brief" })).toContainText("0 passage-backed editorial concerns")
+  await page.getByRole("tab", { name: "Chapter reports", exact: true }).click()
+  await expect(page.getByRole("region", { name: "Chapter 1 revision question" })).toContainText("Mara left the harbor at dawn.")
+  await expect(page.getByRole("region", { name: "Chapter 1 revision question" })).toContainText("What does Mara hope her departure will change?")
+})
+
+test("an older chapter review starts only after the author confirms its allowance use", async ({ page }) => {
+  let reprocessCalls = 0
+  await page.route("**/api/v1/books/book-1/chapter-reports**", (request) => request.fulfill({ json: [
+    { chapter_number: 2, chapter_title: "Departure", summary: "Mara leaves.", new_characters: [], relationship_changes: [], plot_threads_opened: [], plot_threads_resolved: [], continuity_flags: [], editorial_concerns: null },
+  ] }))
+  await page.route("**/api/v1/books/book-1/manuscript/chapters/2/reprocess", (request) => {
+    reprocessCalls += 1
+    return request.fulfill({ json: { book_id: "book-1", status: "queued", chapters_queued: 1, total_words: 200, upload_charge_consumed: false } })
+  })
+  await page.goto(`${route}?view=chapters`)
+  await page.getByRole("button", { name: "Reprocess Chapter 2" }).click()
+  await expect(page.getByLabel("Confirm Chapter 2 reprocessing")).toContainText("uses processed-word allowance")
+  expect(reprocessCalls).toBe(0)
+  await page.getByRole("button", { name: "Cancel" }).click()
+  expect(reprocessCalls).toBe(0)
+  await page.getByRole("button", { name: "Reprocess Chapter 2" }).click()
+  await page.getByRole("button", { name: "Start chapter reprocess" }).click()
+  await expect(page.getByRole("status")).toContainText("Chapter 2 reprocessing started")
+  expect(reprocessCalls).toBe(1)
+})
+
+test("older chapter reports load on demand without hiding the newest reports", async ({ page }) => {
+  await page.route("**/api/v1/books/book-1/chapter-reports**", (request) => {
+    const before = new URL(request.request().url()).searchParams.get("before_chapter")
+    const numbers = before === "2" ? [1] : Array.from({ length: 50 }, (_, index) => 51 - index)
+    return request.fulfill({ json: numbers.map((chapter_number) => ({ chapter_number, chapter_title: `Part ${chapter_number}`, summary: "Reviewed chapter.", new_characters: [], relationship_changes: [], plot_threads_opened: [], plot_threads_resolved: [], continuity_flags: [], editorial_concerns: [] })) })
+  })
+  await page.goto(`${route}?view=chapters`)
+  await expect(page.getByRole("heading", { name: "Chapter 51 — Part 51" })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Chapter 1 — Part 1" })).toHaveCount(0)
+  await page.getByRole("button", { name: "Load older reports" }).click()
+  await expect(page.getByRole("heading", { name: "Chapter 1 — Part 1" })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Chapter 51 — Part 51" })).toBeVisible()
+  await expect(page.getByRole("button", { name: "Load older reports" })).toHaveCount(0)
+})
+
 test("chapter reports have retry and an actionable empty state", async ({ page }) => {
   let failed = true
   await page.route("**/api/v1/books/book-1/chapter-reports**", (request) => failed ? request.fulfill({ status: 503, json: {} }) : request.fulfill({ json: [] }))

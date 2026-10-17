@@ -2,13 +2,14 @@ import { act, type ReactNode } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import type { ChapterConsistencyReport, ContinuityFinding } from "@/types/book"
+import { booksApi } from "@/lib/api/books"
 import { FindingsList } from "./analysisPage.findings"
 import { ChapterReportsView } from "./analysisPage.reports"
 
 vi.mock("next/link", () => ({ default: ({ children, href }: { children: ReactNode; href: string }) => <a href={href}>{children}</a> }))
 let root: Root | undefined
 let host: HTMLDivElement
-afterEach(() => { act(() => root?.unmount()); document.body.innerHTML = "" })
+afterEach(() => { act(() => root?.unmount()); document.body.innerHTML = ""; vi.restoreAllMocks() })
 async function render(node: ReactNode) {
   host = document.createElement("div"); document.body.appendChild(host); root = createRoot(host)
   await act(async () => root?.render(node))
@@ -60,5 +61,54 @@ describe("analysis evidence views", () => {
   it("keeps the report empty state actionable", async () => {
     await render(<ChapterReportsView bookId="book" reports={[] as ChapterConsistencyReport[]} isDark />)
     expect(host.querySelector("a")?.getAttribute("href")).toBe("/book/chapters")
+  })
+  it("loads older chapter reports only when requested", async () => {
+    const onLoadMore = vi.fn()
+    await render(<ChapterReportsView bookId="book" reports={[{ chapter_number: 50, chapter_title: "Later", summary: "", new_characters: [], relationship_changes: [], plot_threads_opened: [], plot_threads_resolved: [], continuity_flags: [] }]} hasMore onLoadMore={onLoadMore} isDark />)
+    expect(onLoadMore).not.toHaveBeenCalled()
+    await click("Load older reports")
+    expect(onLoadMore).toHaveBeenCalledOnce()
+  })
+  it("shows passage-backed concerns and distinguishes missing from completed editorial reviews", async () => {
+    const base = { chapter_title: "Opening", summary: "The door opens.", new_characters: [], relationship_changes: [], plot_threads_opened: [], plot_threads_resolved: [], continuity_flags: [] }
+    await render(<ChapterReportsView bookId="book" reports={[
+      { ...base, chapter_number: 1, editorial_concerns: [{ issue: "The decision is abrupt.", evidence: "The door opens.", suggestion: "Show the decision before the door moves." }] },
+      { ...base, chapter_number: 2, editorial_concerns: [] },
+      { ...base, chapter_number: 3, editorial_concerns: null },
+      { ...base, chapter_number: 4, editorial_concerns: [], revision_question: { question: "What does the open door mean for Mara now?", evidence: "The door opens." } },
+    ]} canReprocess isDark />)
+    const articles = host.querySelectorAll("article")
+    expect(articles[0].textContent).toContain("The decision is abrupt.")
+    expect(articles[0].querySelector("blockquote")?.textContent).toBe("The door opens.")
+    expect(articles[1].textContent).toContain("found no chapter-specific problem with supporting evidence")
+    expect(articles[2].textContent).toContain("has not been recorded for this chapter yet")
+    expect(articles[2].querySelector('a[href="/book/manuscript"]')?.textContent).toBe("Open Manuscript Editor")
+    expect(articles[3].textContent).toContain("A question for revision")
+    expect(articles[3].textContent).toContain("What does the open door mean for Mara now?")
+    expect(articles[3].querySelector("blockquote")?.textContent).toBe("The door opens.")
+  })
+  it("starts an older chapter review only after explicit allowance confirmation", async () => {
+    const reprocess = vi.spyOn(booksApi, "reprocessChapter").mockResolvedValue({ book_id: "book", status: "queued", chapters_queued: 1, total_words: 200, upload_charge_consumed: false })
+    const report: ChapterConsistencyReport = { chapter_number: 3, chapter_title: "Departure", summary: "Mara leaves.", new_characters: [], relationship_changes: [], plot_threads_opened: [], plot_threads_resolved: [], continuity_flags: [], editorial_concerns: null }
+    await render(<ChapterReportsView bookId="book" reports={[report]} canReprocess isDark />)
+    expect(reprocess).not.toHaveBeenCalled()
+    await click("Reprocess Chapter 3")
+    expect(host.textContent).toContain("uses processed-word allowance")
+    expect(reprocess).not.toHaveBeenCalled()
+    await click("Cancel")
+    expect(reprocess).not.toHaveBeenCalled()
+    await click("Reprocess Chapter 3")
+    await click("Start chapter reprocess")
+    expect(reprocess).toHaveBeenCalledWith("book", 3)
+    expect(host.textContent).toContain("Chapter 3 reprocessing started")
+  })
+  it("shows a retryable message when chapter reprocessing cannot start", async () => {
+    vi.spyOn(booksApi, "reprocessChapter").mockRejectedValue({ isAxiosError: true, response: { status: 429 } })
+    const report: ChapterConsistencyReport = { chapter_number: 3, chapter_title: "Departure", summary: "Mara leaves.", new_characters: [], relationship_changes: [], plot_threads_opened: [], plot_threads_resolved: [], continuity_flags: [], editorial_concerns: null }
+    await render(<ChapterReportsView bookId="book" reports={[report]} canReprocess isDark />)
+    await click("Reprocess Chapter 3")
+    await click("Start chapter reprocess")
+    expect(host.querySelector('[role="alert"]')?.textContent).toContain("Processing allowance is not available")
+    expect(host.textContent).toContain("Start chapter reprocess")
   })
 })

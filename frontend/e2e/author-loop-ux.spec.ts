@@ -106,6 +106,17 @@ test("revision workflow retains failed decisions and can undo a report dismissal
   expect(tasks.filter((task) => task.id === "revision-task:rev-impact-1")).toHaveLength(1)
 })
 
+test("converted revision tasks can be opened from the confirmation", async ({ page }) => {
+  await installLoop(page)
+  await page.goto(`${path}#revision-control`)
+  const card = page.getByRole("article").filter({ has: page.getByRole("heading", { name: "Chapter 2 assumption may break later payoff", exact: true }) })
+  await card.getByRole("button", { name: /Create task/ }).click()
+  await expect(page.getByRole("status").getByText("Added to your revision queue.")).toBeVisible()
+  await page.getByRole("link", { name: "View tasks", exact: true }).click()
+  await expect(page).toHaveURL(/sky-of-ash--book-1#author-project-tasks$/)
+  await expect(page.locator("#author-project-tasks")).toContainText("Chapter 2 assumption may break later payoff")
+})
+
 test("revision workflow links partial feedback task saves without duplication", async ({ page }) => {
   const state = await installLoop(page); await page.goto(`${path}#beta-consensus`)
   const card = page.getByRole("article").filter({ hasText: "Clarify the gate rule feedback-1" })

@@ -101,19 +101,20 @@ export function CurrentProjectCard({
   const etaDays = hasBookTarget && currentWords !== null && dailyTarget > 0
     ? Math.max(0, Math.ceil(Math.max(0, targetWords - currentWords) / dailyTarget))
     : null
-  const etaDate = etaDays !== null
-    ? new Date(Date.now() + etaDays * 24 * 60 * 60 * 1000).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })
-    : "No target set"
+  const createdAt = new Date(book.created_at)
+  const createdLabel = Number.isNaN(createdAt.getTime())
+    ? null
+    : createdAt.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" })
 
   return (
-    <section className={panelClass(isDark, "h-full p-4 sm:p-5")}>
-      <p className={`text-xs font-medium ${isDark ? "text-slate-400" : "text-stone-500"}`}>Current project</p>
-      <div className="mt-3 grid grid-cols-[4rem_minmax(0,1fr)] items-start gap-4 sm:grid-cols-[7rem_minmax(0,1fr)] sm:gap-5">
+    <section className={panelClass(isDark, "h-full overflow-hidden p-4 sm:p-6")}>
+      <p className={`font-serif text-lg font-semibold ${isDark ? "text-slate-100" : "text-stone-900"}`}>Current project</p>
+      <div className="mt-3 grid grid-cols-[6rem_minmax(0,1fr)] items-start gap-4 sm:grid-cols-[10rem_minmax(0,1fr)] sm:gap-6 lg:grid-cols-[12rem_minmax(0,1fr)]">
         <SmartBookCover
           src={resolvedCoverUrl}
           title={book.title}
           isDark={isDark}
-          className="aspect-[0.72] w-full overflow-hidden rounded-sm"
+          className="aspect-[0.72] w-full max-w-[12rem] overflow-hidden rounded-sm"
           overlay={
             <CoverEditOverlay
               bookId={bookId}
@@ -125,9 +126,11 @@ export function CurrentProjectCard({
         />
         <div className="min-w-0">
           <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-            <h2 className={`break-words text-2xl font-semibold tracking-tight ${isDark ? "text-white" : "text-stone-950"}`}>{book.title}</h2>
-            <span className={`text-xs ${isDark ? "text-slate-400" : "text-stone-500"}`}>{book.work_type === "screenplay" ? "Screenplay" : "Manuscript"}</span>
+            <h2 className={`break-words font-serif text-2xl font-semibold tracking-tight sm:text-3xl ${isDark ? "text-white" : "text-stone-950"}`}>{book.title}</h2>
           </div>
+          <p className={`mt-2 text-xs ${isDark ? "text-slate-400" : "text-stone-500"}`}>
+            {book.work_type === "screenplay" ? "Screenplay" : "Novel"}{book.genre ? ` · ${book.genre}` : ""} · {book.status === "ready" ? "Draft ready" : book.status.replace(/_/g, " ")}
+          </p>
           <p className={`mt-3 max-w-xl break-words text-sm leading-7 ${isDark ? "text-slate-300" : "text-slate-600"}`}>
             {book.public_description?.trim() || (
               currentWords !== null
@@ -161,6 +164,12 @@ export function CurrentProjectCard({
               Resume revision workflow
             </Link>
           </div>
+          <dl className={`mt-5 grid gap-2 border-t pt-4 text-xs sm:grid-cols-2 ${isDark ? "border-white/[0.08]" : "border-stone-200"}`}>
+            {book.genre ? <div><dt className={isDark ? "text-slate-400" : "text-stone-500"}>Genre</dt><dd className="mt-1 font-medium">{book.genre}</dd></div> : null}
+            <div><dt className={isDark ? "text-slate-400" : "text-stone-500"}>Manuscript status</dt><dd className="mt-1 font-medium capitalize">{book.status.replace(/_/g, " ")}</dd></div>
+            {createdLabel ? <div><dt className={isDark ? "text-slate-400" : "text-stone-500"}>Created</dt><dd className="mt-1 font-medium">{createdLabel}</dd></div> : null}
+            {hasBookTarget ? <div><dt className={isDark ? "text-slate-400" : "text-stone-500"}>Manuscript progress</dt><dd className="mt-1 font-medium">{Math.round(manuscriptProgress)}%</dd></div> : null}
+          </dl>
         </div>
       </div>
 
@@ -168,7 +177,7 @@ export function CurrentProjectCard({
         <HeroMetric isDark={isDark} label="Draft progress" value={hasBookTarget ? `${formatNumber(currentWords)} / ${targetWords.toLocaleString()}` : `${formatNumber(currentWords)} words`} note={hasBookTarget ? `${Math.round(manuscriptProgress)}% of target` : "No book target set"} progress={hasBookTarget ? manuscriptProgress : undefined} />
         <HeroMetric isDark={isDark} label="Daily target" value={`${dailyWords.toLocaleString()} / ${dailyTarget.toLocaleString()}`} note="Today's quota" progress={goalProgress} />
         <HeroMetric isDark={isDark} label="Sign-in streak" value={`${loginStreakDays} day${loginStreakDays === 1 ? "" : "s"}`} note="Consecutive login days" />
-        <HeroMetric isDark={isDark} label="Est. completion" value={etaDate} note={etaDays !== null ? (etaDays === 0 ? "Target reached" : `In ${etaDays} day${etaDays === 1 ? "" : "s"}`) : "Set a book target to calculate"} />
+        <HeroMetric isDark={isDark} label="Est. completion" value={etaDays !== null ? (etaDays === 0 ? "Target reached" : `In ${etaDays} day${etaDays === 1 ? "" : "s"}`) : "No target set"} note={etaDays !== null ? "At the current daily target" : "Set a book target to calculate"} />
       </div>
     </section>
   )

@@ -10,6 +10,7 @@ import { useParams, useRouter } from "next/navigation"
 import { ContextualUpgradePrompt } from "@/components/billing/ContextualUpgradePrompt"
 import { CreateFab } from "@/components/overview/CreateFab"
 import { ActivationExperience } from "@/components/reader/ActivationExperience"
+import { WorkspaceModeSwitcher } from "@/components/reader/WorkspaceModeSwitcher"
 import { SUPPORT_HELP_EVENT } from "@/components/ui/ShortcutHelp"
 import { ErrorCard } from "@/components/ui/ErrorCard"
 import { RecentActivityList } from "@/components/ui/RecentActivityList"
@@ -25,7 +26,8 @@ import { useBookModeStore } from "@/lib/stores/bookModeStore"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 import { getBookRouteSegment, normalizeBookRouteId } from "@/lib/utils/bookRoutes"
 import { normalizeProcessingStatus } from "@/lib/utils/processingStatus"
-import type { Book, BookOverviewPayload, GoalCalendarItem, ReaderBootstrapPayload, UserStats, WriterWorkspace } from "@/types/book"
+import { buildGoalCalendarSavePatch, findRevisionTaskSource, patchRevisionIntelligenceItem } from "@/lib/utils/revisionIntelligence"
+import type { Book, BookOverviewPayload, GoalCalendarItem, ReaderBootstrapPayload, RevisionIntelligence, UserStats, WriterWorkspace } from "@/types/book"
 import type { RecentActivityItem } from "@/types/ux"
 
 const AuthorWorkspaceDashboard = dynamic(
@@ -394,6 +396,12 @@ export default function BookOverviewPage() {
   const shouldShowAuthorWorkspace = activeBookMode === "author" && canUsePaidAuthorTools
   const processingSummary = getProcessingSummary(book)
   const normalizedProcessingStatus = normalizeProcessingStatus(book?.processing, book)
+  const showActivationExperience = Boolean(
+    shouldShowAuthorWorkspace
+      && revisionIntelligence?.activation
+      && !revisionIntelligence.activation.completed
+      && (!normalizedProcessingStatus || normalizedProcessingStatus.ready),
+  )
   const unitTitle = storyUnitTitle(book?.work_type)
   const unitPrefix = storyUnitPrefix(book?.work_type)
   const chapters = chapterList?.chapters ?? []
@@ -482,15 +490,34 @@ export default function BookOverviewPage() {
     }
   }
 
-  const saveGoalCalendar = async (goalCalendar: GoalCalendarItem[]) =>
-    saveWorkspacePatch(
-      { goal_calendar: goalCalendar },
+  const saveGoalCalendar = async (goalCalendar: GoalCalendarItem[]) => {
+    if (!writerWorkspace) return false
+    const { patch, removedTaskIds } = buildGoalCalendarSavePatch(writerWorkspace, goalCalendar)
+    const saved = await saveWorkspacePatch(
+      patch,
       {
         saving: "Saving planner...",
         success: "Planner saved.",
         error: "Could not save planner changes.",
       }
     )
+    if (saved && removedTaskIds.length > 0) {
+      const revisionKey = asQueryKey(bookCacheKey(bookId, "revision-intelligence"))
+      queryClient.setQueryData<RevisionIntelligence | undefined>(revisionKey, (current) => {
+        if (!current) return current
+        return removedTaskIds.reduce((updated, taskId) => {
+          const source = findRevisionTaskSource(updated, taskId)
+          return source
+            ? patchRevisionIntelligenceItem(updated, source.id, {
+                task_id: null,
+                status: source.status === "task_created" ? "pending" : source.status,
+              })
+            : updated
+        }, current)
+      })
+    }
+    return saved
+  }
 
   const continueReading = () => {
     navigateWithMemory(`/${bookId}/chapter/${continueChapter}`)
@@ -609,6 +636,15 @@ export default function BookOverviewPage() {
               state={book?.is_public || book?.public_status === "published" ? "public_sample" : isCollaboratorSession ? "shared" : "private"}
             />
             <div className="flex items-center gap-2">
+              {showActivationExperience ? (
+                <WorkspaceModeSwitcher
+                  isDark={isDark}
+                  activeMode={activeBookMode}
+                  modeSaving={modeSaving}
+                  writingAvailable={canUseAuthorWorkspace && canSwitchWorkspaceMode}
+                  onModeChange={updateMode}
+                />
+              ) : null}
               <button type="button" onClick={() => window.dispatchEvent(new CustomEvent(SUPPORT_HELP_EVENT))} className="min-h-10 rounded-sm border border-border px-3 text-sm font-medium">Help</button>
               {shouldShowAuthorWorkspace && canEditSharedManuscript ? <CreateFab inline bookId={bookId} isDark={isDark} onAddScene={openAddSceneFlow} onNavigate={navigateWithMemory} /> : null}
             </div>
@@ -660,9 +696,7 @@ export default function BookOverviewPage() {
               onNavigate={navigateWithMemory}
               onContinueReading={continueReading}
             />
-          ) : revisionIntelligence?.activation
-            && !revisionIntelligence.activation.completed
-            && (!normalizedProcessingStatus || normalizedProcessingStatus.ready) ? (
+          ) : showActivationExperience && revisionIntelligence ? (
             <ActivationExperience
               bookId={bookId}
               bookCreatedAt={book?.created_at}

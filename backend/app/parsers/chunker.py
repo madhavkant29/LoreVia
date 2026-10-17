@@ -96,27 +96,34 @@ def chunk_text(
         if paragraph_tokens > max_tokens:
             oversized_parts = _split_large_paragraph(paragraph, max_tokens)
             for part in oversized_parts:
-                part_tokens = count_tokens(part)
-                if current and current_tokens + part_tokens > max_tokens:
+                if current and count_tokens("\n\n".join([*current, part])) > max_tokens:
                     chunks.append("\n\n".join(current))
                     current, current_tokens = _paragraph_overlap(current, overlap)
+                    while current and count_tokens("\n\n".join([*current, part])) > max_tokens:
+                        current.pop(0)
                 current.append(part)
-                current_tokens += part_tokens
+                current_tokens = count_tokens("\n\n".join(current))
             continue
 
         # Hard cap: if adding would exceed max, flush now.
-        if current and current_tokens + paragraph_tokens > max_tokens:
+        if current and count_tokens("\n\n".join([*current, paragraph])) > max_tokens:
             chunks.append("\n\n".join(current))
             current, current_tokens = _paragraph_overlap(current, overlap)
+            while current and count_tokens("\n\n".join([*current, paragraph])) > max_tokens:
+                current.pop(0)
+            current_tokens = count_tokens("\n\n".join(current))
 
         # Soft target: once we have reached the target and we have a reasonably sized chunk,
         # we prefer to flush before adding the next paragraph (so chunk sizes stay consistent).
         if current and current_tokens >= target_tokens and current_tokens >= min_tokens:
             chunks.append("\n\n".join(current))
             current, current_tokens = _paragraph_overlap(current, overlap)
+            while current and count_tokens("\n\n".join([*current, paragraph])) > max_tokens:
+                current.pop(0)
+            current_tokens = count_tokens("\n\n".join(current))
 
         current.append(paragraph)
-        current_tokens += paragraph_tokens
+        current_tokens = count_tokens("\n\n".join(current))
 
     if current:
         chunks.append("\n\n".join(current))
@@ -157,7 +164,6 @@ def _split_large_paragraph(paragraph: str, max_tokens: int) -> list[str]:
 
     parts: list[str] = []
     current: list[str] = []
-    current_tokens = 0
 
     for sentence in sentences:
         sentence_tokens = count_tokens(sentence)
@@ -165,17 +171,14 @@ def _split_large_paragraph(paragraph: str, max_tokens: int) -> list[str]:
             if current:
                 parts.append(" ".join(current))
                 current = []
-                current_tokens = 0
             parts.extend(_split_oversized_sentence(sentence, max_tokens))
             continue
 
-        if current and current_tokens + sentence_tokens > max_tokens:
+        if current and count_tokens(" ".join([*current, sentence])) > max_tokens:
             parts.append(" ".join(current))
             current = []
-            current_tokens = 0
 
         current.append(sentence)
-        current_tokens += sentence_tokens
 
     if current:
         parts.append(" ".join(current))
@@ -208,6 +211,12 @@ def _split_oversized_sentence(sentence: str, max_tokens: int) -> list[str]:
     current: list[str] = []
 
     for word in words:
+        if count_tokens(word) > max_tokens:
+            if current:
+                parts.append(" ".join(current).strip())
+                current = []
+            parts.extend(_split_oversized_word(word, max_tokens))
+            continue
         candidate = " ".join([*current, word]).strip()
         if current and count_tokens(candidate) > max_tokens:
             parts.append(" ".join(current).strip())
@@ -219,6 +228,25 @@ def _split_oversized_sentence(sentence: str, max_tokens: int) -> list[str]:
         parts.append(" ".join(current).strip())
 
     return [part for part in parts if part]
+
+
+def _split_oversized_word(word: str, max_tokens: int) -> list[str]:
+    """Keep unusually long unspaced text within the token cap without dropping characters."""
+    parts: list[str] = []
+    start = 0
+    while start < len(word):
+        low, high = start + 1, len(word)
+        end = start + 1
+        while low <= high:
+            middle = (low + high) // 2
+            if count_tokens(word[start:middle]) <= max_tokens:
+                end = middle
+                low = middle + 1
+            else:
+                high = middle - 1
+        parts.append(word[start:end])
+        start = end
+    return parts
 
 
 def _sentence_segments(paragraph: str) -> list[str]:

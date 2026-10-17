@@ -2,6 +2,7 @@
 Analysis consumer: summaries + plot tracking for one chapter.
 """
 
+import json
 import logging
 import time
 import uuid
@@ -268,6 +269,15 @@ async def _analyse_chapter_in_generation(
                 if summary_payload is not None:
                     detailed_payload = cast(dict[str, Any], summary_payload)
                     summary_payloads["detailed"] = detailed_payload
+                    summary_payloads["editorial_note"] = {
+                        "content": json.dumps(
+                            {
+                                "concerns": detailed_payload.get("editorial_concerns") or [],
+                                "revision_question": detailed_payload.get("revision_question"),
+                            },
+                            ensure_ascii=False,
+                        )
+                    }
             if detailed_payload is not None:
                 derived_payloads = derive_summary_modes_from_detailed(detailed_payload)
                 for mode in ("short", "key_points"):
@@ -421,7 +431,7 @@ async def _analyse_chapter_in_generation(
                         .all()
                     )
                     for cached_chapter_id in chapter_ids:
-                        for mode in ("short", "detailed", "key_points"):
+                        for mode in ("short", "detailed", "key_points", "editorial_note"):
                             await cache_del(key_chapter_summary(str(cached_chapter_id), mode))
             else:
                 for mode in persisted_modes:

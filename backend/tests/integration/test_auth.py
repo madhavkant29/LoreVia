@@ -29,6 +29,17 @@ def cookie_auth_headers(*cookies: str, csrf_token: str | None = None) -> dict[st
 
 
 @pytest.mark.asyncio
+async def test_csrf_bootstrap_sets_a_browser_readable_cookie(client):
+    response = await client.get("/api/v1/auth/csrf")
+
+    assert response.status_code == 204
+    assert any(
+        header.startswith("lorevia_csrf=")
+        for header in response.headers.get_list("set-cookie")
+    )
+
+
+@pytest.mark.asyncio
 async def test_register_requires_email_verification_before_login(client):
     r = await client.post(
         "/api/v1/auth/register",

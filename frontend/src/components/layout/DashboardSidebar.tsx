@@ -5,11 +5,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
 import type { Route } from "next"
 import { usePathname } from "next/navigation"
-import { Globe2 } from "lucide-react"
 
 import { Button } from "@/components/ui/Button"
 import { booksApi } from "@/lib/api/books"
-import { supportApi } from "@/lib/api/support"
 import { BrandLockup } from "@/components/layout/BrandLockup"
 import { ChatLauncher } from "@/components/layout/ChatLauncher"
 import { NotificationBell } from "@/components/layout/NotificationBell"
@@ -74,7 +72,6 @@ export function DashboardSidebar({ children }: { children: ReactNode }) {
   const [mobileOpen, setMobileOpen] = useState(false)
   const [desktopNav, setDesktopNav] = useState(false)
   const [badgeQueriesEnabled, setBadgeQueriesEnabled] = useState(false)
-  const [communityUrl, setCommunityUrl] = useState<string | null>(null)
   const libraryPrefetchedRef = useRef(false)
   const pathname = usePathname()
   const focusedBilling = pathname === "/upgrade"
@@ -82,7 +79,10 @@ export function DashboardSidebar({ children }: { children: ReactNode }) {
   const showUserChrome = authHydrated && !!user
   const navItems = useMemo<NavItem[]>(() => {
     const resolved = resolveWorkspaceTools(DASHBOARD_TOOLS, {
-      mode: uiPreferences.complexity_mode ?? "focused",
+      // Keep the dashboard navigation complete. Explicit user visibility
+      // preferences still apply, while focused mode continues to control
+      // book-level tools and other contextual surfaces.
+      mode: "standard",
       activePath: pathname,
       globalPreference: uiPreferences,
       placement: "dashboard",
@@ -135,19 +135,6 @@ export function DashboardSidebar({ children }: { children: ReactNode }) {
 
     return () => cancelEnablement(handle)
   }, [authHydrated, badgeQueriesEnabled, focusedBilling, user])
-
-  useEffect(() => {
-    if (!showUserChrome || focusedBilling) return
-    let cancelled = false
-    void supportApi.config().then((config) => {
-      if (!cancelled) setCommunityUrl(config.community_url)
-    }).catch(() => {
-      if (!cancelled) setCommunityUrl(null)
-    })
-    return () => {
-      cancelled = true
-    }
-  }, [focusedBilling, showUserChrome])
 
   const profileInitial = useMemo(() => {
     const source = user?.username || user?.email || "?"
@@ -224,20 +211,6 @@ export function DashboardSidebar({ children }: { children: ReactNode }) {
                 onLibraryPrefetch={item.id === "dashboard.library" ? handleLibraryPrefetch : undefined}
               />
             ))}
-            {communityUrl ? (
-              <a
-                href={communityUrl}
-                target="_blank"
-                rel="noreferrer"
-                title="Open the LoreVia Discord community in a new tab."
-                aria-label="Community: open the LoreVia Discord community in a new tab"
-                onClick={() => setMobileOpen(false)}
-                className="group relative flex min-h-12 items-center gap-3 rounded-sm px-4 text-sm font-medium text-[rgb(var(--muted-foreground))] transition-colors hover:bg-stone-200/70 hover:text-stone-950 dark:hover:bg-white/[0.05] dark:hover:text-white"
-              >
-                <span className="text-current"><Globe2 className="h-5 w-5" aria-hidden="true" /></span>
-                <span>Community</span>
-              </a>
-            ) : null}
           </div>
         </nav>
 

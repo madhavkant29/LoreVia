@@ -37,7 +37,6 @@ async def get_support_config(current_user=Depends(get_current_user)):
     corpus_version, _articles = load_support_corpus()
     return SupportConfigOut(
         assistant_enabled=settings.SUPPORT_ASSISTANT_ENABLED,
-        community_url=settings.COMMUNITY_DISCORD_URL or None,
         corpus_version=corpus_version,
     )
 

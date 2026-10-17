@@ -81,6 +81,14 @@ export function NotificationsPanel({ mode = "sidebar", enabled = true }: { mode?
     await refresh()
   }
 
+  function handleMarkRead(id: string) {
+    void markRead(id).catch(() => undefined)
+  }
+
+  function handleMarkAllRead() {
+    void markAllRead().catch(() => undefined)
+  }
+
   return (
     <section className={`flex h-full flex-col ${mode === "sidebar" ? "" : "mx-auto max-w-4xl border-x"} ${border}`}>
       <header className={`flex items-start justify-between gap-4 border-b px-5 py-5 ${border}`}>
@@ -88,7 +96,7 @@ export function NotificationsPanel({ mode = "sidebar", enabled = true }: { mode?
           <h1 className={`text-xl font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>Notifications</h1>
           <p className={`mt-1 text-sm ${muted}`}>{unreadCount > 0 ? `${unreadCount} unread update${unreadCount === 1 ? "" : "s"}` : "You’re up to date"}</p>
         </div>
-        <button type="button" onClick={markAllRead} disabled={unreadCount === 0} className={`border px-3 py-2 text-xs font-medium transition disabled:opacity-50 ${isDark ? "border-white/10 text-slate-200 hover:bg-white/5" : "border-stone-300 text-stone-700 hover:bg-stone-50"}`}>
+        <button type="button" onClick={handleMarkAllRead} disabled={unreadCount === 0} className={`border px-3 py-2 text-xs font-medium transition disabled:opacity-50 ${isDark ? "border-white/10 text-slate-200 hover:bg-white/5" : "border-stone-300 text-stone-700 hover:bg-stone-50"}`}>
           Mark all read
         </button>
       </header>
@@ -118,18 +126,18 @@ export function NotificationsPanel({ mode = "sidebar", enabled = true }: { mode?
                       <p className={`mt-1 text-sm leading-6 ${muted}`}>{item.body}</p>
                     </div>
                     {unread ? (
-                      <button type="button" onClick={() => void markRead(item.id)} className={`w-fit text-xs font-medium hover:underline ${muted}`}>Mark read</button>
+                      <button type="button" onClick={() => handleMarkRead(item.id)} className={`w-fit text-xs font-medium hover:underline ${muted}`}>Mark read</button>
                     ) : null}
                   </div>
 
                   {item.kind === "friend_request" && requestId ? (
                     <div className="mt-3 flex flex-wrap gap-2">
-                      <button type="button" onClick={() => void acceptFriendRequest(item, requestId)} className="bg-emerald-700 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-600">Accept</button>
-                      <button type="button" onClick={() => void declineFriendRequest(item, requestId)} className={`border px-3 py-2 text-xs font-semibold ${isDark ? "border-white/10 text-slate-200" : "border-stone-300 text-stone-700"}`}>Decline</button>
+                      <button type="button" onClick={() => void acceptFriendRequest(item, requestId).catch(() => undefined)} className="bg-emerald-700 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-600">Accept</button>
+                      <button type="button" onClick={() => void declineFriendRequest(item, requestId).catch(() => undefined)} className={`border px-3 py-2 text-xs font-semibold ${isDark ? "border-white/10 text-slate-200" : "border-stone-300 text-stone-700"}`}>Decline</button>
                     </div>
                   ) : (
                     <div className="mt-3 flex flex-wrap gap-4">
-                      {href ? <Link href={href as Route} onClick={() => void markRead(item.id)} className={`text-sm font-semibold hover:underline ${isDark ? "text-teal-300" : "text-teal-700"}`}>Open</Link> : null}
+                      {href ? <Link href={href as Route} onClick={() => handleMarkRead(item.id)} className={`text-sm font-semibold hover:underline ${isDark ? "text-teal-300" : "text-teal-700"}`}>Open</Link> : null}
                       {detailSupported(item) ? <button type="button" onClick={() => void toggleDetails(item)} className={`text-sm font-medium hover:underline ${muted}`}>{expandedId === item.id ? "Hide details" : "View details"}</button> : null}
                     </div>
                   )}

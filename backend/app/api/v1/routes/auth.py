@@ -54,7 +54,7 @@ from app.utils.auth_cookies import (
     resolve_device_id,
     resolve_device_id_optional,
 )
-from app.utils.auth_csrf import enforce_cookie_csrf
+from app.utils.auth_csrf import enforce_cookie_csrf, set_auth_csrf_cookie
 from app.utils.auth_utils import (
     current_token_version,
     get_user_for_auth_subject,
@@ -72,6 +72,12 @@ router.include_router(auth_account.router)
 log = logging.getLogger("lorevia.auth")
 LEGAL_VERSION = "2026-04"
 SUPABASE_OAUTH_PERSISTENCE_EXCEPTIONS = (RuntimeError, ValueError, SQLAlchemyError)
+
+
+@router.get("/csrf", status_code=204)
+async def csrf(response: Response) -> None:
+    """Issue a browser-readable CSRF cookie before the first unsafe request."""
+    set_auth_csrf_cookie(response)
 
 
 @router.post("/register", response_model=RegisterOut, status_code=201)

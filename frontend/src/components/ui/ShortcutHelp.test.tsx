@@ -7,8 +7,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { ShortcutHelp, SUPPORT_HELP_EVENT } from "./ShortcutHelp"
 
 const askMock = vi.hoisted(() => vi.fn())
-const configMock = vi.hoisted(() => vi.fn())
-const createIncidentMock = vi.hoisted(() => vi.fn())
 const guidesMock = vi.hoisted(() => vi.fn())
 const dismissGuidanceMock = vi.hoisted(() => vi.fn())
 const restartGuidanceMock = vi.hoisted(() => vi.fn())
@@ -22,8 +20,6 @@ vi.mock("next/navigation", () => ({
 vi.mock("@/lib/api/support", () => ({
   supportApi: {
     ask: askMock,
-    config: configMock,
-    createIncident: createIncidentMock,
     guides: guidesMock,
   },
 }))
@@ -58,11 +54,6 @@ async function flush() {
 describe("ShortcutHelp support assistant", () => {
   beforeEach(() => {
     pathnameMock.mockReturnValue("/book-1/chapters")
-    configMock.mockResolvedValue({
-      assistant_enabled: true,
-      community_url: "https://discord.gg/mjuWtTWSh",
-      corpus_version: "support-v1",
-    })
     guidesMock.mockResolvedValue([
       {
         slug: "saving-a-chapter",
@@ -80,7 +71,6 @@ describe("ShortcutHelp support assistant", () => {
       escalation_available: true,
       declined: false,
     })
-    createIncidentMock.mockResolvedValue({ reference: "LV-12345678" })
   })
 
   afterEach(() => {
@@ -146,7 +136,7 @@ describe("ShortcutHelp support assistant", () => {
     expect(JSON.stringify(askMock.mock.calls[0][1])).not.toContain("pasted a chapter")
     expect(document.body.textContent).toContain("Your draft stays local")
     expect(document.body.textContent).toContain("Save or recover a chapter")
-    expect(document.body.textContent).toContain("Join Discord")
+    expect(document.body.textContent).not.toContain("Join Discord")
 
     await act(async () => {
       const valueSetter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set
@@ -191,5 +181,46 @@ describe("ShortcutHelp support assistant", () => {
     expect(document.body.textContent).toContain("LoreVia Support")
     expect(document.body.querySelector("#lorevia-support-question")).toBe(textarea)
     expect(document.body.querySelectorAll('[role="dialog"]')).toHaveLength(1)
+  })
+
+  it("links support cases to a Gmail draft addressed to LoreVia support", async () => {
+    renderShortcutHelp()
+
+    await act(async () => {
+      document.body.querySelector('button[aria-label="Help"]')?.dispatchEvent(new MouseEvent("click", { bubbles: true }))
+      await Promise.resolve()
+    })
+    await flush()
+
+    const supportLink = Array.from(document.body.querySelectorAll("a"))
+      .find((link) => link.textContent?.trim() === "Create support case")
+
+    expect(supportLink?.getAttribute("href")).toContain("https://mail.google.com/mail/?view=cm&fs=1")
+    expect(supportLink?.getAttribute("href")).toContain(encodeURIComponent("support@getlorevia.com"))
+    expect(supportLink?.getAttribute("target")).toBe("_blank")
+    expect(decodeURIComponent(supportLink?.getAttribute("href") ?? "")).toContain("Route: /book-1/chapters")
+  })
+
+  it("opens a project guide that explains regular and advanced pages", async () => {
+    renderShortcutHelp()
+
+    await act(async () => {
+      document.body.querySelector('button[aria-label="Help"]')?.dispatchEvent(new MouseEvent("click", { bubbles: true }))
+      await Promise.resolve()
+    })
+    await flush()
+
+    const guideButton = Array.from(document.body.querySelectorAll("button"))
+      .find((button) => button.textContent?.trim() === "Guide")
+    await act(async () => {
+      guideButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }))
+      await Promise.resolve()
+    })
+
+    expect(document.body.textContent).toContain("Project guide")
+    expect(document.body.textContent).toContain("Manuscript Editor")
+    expect(document.body.textContent).toContain("Setup & Payoff")
+    expect(document.body.textContent).toContain("Series Wiki")
+    expect(document.body.textContent).toContain("Advanced")
   })
 })

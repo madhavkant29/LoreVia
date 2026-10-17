@@ -1,3 +1,4 @@
+import json
 import uuid
 from datetime import UTC, datetime, timedelta
 
@@ -13,6 +14,109 @@ from app.models.intelligence import BookChunk, ChapterSummary, ContinuityScan
 from app.models.operations import AiQualityEvent
 from app.services.continuity.scan_service import _claim_full_scan_authority
 from app.utils.books.manuscript import persist_editor_chapter_content
+
+
+@pytest.mark.asyncio
+async def test_chapter_reports_distinguish_an_unreviewed_chapter_from_a_completed_editorial_pass(
+    client, db, auth_headers
+):
+    me = await client.get("/api/v1/auth/me", headers=auth_headers)
+    book = Book(
+        user_id=uuid.UUID(me.json()["id"]),
+        title="Review coverage",
+        format="manual",
+        work_type="novel",
+        s3_key="books/review-coverage.txt",
+        status="ready",
+        mode="author",
+    )
+    db.add(book)
+    await db.flush()
+    first = Chapter(book_id=book.id, number=1, title="Opening", s3_key="chapters/review-coverage/1.txt")
+    second = Chapter(book_id=book.id, number=2, title="Departure", s3_key="chapters/review-coverage/2.txt")
+    db.add_all([first, second])
+    await db.flush()
+    db.add(ChapterSummary(
+        chapter_id=second.id,
+        mode="editorial_note",
+        content=json.dumps([{
+            "issue": "The departure has no decision beat.",
+            "evidence": "Mara left the harbor.",
+            "suggestion": "Show the choice that sends her away.",
+        }]),
+    ))
+    await db.commit()
+
+    response = await client.get(f"/api/v1/books/{book.id}/chapter-reports", headers=auth_headers)
+
+    assert response.status_code == 200
+    assert [report["chapter_number"] for report in response.json()] == [2, 1]
+    assert response.json()[0]["editorial_concerns"][0]["evidence"] == "Mara left the harbor."
+    assert response.json()[1]["editorial_concerns"] is None
+    newest = await client.get(f"/api/v1/books/{book.id}/chapter-reports?limit=1", headers=auth_headers)
+    older = await client.get(
+        f"/api/v1/books/{book.id}/chapter-reports?limit=1&before_chapter=2",
+        headers=auth_headers,
+    )
+    assert [item["chapter_number"] for item in newest.json()] == [2]
+    assert [item["chapter_number"] for item in older.json()] == [1]
+    no_more = await client.get(
+        f"/api/v1/books/{book.id}/chapter-reports?limit=1&before_chapter=1",
+        headers=auth_headers,
+    )
+    invalid_cursor = await client.get(
+        f"/api/v1/books/{book.id}/chapter-reports?before_chapter=0",
+        headers=auth_headers,
+    )
+    assert no_more.json() == []
+    assert invalid_cursor.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_chapter_reports_return_a_grounded_question_separately_from_a_problem(
+    client, db, auth_headers
+):
+    me = await client.get("/api/v1/auth/me", headers=auth_headers)
+    book = Book(
+        user_id=uuid.UUID(me.json()["id"]),
+        title="Revision question coverage",
+        format="manual",
+        work_type="novel",
+        s3_key="books/revision-question-coverage.txt",
+        status="ready",
+        mode="author",
+    )
+    db.add(book)
+    await db.flush()
+    chapter = Chapter(
+        book_id=book.id,
+        number=1,
+        title="Departure",
+        s3_key="chapters/revision-question-coverage/1.txt",
+    )
+    db.add(chapter)
+    await db.flush()
+    db.add(ChapterSummary(
+        chapter_id=chapter.id,
+        mode="editorial_note",
+        content=json.dumps({
+            "concerns": [],
+            "revision_question": {
+                "question": "What does Mara hope the departure will change?",
+                "evidence": "Mara left the harbor at dawn.",
+            },
+        }),
+    ))
+    await db.commit()
+
+    response = await client.get(f"/api/v1/books/{book.id}/chapter-reports", headers=auth_headers)
+
+    assert response.status_code == 200
+    assert response.json()[0]["editorial_concerns"] == []
+    assert response.json()[0]["revision_question"] == {
+        "question": "What does Mara hope the departure will change?",
+        "evidence": "Mara left the harbor at dawn.",
+    }
 
 
 @pytest.mark.asyncio

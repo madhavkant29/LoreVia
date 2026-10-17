@@ -147,18 +147,18 @@
       "error_codes": ["plan_locked", "permission_denied", "rate_limited"]
     },
     {
-      "slug": "service-status-community-and-human-support",
-      "title": "Service status, Discord, and human support",
-      "summary": "Check a problem, join the LoreVia Discord community, or create a redacted human-support case.",
+      "slug": "service-status-and-human-support",
+      "title": "Service status and human support",
+      "summary": "Check a problem or create a redacted human-support case.",
       "audience": ["all"],
       "routes": ["/settings"],
       "workspace": "all",
       "plan_notes": "Available on every plan.",
       "permission_notes": "Creating a support case always requires your confirmation.",
-      "keywords": ["status", "down", "outage", "discord", "community", "human support", "case", "troubleshooting", "how to", "where is", "find", "access", "open", "problem", "issue", "error", "bug"],
+      "keywords": ["status", "down", "outage", "human support", "case", "troubleshooting", "how to", "where is", "find", "access", "open", "problem", "issue", "error", "bug"],
       "tool_ids": [],
-      "steps": ["Retry once and note the safe error code or request ID.", "Use Ask Support for a guided answer based on LoreVia documentation.", "Create a support case only after reviewing the redacted summary.", "Join Discord for general community discussion; do not post private manuscript text or account details."],
-      "warnings": ["Discord is a community space, not a private support channel."],
+      "steps": ["Retry once and note the safe error code or request ID.", "Use Ask Support for a guided answer based on LoreVia documentation.", "Create a support case only after reviewing the redacted summary."],
+      "warnings": ["Do not include private manuscript text, passwords, payment details, or access tokens in a support case."],
       "deep_links": [{"label": "Open Settings", "href": "/settings"}],
       "error_codes": ["offline", "storage_failure", "unexpected_failure"]
     }

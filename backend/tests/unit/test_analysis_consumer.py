@@ -335,7 +335,10 @@ async def test_manual_analyse_chapter_refreshes_all_summary_modes_after_commit(m
         "chapter_id": str(chapter.id),
         "summaries": {"short": "generated", "detailed": "generated", "key_points": "generated"},
     }
-    assert len(db.added) == 3
+    assert len(db.added) == 4
+    assert next(row.content for row in db.added if row.mode == "editorial_note") == (
+        '{"concerns": [], "revision_question": null}'
+    )
     assert chapter.analysis_state["status"] == "succeeded"
     assert chapter.title == "Gate Opens"
     assert book.writer_workspace["processing"]["pipeline"]["analysis"]["status"] == "succeeded"

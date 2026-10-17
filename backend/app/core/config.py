@@ -318,11 +318,8 @@ class Settings(BaseSettings):
     DEVICE_TRIAL_ENFORCEMENT_ENABLED: bool = True
     DEVICE_TRIAL_MAX_ACCOUNTS: int = 2
 
-    # User help and community. The invite is deliberately application
-    # configuration (not a manuscript or account secret) so every client gets
-    # the same durable destination.
+    # User help.
     SUPPORT_ASSISTANT_ENABLED: bool = True
-    COMMUNITY_DISCORD_URL: str = "https://discord.gg/mjuWtTWSh"
 
     # Cloudflare Tunnel
     CLOUDFLARE_TUNNEL_TOKEN: str | None = None  # Option 1 security

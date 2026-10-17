@@ -16,6 +16,7 @@ from app.models.book import Chapter
 from app.models.intelligence import ChapterSummary
 
 SUMMARY_MODES = ("short", "detailed", "key_points")
+PERSISTED_SUMMARY_MODES = (*SUMMARY_MODES, "editorial_note")
 
 
 def summary_modes_to_generate(
@@ -25,7 +26,10 @@ def summary_modes_to_generate(
 ) -> list[str]:
     if force_regenerate:
         return list(SUMMARY_MODES)
-    return [mode for mode in SUMMARY_MODES if mode not in existing_modes]
+    missing_modes = [mode for mode in SUMMARY_MODES if mode not in existing_modes]
+    if "detailed" in existing_modes and "editorial_note" not in existing_modes:
+        missing_modes.append("detailed")
+    return missing_modes
 
 
 async def persist_chapter_summary_payloads(
@@ -35,7 +39,7 @@ async def persist_chapter_summary_payloads(
     payloads: Mapping[str, Mapping[str, Any]],
 ) -> list[str]:
     """Replace generated summary modes without deleting the last good rows first."""
-    requested_modes = [mode for mode in SUMMARY_MODES if mode in payloads]
+    requested_modes = [mode for mode in PERSISTED_SUMMARY_MODES if mode in payloads]
     if not requested_modes:
         return []
 

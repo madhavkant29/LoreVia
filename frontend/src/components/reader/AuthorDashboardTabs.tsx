@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import type { Route } from "next"
 import Link from "next/link"
 
@@ -12,7 +12,9 @@ import type { IconName, WorkspaceSaveState } from "@/components/overview/types"
 import { formatPlannerDate } from "@/components/overview/utils"
 import { WritingStreakCard } from "@/components/overview/WritingStreakCard"
 import { RevisionIntelligencePanel } from "@/components/revision/RevisionIntelligencePanel"
+import { Dialog } from "@/components/ui/Dialog"
 import { ErrorCard } from "@/components/ui/ErrorCard"
+import { findRevisionTaskSource } from "@/lib/utils/revisionIntelligence"
 import type {
   GoalCalendarItem,
   PreWritingCheck,
@@ -41,6 +43,8 @@ export function AuthorOverviewTab({
   weeklyLoginActivity,
   totalRevisionItems,
   highSeverityItems,
+  canOpenManuscript,
+  onOpenStats,
   chapters,
   unitTitle,
   onNavigate,
@@ -58,8 +62,10 @@ export function AuthorOverviewTab({
   dailyTarget: number
   loginStreakDays: number
   weeklyLoginActivity: boolean[]
-  totalRevisionItems: number
-  highSeverityItems: number
+  totalRevisionItems: number | null
+  highSeverityItems: number | null
+  canOpenManuscript: boolean
+  onOpenStats: () => void
   chapters: ChapterListResponse["chapters"]
   unitTitle: string
   onNavigate: (href: string) => void
@@ -74,7 +80,7 @@ export function AuthorOverviewTab({
   const latestChapter = chapters[chapters.length - 1]
 
   return (
-    <div className="grid gap-5 xl:auto-rows-fr xl:grid-cols-[minmax(0,0.86fr)_minmax(0,0.92fr)_minmax(0,1fr)]">
+    <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,0.9fr)_minmax(0,0.9fr)]">
       <ProjectOverviewCard
         isDark={isDark}
         currentWords={currentWords}
@@ -87,9 +93,9 @@ export function AuthorOverviewTab({
         <div className="mt-5 space-y-3">
           <CompactProgressRow isDark={isDark} label="Draft progress" value={`${Math.round(manuscriptProgress)}%`} percent={manuscriptProgress} />
           <CompactProgressRow isDark={isDark} label="Daily quota" value={`${dailyWords.toLocaleString()} / ${dailyTarget.toLocaleString()}`} percent={(dailyWords / dailyTarget) * 100} />
-          <InfoLine isDark={isDark} label="Active revision items" value={String(totalRevisionItems)} />
+          <InfoLine isDark={isDark} label="Active revision items" value={totalRevisionItems === null ? "Not available" : String(totalRevisionItems)} />
           <InfoLine isDark={isDark} label="Last written" value={latestChapter ? `${unitTitle} ${latestChapter.number}` : "No chapter activity"} />
-          <button type="button" onClick={() => onNavigate(`/${bookId}/reports`)} className={footerLinkClass(isDark)}>
+          <button type="button" onClick={onOpenStats} className={footerLinkClass(isDark)}>
             View workspace stats <Icon name="chevron" />
           </button>
         </div>
@@ -97,8 +103,8 @@ export function AuthorOverviewTab({
       <section className={panelClass(isDark, "h-full p-4 sm:p-5")}>
         <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-300" : "text-slate-600"}`}>Up next</p>
         <div className="mt-5 space-y-3">
-          <ActionRow isDark={isDark} icon="pen" title="Continue writing" body={latestChapter ? `${unitTitle} ${latestChapter.number}` : "Open manuscript"} onClick={onOpenManuscript} />
-          <ActionRow isDark={isDark} icon="timeline" title="Review high severity risks" body={`${highSeverityItems} item${highSeverityItems === 1 ? "" : "s"} need attention`} onClick={() => onNavigate(`/${bookId}/analysis`)} tone="amber" />
+          {canOpenManuscript ? <ActionRow isDark={isDark} icon="pen" title="Continue writing" body={latestChapter ? `${unitTitle} ${latestChapter.number}` : "Open manuscript"} onClick={onOpenManuscript} /> : null}
+          <ActionRow isDark={isDark} icon="timeline" title="Review high severity risks" body={highSeverityItems === null ? "Open the revision report" : `${highSeverityItems} item${highSeverityItems === 1 ? "" : "s"} need attention`} onClick={() => onNavigate(`/${bookId}/analysis`)} tone="amber" />
           <ActionRow isDark={isDark} icon="analysis" title="Run story health scan" body="Open the current report" onClick={() => onNavigate(`/${bookId}/analysis`)} tone="teal" />
           <div className="pt-2">
             <WritingStreakCard isDark={isDark} streakDays={loginStreakDays} weekActivity={weeklyLoginActivity} compact />
@@ -532,6 +538,7 @@ export function RevisionHubTab({
 export function PlanningTab({
   isDark,
   writerWorkspace,
+  revisionIntelligence,
   currentWords,
   targetWords,
   chapterCount,
@@ -547,6 +554,7 @@ export function PlanningTab({
 }: {
   isDark: boolean
   writerWorkspace: WriterWorkspace | null
+  revisionIntelligence: RevisionIntelligence | null
   currentWords: number | null
   targetWords: number | null
   chapterCount: number | null
@@ -560,6 +568,11 @@ export function PlanningTab({
   writerWorkspaceError?: boolean
   onRetryWriterWorkspace?: () => void
 }) {
+  const [selectedTaskSnapshot, setSelectedTaskSnapshot] = useState<GoalCalendarItem | null>(null)
+  const [confirmTaskDelete, setConfirmTaskDelete] = useState(false)
+  const [deletingTask, setDeletingTask] = useState(false)
+  const [taskDeleteError, setTaskDeleteError] = useState(false)
+  const taskListRef = useRef<HTMLElement>(null)
   if (writerWorkspaceError && !writerWorkspace && onRetryWriterWorkspace) {
     return (
       <ErrorCard
@@ -576,6 +589,34 @@ export function PlanningTab({
     ? Math.max(0, Math.ceil(Math.max(0, targetWords - currentWords) / dailyTarget))
     : null
   const incompleteItems = (writerWorkspace?.goal_calendar ?? []).filter((item) => !item.completed)
+  const taskItems = (writerWorkspace?.goal_calendar ?? []).filter((item) => item.quota_unit === "tasks")
+  const selectedTask = taskItems.find((item) => item.id === selectedTaskSnapshot?.id) ?? selectedTaskSnapshot
+  const sourceFinding = selectedTask ? findRevisionTaskSource(revisionIntelligence, selectedTask.id) : null
+  const closeTaskDetails = () => {
+    if (deletingTask) return
+    setSelectedTaskSnapshot(null)
+    setConfirmTaskDelete(false)
+    setTaskDeleteError(false)
+  }
+  const deleteSelectedTask = async () => {
+    if (!selectedTask || deletingTask || !writerWorkspace) return
+    setDeletingTask(true)
+    setTaskDeleteError(false)
+    try {
+      const saved = await onSaveGoalCalendar(writerWorkspace.goal_calendar.filter((item) => item.id !== selectedTask.id))
+      if (saved) {
+        setSelectedTaskSnapshot(null)
+        setConfirmTaskDelete(false)
+        window.setTimeout(() => taskListRef.current?.focus(), 0)
+      } else {
+        setTaskDeleteError(true)
+      }
+    } catch {
+      setTaskDeleteError(true)
+    } finally {
+      setDeletingTask(false)
+    }
+  }
 
   return (
     <div className="space-y-5">
@@ -587,15 +628,106 @@ export function PlanningTab({
         <PlanningMetric isDark={isDark} label="Target completion" value={etaDays !== null ? (etaDays === 0 ? "Target reached" : `In ${etaDays} days`) : "Not available"} />
       </div>
       <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(18rem,0.45fr)] xl:auto-rows-fr">
-        <GoalCalendarCard
-          isDark={isDark}
-          writerWorkspace={writerWorkspace}
-          saveState={saveState}
-          saveMessage={saveMessage}
-          onSaveGoalCalendar={onSaveGoalCalendar}
-          onOpenManuscript={onOpenManuscript}
-        />
+        <div id="author-goal-calendar" className="min-w-0 scroll-mt-6">
+          <GoalCalendarCard
+            isDark={isDark}
+            writerWorkspace={writerWorkspace}
+            saveState={saveState}
+            saveMessage={saveMessage}
+            onSaveGoalCalendar={onSaveGoalCalendar}
+            onOpenManuscript={onOpenManuscript}
+          />
+        </div>
         <div className="space-y-5">
+          <section id="author-project-tasks" ref={taskListRef} tabIndex={-1} className={panelClass(isDark, "scroll-mt-6 p-4 sm:p-5")}>
+            <h3 className={`text-sm font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>Revision tasks</h3>
+            <p className={`mt-3 text-sm leading-6 ${isDark ? "text-slate-200" : "text-slate-700"}`}>
+              Tasks from Story Map and the revision workflow are saved in this project’s Goal Calendar. Select a task for details; its source finding remains on the revision board.
+            </p>
+            <p className={`mt-3 text-xs ${isDark ? "text-teal-200" : "text-teal-800"}`}>
+              {taskItems.length} task{taskItems.length === 1 ? "" : "s"} in this project
+            </p>
+            {taskItems.length > 0 ? (
+              <ul className={`mt-3 divide-y ${isDark ? "divide-white/10" : "divide-stone-200"}`}>
+                {taskItems.map((item) => (
+                  <li key={item.id}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedTaskSnapshot(item)
+                        setConfirmTaskDelete(false)
+                        setTaskDeleteError(false)
+                      }}
+                      className={`flex w-full items-start justify-between gap-3 rounded-sm px-2 py-3 text-left text-sm transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-400 ${isDark ? "hover:bg-white/[0.06]" : "hover:bg-stone-100"}`}
+                      aria-label={`View task details: ${item.title}`}
+                    >
+                      <span className={item.completed ? "line-through opacity-60" : "font-medium"}>{item.title}</span>
+                      <span className={`shrink-0 text-xs ${isDark ? "text-slate-400" : "text-stone-500"}`}>{formatPlannerDate(item.due_date)}</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+          </section>
+          <Dialog
+            open={selectedTask !== null}
+            onClose={closeTaskDetails}
+            title={selectedTask?.title ?? "Task details"}
+            eyebrow="Revision task"
+            size="sm"
+            className="rounded-xl"
+            contentClassName="relative p-5 sm:p-6"
+            titleClassName="pr-8 text-xl"
+          >
+            <button
+              type="button"
+              onClick={closeTaskDetails}
+              disabled={deletingTask}
+              aria-label="Close task details"
+              className="absolute right-4 top-4 rounded-md px-2 py-1 text-xl leading-none text-[rgb(var(--muted-foreground))] hover:bg-[rgba(var(--foreground),0.08)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-teal-400"
+            >
+              ×
+            </button>
+            {selectedTask ? (
+              <div className="mt-5 space-y-5 text-sm">
+                <dl className="grid grid-cols-2 gap-4 border-y border-[rgba(var(--border),0.5)] py-4">
+                  <div>
+                    <dt className="text-[rgb(var(--muted-foreground))]">Status</dt>
+                    <dd className="mt-1 font-medium">{selectedTask.completed ? "Completed" : "Open"}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-[rgb(var(--muted-foreground))]">Due</dt>
+                    <dd className="mt-1 font-medium">{formatPlannerDate(selectedTask.due_date)}</dd>
+                  </div>
+                </dl>
+                {sourceFinding ? (
+                  <div className="space-y-3">
+                    <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[rgb(var(--muted-foreground))]">Source finding</p>
+                    <p className="leading-6">{sourceFinding.description}</p>
+                    <dl className="grid grid-cols-2 gap-3 text-xs">
+                      <div><dt className="text-[rgb(var(--muted-foreground))]">Category</dt><dd className="mt-1 capitalize">{sourceFinding.category}</dd></div>
+                      <div><dt className="text-[rgb(var(--muted-foreground))]">Severity</dt><dd className="mt-1 capitalize">{sourceFinding.severity}</dd></div>
+                      {sourceFinding.chapter_ref != null ? <div><dt className="text-[rgb(var(--muted-foreground))]">Chapter</dt><dd className="mt-1">{sourceFinding.chapter_ref}</dd></div> : null}
+                    </dl>
+                    {sourceFinding.recommendation ? <p className="border-l-2 border-teal-500 pl-3 leading-6">{sourceFinding.recommendation}</p> : null}
+                  </div>
+                ) : null}
+                <p className="text-xs text-[rgb(var(--muted-foreground))]">Manage this task in Goal Calendar.</p>
+                {taskDeleteError ? <p role="alert" className="text-xs text-red-400">Could not delete this task. Please try again.</p> : null}
+                {confirmTaskDelete ? (
+                  <div className="rounded-md border border-red-500/30 p-3">
+                    <p className="leading-6">Delete this task from Goal Calendar? The source finding will stay on the revision board.</p>
+                    <div className="mt-3 flex flex-wrap justify-end gap-2">
+                      <button type="button" disabled={deletingTask} onClick={() => setConfirmTaskDelete(false)} className="rounded-md border border-[rgba(var(--border),0.7)] px-3 py-2 font-medium disabled:opacity-50">Cancel</button>
+                      <button type="button" disabled={deletingTask} onClick={deleteSelectedTask} className="rounded-md bg-red-700 px-3 py-2 font-semibold text-white hover:bg-red-600 disabled:opacity-50">{deletingTask ? "Deleting…" : "Confirm delete"}</button>
+                    </div>
+                  </div>
+                ) : (
+                  <button type="button" onClick={() => setConfirmTaskDelete(true)} className="rounded-md border border-red-500/30 px-3 py-2 font-medium text-red-400 hover:bg-red-500/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-red-400">Delete task</button>
+                )}
+              </div>
+            ) : null}
+          </Dialog>
           <section className={panelClass(isDark, "p-4 sm:p-5")}>
             <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-300" : "text-slate-600"}`}>Session goals</p>
             <div className="mt-4 space-y-3">
@@ -667,16 +799,19 @@ export function WorkspaceStatsTab({
   const recentWritingDays = getRecentWritingDays(userStats, 7)
   const recentWritingTotal = userStats?.writing.last_7_days.words ?? recentWritingDays.reduce((sum, day) => sum + day.value, 0)
   const recentWritingAverage = recentWritingDays.length > 0 ? Math.round(recentWritingTotal / recentWritingDays.length) : null
+  const recentWritingTrend = getRecentWritingDays(userStats, 14)
+  const completedChapterCount = chapters.filter((chapter) => chapter.processed).length
 
   return (
-    <div className="grid gap-5 xl:grid-cols-[minmax(0,0.92fr)_minmax(0,1fr)_minmax(0,1fr)]">
+    <div className="grid gap-5 xl:grid-cols-[minmax(0,0.82fr)_minmax(0,1.18fr)]">
       <h3 className="sr-only">Workspace stats</h3>
-      <div className="xl:col-span-3">
+      <div className="xl:col-span-2">
         <ProjectOverviewCard isDark={isDark} currentWords={currentWords} chapterCount={chapterCount} characterCount={characterCount} worldArticleCount={worldArticleCount} />
       </div>
       <div className="space-y-5">
         <DailyGoalCard isDark={isDark} dailyWords={dailyWords} dailyTarget={dailyTarget} onUpdateGoal={onOpenManuscript} />
         <WritingStreakCard isDark={isDark} streakDays={loginStreakDays} weekActivity={weeklyLoginActivity} />
+        <GoalRingCard isDark={isDark} progress={progress} currentWords={currentWords} targetWords={targetWords} />
         <ProgressBreakdownCard
           isDark={isDark}
           progress={progress}
@@ -688,26 +823,10 @@ export function WorkspaceStatsTab({
           userStats={userStats}
         />
       </div>
-      <div className="space-y-5">
-        <BarChartCard
-          isDark={isDark}
-          title="Chapter cadence"
-          eyebrow="Average words per measured chapter"
-          value={measuredChapterAverage ? measuredChapterAverage.toLocaleString() : "No data"}
-          data={chapterWordStats.slice(-5)}
-          emptyLabel="No chapter word counts have been recorded yet."
-        />
-        <BarChartCard
-          isDark={isDark}
-          title="Writing velocity"
-          eyebrow="Average words per day, last 7 days"
-          value={recentWritingAverage !== null ? recentWritingAverage.toLocaleString() : "No data"}
-          data={recentWritingDays}
-          emptyLabel="No daily writing entries have been recorded this week."
-        />
-      </div>
-      <div className="space-y-5">
-        <TrendCard isDark={isDark} userStats={userStats} currentWords={currentWords} />
+      <div className="grid gap-5 md:grid-cols-2">
+        <ChapterLengthChart isDark={isDark} data={chapterWordStats} average={measuredChapterAverage} />
+        <WritingLineChart isDark={isDark} data={recentWritingTrend} average={recentWritingAverage} />
+        <ChapterProcessingChart isDark={isDark} processed={completedChapterCount} total={chapters.length} />
         <InsightsCard
           isDark={isDark}
           worldArticleCount={worldArticleCount}
@@ -726,8 +845,12 @@ export function StoryMapTab({
   bookId,
   preWritingCheck,
   revisionIntelligence,
+  writerWorkspace,
   onOpenRelationships,
   onNavigate,
+  onRevisionChange,
+  onWriterWorkspaceChange,
+  onTaskCreated,
   preWritingCheckError,
   onRetryPreWritingCheck,
   revisionIntelligenceError,
@@ -737,8 +860,12 @@ export function StoryMapTab({
   bookId: string
   preWritingCheck: PreWritingCheck | null
   revisionIntelligence: RevisionIntelligence | null
+  writerWorkspace: WriterWorkspace | null
   onOpenRelationships: () => void
   onNavigate: (href: string) => void
+  onRevisionChange: (revision: RevisionIntelligence) => void
+  onWriterWorkspaceChange: (workspace: WriterWorkspace) => void
+  onTaskCreated: (count: number) => void
   preWritingCheckError?: boolean
   onRetryPreWritingCheck?: () => void
   revisionIntelligenceError?: boolean
@@ -761,8 +888,8 @@ export function StoryMapTab({
         <section className={panelClass(isDark, "p-4 sm:p-5")}>
           <div className="flex items-start justify-between gap-3">
             <div>
-              <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-300" : "text-slate-600"}`}>Memory map</p>
-              <h3 className={`mt-2 text-xl font-semibold ${isDark ? "text-white" : "text-slate-900"}`}>Who is in play and what still needs closure.</h3>
+              <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-300" : "text-slate-600"}`}>Story cast</p>
+              <h3 className={`mt-2 text-xl font-semibold ${isDark ? "text-white" : "text-slate-900"}`}>Characters, threads, and the next pressure point.</h3>
             </div>
             <button type="button" onClick={onOpenRelationships} className="text-sm font-semibold text-teal-700 dark:text-teal-300">
               Open graph
@@ -812,7 +939,7 @@ export function StoryMapTab({
         </section>
 
         <section className={panelClass(isDark, "p-4 sm:p-5")}>
-          <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-300" : "text-slate-600"}`}>Continuity findings</p>
+          <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-300" : "text-slate-600"}`}>Continuity notes</p>
           <div className="mt-4 space-y-3">
             {(preWritingCheck?.alerts ?? []).slice(0, 5).map((alert) => (
               <div key={`${alert.title}-${alert.chapter_ref ?? "na"}`} className={`rounded-md border px-4 py-3 ${isDark ? "border-white/[0.06] bg-white/[0.03]" : "border-slate-200 bg-white"}`}>
@@ -828,14 +955,17 @@ export function StoryMapTab({
         </section>
       </div>
 
+      <StoryMapSignalCharts isDark={isDark} preWritingCheck={preWritingCheck} />
+
       {revisionIntelligence ? (
         <RevisionIntelligencePanel
           bookId={bookId}
           revision={revisionIntelligence}
-          writerWorkspace={null}
+          writerWorkspace={writerWorkspace}
           isDark={isDark}
-          onRevisionChange={() => {}}
-          onWriterWorkspaceChange={() => {}}
+          onRevisionChange={onRevisionChange}
+          onWriterWorkspaceChange={onWriterWorkspaceChange}
+          onTaskCreated={onTaskCreated}
           variant="story-map"
         />
       ) : revisionIntelligenceError && onRetryRevisionIntelligence ? (
@@ -847,6 +977,86 @@ export function StoryMapTab({
         />
       ) : null}
     </div>
+  )
+}
+
+function StoryMapSignalCharts({ isDark, preWritingCheck }: { isDark: boolean; preWritingCheck: PreWritingCheck | null }) {
+  const recentEvents = preWritingCheck?.recent_events ?? []
+  const activeCharacters = preWritingCheck?.active_characters ?? []
+  const maxChapter = Math.max(
+    preWritingCheck?.upcoming_chapter ? preWritingCheck.upcoming_chapter - 1 : 0,
+    ...recentEvents.map((event) => event.chapter_number),
+    ...activeCharacters.map((character) => character.last_seen_chapter ?? 0),
+    1,
+  )
+
+  return (
+    <section className={panelClass(isDark, "p-4 sm:p-5")}>
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-300" : "text-slate-600"}`}>Story shape</p>
+          <h3 className={`mt-2 text-xl font-semibold ${isDark ? "text-white" : "text-slate-900"}`}>A visual read on movement through the draft.</h3>
+        </div>
+        <p className={`text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}>Based on the chapters and entities already in this project</p>
+      </div>
+
+      <div className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1.15fr)_minmax(18rem,0.85fr)]">
+        <div className={`rounded-md border p-4 ${isDark ? "border-white/[0.06] bg-white/[0.025]" : "border-slate-200/70 bg-slate-50/60"}`}>
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className={`text-sm font-semibold ${isDark ? "text-slate-100" : "text-slate-800"}`}>Recent story beats</p>
+              <p className={`mt-1 text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}>Where the latest extracted events land by chapter.</p>
+            </div>
+            <span className={`text-xs font-semibold ${isDark ? "text-teal-200" : "text-teal-800"}`}>{recentEvents.length} beats</span>
+          </div>
+          {recentEvents.length > 0 ? (
+            <div className="mt-6 space-y-4">
+              {recentEvents.slice(-6).map((event) => (
+                <div key={`${event.chapter_number}-${event.detail}`} className="grid grid-cols-[3.5rem_minmax(0,1fr)] items-start gap-3">
+                  <div className={`pt-1 text-xs font-semibold ${isDark ? "text-teal-200" : "text-teal-800"}`}>Ch {event.chapter_number}</div>
+                  <div className="relative border-l pl-4 before:absolute before:-left-[0.34rem] before:top-1.5 before:h-2.5 before:w-2.5 before:rounded-full before:bg-teal-500">
+                    <p className={`text-sm leading-6 ${isDark ? "text-slate-200" : "text-slate-700"}`}>{event.detail}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className={`mt-5 rounded-md border border-dashed px-4 py-6 text-sm ${isDark ? "border-white/[0.08] text-slate-300" : "border-slate-200 text-slate-600"}`}>No extracted story beats are available yet.</p>
+          )}
+        </div>
+
+        <div className={`rounded-md border p-4 ${isDark ? "border-white/[0.06] bg-white/[0.025]" : "border-slate-200/70 bg-slate-50/60"}`}>
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className={`text-sm font-semibold ${isDark ? "text-slate-100" : "text-slate-800"}`}>Last-seen spread</p>
+              <p className={`mt-1 text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}>The latest chapter where each active character appears.</p>
+            </div>
+            <span className={`text-xs font-semibold ${isDark ? "text-teal-200" : "text-teal-800"}`}>Ch {maxChapter}</span>
+          </div>
+          {activeCharacters.length > 0 ? (
+            <div className="mt-6 space-y-4">
+              {activeCharacters.slice(0, 6).map((character) => {
+                const lastSeen = character.last_seen_chapter ?? 0
+                const width = lastSeen > 0 ? Math.max(8, (lastSeen / maxChapter) * 100) : 0
+                return (
+                  <div key={character.id}>
+                    <div className="flex items-center justify-between gap-3">
+                      <p className={`min-w-0 truncate text-sm font-medium ${isDark ? "text-slate-200" : "text-slate-700"}`}>{character.name}</p>
+                      <span className={`shrink-0 text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}>{lastSeen > 0 ? `Ch ${lastSeen}` : "Not placed"}</span>
+                    </div>
+                    <div className={`mt-2 h-2 overflow-hidden rounded-full ${isDark ? "bg-white/[0.08]" : "bg-slate-200"}`}>
+                      <div className="h-full rounded-full bg-gradient-to-r from-teal-600 to-sky-400" style={{ width: `${width}%` }} />
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          ) : (
+            <p className={`mt-5 rounded-md border border-dashed px-4 py-6 text-sm ${isDark ? "border-white/[0.08] text-slate-300" : "border-slate-200 text-slate-600"}`}>No active character positions are available yet.</p>
+          )}
+        </div>
+      </div>
+    </section>
   )
 }
 
@@ -1011,64 +1221,119 @@ function ProgressBreakdownCard({
   )
 }
 
-function BarChartCard({
-  isDark,
-  title,
-  eyebrow,
-  value,
-  data,
-  emptyLabel,
-}: {
-  isDark: boolean
-  title: string
-  eyebrow: string
-  value: string
-  data: Array<{ label: string; value: number }>
-  emptyLabel: string
-}) {
-  const maxValue = data.reduce((max, item) => Math.max(max, item.value), 0)
+function GoalRingCard({ isDark, progress, currentWords, targetWords }: { isDark: boolean; progress: number; currentWords: number | null; targetWords: number | null }) {
+  const safeProgress = clamp(Math.round(progress), 0, 100)
   return (
-    <section className={panelClass(isDark, "h-full p-4 sm:p-5")}>
-      <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-300" : "text-slate-600"}`}>{title}</p>
-      <p className={`mt-2 text-sm ${isDark ? "text-slate-300" : "text-slate-600"}`}>{eyebrow}</p>
-      <p className={`mt-1 text-2xl font-semibold ${isDark ? "text-white" : "text-slate-950"}`}>{value}</p>
-      {data.length > 0 ? (
-        <div className="mt-5 flex h-32 items-end gap-3 border-b border-white/10 px-2">
-          {data.map((item) => (
-            <div key={item.label} className="flex flex-1 flex-col items-center justify-end gap-2" title={`${item.label}: ${item.value.toLocaleString()} words`}>
-              <div className="w-full rounded-t-lg bg-teal-500/80" style={{ height: `${clamp((item.value / Math.max(1, maxValue)) * 100, 8, 100)}%` }} />
-              <span className={`text-3xs ${isDark ? "text-slate-300" : "text-slate-600"}`}>{item.label}</span>
-            </div>
-          ))}
+    <section className={panelClass(isDark, "p-4 sm:p-5")}>
+      <div className="flex items-center gap-4">
+        <div
+          className="relative flex h-24 w-24 shrink-0 items-center justify-center rounded-full"
+          style={{ background: `conic-gradient(#14b8a6 0 ${safeProgress}%, ${isDark ? "#26313a" : "#e5e7eb"} ${safeProgress}% 100%)` }}
+          aria-label={`${safeProgress}% of the book target`}
+          role="img"
+        >
+          <div className={`flex h-[4.25rem] w-[4.25rem] items-center justify-center rounded-full text-lg font-semibold ${isDark ? "bg-[#0d141c] text-white" : "bg-white text-stone-950"}`}>{safeProgress}%</div>
         </div>
-      ) : (
-        <p className={`mt-5 rounded-md border px-4 py-6 text-sm leading-6 ${isDark ? "border-white/[0.06] bg-white/[0.03] text-slate-300" : "border-slate-200 bg-slate-50 text-slate-600"}`}>{emptyLabel}</p>
-      )}
+        <div className="min-w-0">
+          <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-300" : "text-slate-600"}`}>Book progress</p>
+          <p className={`mt-2 text-sm leading-6 ${isDark ? "text-slate-200" : "text-slate-700"}`}>
+            {currentWords !== null && targetWords ? `${currentWords.toLocaleString()} of ${targetWords.toLocaleString()} words` : "No book target is set yet."}
+          </p>
+        </div>
+      </div>
     </section>
   )
 }
 
-function TrendCard({ isDark, userStats, currentWords }: { isDark: boolean; userStats: UserStats | null; currentWords: number | null }) {
-  const recentDays = getRecentWritingDays(userStats, 14)
-  const maxValue = recentDays.reduce((max, day) => Math.max(max, day.value), 0)
-  const last30Words = userStats?.writing.last_30_days.words ?? null
+function ChapterLengthChart({ isDark, data, average }: { isDark: boolean; data: Array<{ label: string; value: number }>; average: number }) {
+  const maxValue = data.reduce((max, item) => Math.max(max, item.value), 0)
   return (
-    <section className={panelClass(isDark, "h-full p-4 sm:p-5")}>
-      <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-300" : "text-slate-600"}`}>Trend overview</p>
-      <p className={`mt-2 text-sm ${isDark ? "text-slate-300" : "text-slate-600"}`}>Words written in the last 30 days</p>
-      <p className="mt-2 text-2xl font-semibold text-teal-500">{last30Words !== null ? last30Words.toLocaleString() : "No data"}</p>
-      {recentDays.length > 0 ? (
-        <div className="mt-5 grid h-28 items-end gap-1.5" style={{ gridTemplateColumns: `repeat(${recentDays.length}, minmax(0, 1fr))` }}>
-          {recentDays.map((day) => (
-            <div key={day.key} className="rounded-t-lg bg-teal-500/70" title={`${day.label}: ${day.value.toLocaleString()} words`} style={{ height: `${day.value > 0 ? clamp((day.value / Math.max(1, maxValue)) * 100, 8, 100) : 0}%` }} />
+    <section className={panelClass(isDark, "p-4 sm:p-5")}>
+      <div className="flex items-end justify-between gap-3">
+        <div>
+          <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-300" : "text-slate-600"}`}>Chapter length</p>
+          <p className={`mt-2 text-sm ${isDark ? "text-slate-300" : "text-slate-600"}`}>Word count by measured chapter</p>
+        </div>
+        <p className={`text-lg font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>{average ? average.toLocaleString() : "—"}<span className={`ml-1 text-xs font-normal ${isDark ? "text-slate-400" : "text-stone-500"}`}>avg</span></p>
+      </div>
+      {data.length > 0 ? (
+        <div className="mt-5 space-y-3">
+          {data.map((item) => (
+            <div key={item.label} className="grid grid-cols-[3rem_minmax(0,1fr)_4.5rem] items-center gap-3" title={`${item.label}: ${item.value.toLocaleString()} words`}>
+              <span className={`text-xs font-medium ${isDark ? "text-slate-300" : "text-slate-600"}`}>{item.label}</span>
+              <div className={`h-2.5 overflow-hidden rounded-full ${isDark ? "bg-white/[0.08]" : "bg-slate-100"}`}>
+                <div className="h-full rounded-full bg-gradient-to-r from-teal-600 to-sky-400" style={{ width: `${Math.max(5, (item.value / Math.max(1, maxValue)) * 100)}%` }} />
+              </div>
+              <span className={`text-right text-xs font-semibold ${isDark ? "text-slate-200" : "text-slate-700"}`}>{item.value.toLocaleString()}</span>
+            </div>
           ))}
         </div>
-      ) : (
-        <p className={`mt-5 rounded-md border px-4 py-6 text-sm leading-6 ${isDark ? "border-white/[0.06] bg-white/[0.03] text-slate-300" : "border-slate-200 bg-slate-50 text-slate-600"}`}>No recent writing entries have been recorded.</p>
-      )}
-      <p className={`mt-4 text-xs ${isDark ? "text-slate-300" : "text-slate-600"}`}>Current manuscript words: {formatNumber(currentWords)}</p>
+      ) : <EmptyChartMessage isDark={isDark}>No chapter word counts have been recorded yet.</EmptyChartMessage>}
     </section>
   )
+}
+
+function WritingLineChart({ isDark, data, average }: { isDark: boolean; data: Array<{ key: string; label: string; value: number }>; average: number | null }) {
+  const width = 520
+  const height = 180
+  const padding = { top: 18, right: 14, bottom: 30, left: 14 }
+  const maxValue = data.reduce((max, item) => Math.max(max, item.value), 0)
+  const points = data.map((item, index) => {
+    const x = data.length === 1 ? width / 2 : padding.left + (index / (data.length - 1)) * (width - padding.left - padding.right)
+    const y = maxValue > 0 ? height - padding.bottom - (item.value / maxValue) * (height - padding.top - padding.bottom) : height - padding.bottom
+    return { ...item, x, y }
+  })
+  const path = points.map((point, index) => `${index === 0 ? "M" : "L"} ${point.x.toFixed(1)} ${point.y.toFixed(1)}`).join(" ")
+
+  return (
+    <section className={panelClass(isDark, "p-4 sm:p-5")}>
+      <div className="flex items-end justify-between gap-3">
+        <div>
+          <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-300" : "text-slate-600"}`}>Writing rhythm</p>
+          <p className={`mt-2 text-sm ${isDark ? "text-slate-300" : "text-slate-600"}`}>Saved words over the last 14 recorded days</p>
+        </div>
+        <p className={`text-lg font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>{average !== null ? average.toLocaleString() : "—"}<span className={`ml-1 text-xs font-normal ${isDark ? "text-slate-400" : "text-stone-500"}`}>daily avg</span></p>
+      </div>
+      {data.length > 0 ? (
+        <div className="mt-4">
+          <svg viewBox={`0 0 ${width} ${height}`} className="h-44 w-full" role="img" aria-label="Writing rhythm line chart">
+            {[0.25, 0.5, 0.75].map((ratio) => <line key={ratio} x1={padding.left} x2={width - padding.right} y1={height - padding.bottom - ratio * (height - padding.top - padding.bottom)} y2={height - padding.bottom - ratio * (height - padding.top - padding.bottom)} stroke={isDark ? "#26313a" : "#e5e7eb"} strokeDasharray="4 6" />)}
+            <path d={path} fill="none" stroke={isDark ? "#5eead4" : "#0f766e"} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
+            {points.map((point) => <circle key={point.key} cx={point.x} cy={point.y} r="4" fill={isDark ? "#0d141c" : "white"} stroke={isDark ? "#5eead4" : "#0f766e"} strokeWidth="2" />)}
+            <text x={padding.left} y={height - 7} fill={isDark ? "#94a3b8" : "#64748b"} fontSize="11">{data[0].label}</text>
+            <text x={width - padding.right} y={height - 7} textAnchor="end" fill={isDark ? "#94a3b8" : "#64748b"} fontSize="11">{data[data.length - 1].label}</text>
+          </svg>
+        </div>
+      ) : <EmptyChartMessage isDark={isDark}>No recent writing entries have been recorded.</EmptyChartMessage>}
+    </section>
+  )
+}
+
+function ChapterProcessingChart({ isDark, processed, total }: { isDark: boolean; processed: number; total: number }) {
+  const remaining = Math.max(0, total - processed)
+  const processedPercent = total > 0 ? (processed / total) * 100 : 0
+  return (
+    <section className={panelClass(isDark, "p-4 sm:p-5")}>
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-300" : "text-slate-600"}`}>Draft coverage</p>
+          <p className={`mt-2 text-sm ${isDark ? "text-slate-300" : "text-slate-600"}`}>Chapters available to the workspace</p>
+        </div>
+        <p className={`text-lg font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>{processed}/{total}</p>
+      </div>
+      <div className={`mt-6 h-4 overflow-hidden rounded-full ${isDark ? "bg-white/[0.08]" : "bg-slate-100"}`}>
+        <div className="h-full rounded-full bg-gradient-to-r from-teal-600 to-emerald-400" style={{ width: `${processedPercent}%` }} />
+      </div>
+      <div className={`mt-4 flex justify-between text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+        <span>{processed} processed</span>
+        <span>{remaining} remaining</span>
+      </div>
+    </section>
+  )
+}
+
+function EmptyChartMessage({ isDark, children }: { isDark: boolean; children: string }) {
+  return <p className={`mt-5 rounded-md border border-dashed px-4 py-6 text-sm leading-6 ${isDark ? "border-white/[0.08] text-slate-300" : "border-slate-200 bg-slate-50 text-slate-600"}`}>{children}</p>
 }
 
 function InsightsCard({
@@ -1102,15 +1367,14 @@ function InsightsCard({
   ]
   return (
     <section className={panelClass(isDark, "h-full p-4 sm:p-5")}>
-      <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-300" : "text-slate-600"}`}>Insights</p>
+      <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-300" : "text-slate-600"}`}>At a glance</p>
       <div className="mt-4 space-y-3">
         {insights.map((insight, index) => (
           <div key={insight} className={`rounded-md border px-4 py-3 text-sm leading-6 ${isDark ? "border-white/[0.06] bg-white/[0.03] text-slate-300" : "border-slate-200 bg-white text-slate-600"}`}>
-            <span className={`mr-2 font-semibold ${isDark ? "text-teal-300" : "text-teal-700"}`}>{index + 1}.</span>{insight}
+            <span className={`mr-2 inline-block h-2 w-2 rounded-full ${index === 0 ? "bg-teal-500" : index === 1 ? "bg-sky-400" : "bg-slate-400"}`} />{insight}
           </div>
         ))}
       </div>
-      <button type="button" className={footerLinkClass(isDark)}>View all insights <Icon name="chevron" /></button>
     </section>
   )
 }

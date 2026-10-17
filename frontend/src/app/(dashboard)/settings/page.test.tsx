@@ -14,7 +14,6 @@ const setDailyGoalMock = vi.hoisted(() => vi.fn())
 const setReadingModeMock = vi.hoisted(() => vi.fn())
 const logoutApiMock = vi.hoisted(() => vi.fn())
 const clearAuthCookiesMock = vi.hoisted(() => vi.fn())
-const apiClientGetMock = vi.hoisted(() => vi.fn())
 const apiClientPutMock = vi.hoisted(() => vi.fn())
 const getEmailPreferencesMock = vi.hoisted(() => vi.fn())
 const updateEmailPreferencesMock = vi.hoisted(() => vi.fn())
@@ -72,7 +71,6 @@ vi.mock("@/lib/api/auth", () => ({
 
 vi.mock("@/lib/api/client", () => ({
   apiClient: {
-    get: apiClientGetMock,
     put: apiClientPutMock,
   },
   clearAuthCookies: clearAuthCookiesMock,
@@ -148,7 +146,6 @@ describe("SettingsPage billing actions", () => {
     setReadingModeMock.mockReset()
     logoutApiMock.mockReset()
     clearAuthCookiesMock.mockReset()
-    apiClientGetMock.mockReset()
     apiClientPutMock.mockReset()
     getEmailPreferencesMock.mockReset()
     updateEmailPreferencesMock.mockReset()
@@ -171,18 +168,6 @@ describe("SettingsPage billing actions", () => {
       marketing: true,
       unsubscribed_all: false,
       unsubscribed_at: null,
-    })
-    apiClientGetMock.mockImplementation((url: string) => {
-      if (url === "/support/config") {
-        return Promise.resolve({
-          data: {
-            assistant_enabled: true,
-            community_url: null,
-            corpus_version: "test",
-          },
-        })
-      }
-      return Promise.reject(new Error(`Unexpected GET ${url}`))
     })
   })
 

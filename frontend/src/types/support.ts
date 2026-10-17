@@ -50,12 +50,6 @@ export type SupportGuideSummary = {
   workspace: string
 }
 
-export type SupportConfig = {
-  assistant_enabled: boolean
-  community_url: string | null
-  corpus_version: string
-}
-
 export type SupportIncident = {
   id: string
   reference: string

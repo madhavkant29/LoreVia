@@ -149,18 +149,15 @@ async def finalize_book_completion_after_chapter(
 def _group_chunks_for_extraction(chunks: list[str]) -> list[list[str]]:
     batches: list[list[str]] = []
     current_batch: list[str] = []
-    current_tokens = 0
 
     for chunk in chunks:
-        chunk_tokens = count_tokens(chunk)
-        exceeds_token_budget = current_tokens + chunk_tokens > settings.EXTRACTION_BATCH_MAX_TOKENS
+        candidate = "\n\n".join([*current_batch, chunk])
+        exceeds_token_budget = count_tokens(candidate) > settings.EXTRACTION_BATCH_MAX_TOKENS
         exceeds_chunk_budget = len(current_batch) >= settings.EXTRACTION_BATCH_MAX_CHUNKS
         if current_batch and (exceeds_token_budget or exceeds_chunk_budget):
             batches.append(current_batch)
             current_batch = []
-            current_tokens = 0
         current_batch.append(chunk)
-        current_tokens += chunk_tokens
 
     if current_batch:
         batches.append(current_batch)

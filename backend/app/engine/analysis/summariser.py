@@ -55,7 +55,8 @@ PROMPTS = {
   }],
   "clues": [{"clue": "...", "foreshadows": "...", "why_it_matters": "..."}],
   "themes": [{"theme": "...", "signal": "explicit|subtext", "evidence": "...", "depth": "surface|complex"}],
-  "open_questions": ["..."]
+  "open_questions": ["..."],
+  "editorial_concerns": [{"issue": "one specific craft or story-logic weakness", "evidence": "short exact excerpt", "suggestion": "a concrete revision direction"}]
 }
 Rules:
 - Return raw JSON only. No markdown fences.
@@ -68,6 +69,8 @@ Rules:
 - Mark has_transition_evidence when the passage explicitly explains a change, transfer, injury, recovery, disguise, transformation, travel, or relationship shift.
 - Mark unreliable_narration when the passage itself signals an unreliable, mistaken, deceptive, dream, or disguised viewpoint.
 - Evidence must be a short exact excerpt, never a paraphrase.
+- Look for the most consequential, specific revision concern in this passage. Return one editorial concern when the text supports one; otherwise return an empty array. Never invent a weakness or cite text outside this passage.
+- Keep editorial language direct and human. Avoid generic praise, inflated certainty, and formulaic AI phrasing.
 - Include both obvious and philosophical themes when grounded in the text, such as false altruism, self-hatred, moral injury, denial, obsession, unreliable narration, or identity fracture.
 - If there are no character changes or clues, return empty arrays.
 - Do not include any text before or after the JSON.""",
@@ -101,31 +104,88 @@ async def generate_summary(
         usage_metadata: dict[str, Any] = {"chapter_title": title[:160]}
         if len(passages) > 1:
             usage_metadata.update({"part_index": part_index, "part_count": len(passages)})
-        content = await complete_with_fallback(
-            system=part_system,
-            user=passage,
-            openai_model=settings.OPENAI_EXTRACT_MODEL,
-            gemini_model=settings.GEMINI_EXTRACT_MODEL,
-            temperature=0.2,
-            max_tokens=2200,
-            response_format={"type": "json_object"} if mode == "detailed" else None,
-            openai_client=openai_client,
-            usage_feature=f"chapter_summary_{mode}",
-            usage_user_id=user_id,
-            usage_book_id=book_id,
-            usage_metadata=usage_metadata,
-        )
-        if mode == "detailed":
+        for attempt in range(2 if mode == "detailed" else 1):
+            content = await complete_with_fallback(
+                system=(
+                    part_system
+                    if attempt == 0
+                    else part_system + "\nYour previous response was not valid JSON with a nonempty summary. Return the requested JSON object only."
+                ),
+                user=passage,
+                openai_model=settings.OPENAI_EXTRACT_MODEL,
+                gemini_model=settings.GEMINI_EXTRACT_MODEL,
+                temperature=0.2,
+                max_tokens=2400,
+                response_format={"type": "json_object"} if mode == "detailed" else None,
+                openai_client=openai_client,
+                usage_feature=f"chapter_summary_{mode}",
+                usage_user_id=user_id,
+                usage_book_id=book_id,
+                usage_metadata={**usage_metadata, "attempt": attempt + 1},
+            )
+            if mode != "detailed":
+                plain_results.append(content)
+                break
             try:
                 data = json.loads(_strip_json_fence(content))
-                payloads.append(_normalize_summary_payload(data, fallback=content))
-                continue
-            except json.JSONDecodeError:
-                pass
-        plain_results.append(content)
+            except (TypeError, ValueError):
+                data = None
+            if isinstance(data, dict) and isinstance(data.get("summary"), str) and data["summary"].strip():
+                payloads.append(_normalize_summary_payload(data, fallback=content, source_text=passage))
+                break
+            if attempt == 1:
+                raise ValueError(f"Detailed summary for passage {part_index} is incomplete")
 
     if mode == "detailed" and payloads:
-        return _merge_detailed_summary_payloads(payloads)
+        merged = _merge_detailed_summary_payloads(payloads)
+        if not merged["editorial_concerns"] and chapter_text.strip():
+            revision_question: dict[str, str] | None = None
+            for part_index, review_passage in sorted(
+                enumerate(passages, start=1), key=lambda item: len(item[1]), reverse=True
+            ):
+                review_text = await complete_with_fallback(
+                    system=(
+                        "You are reviewing one chapter passage as a careful fiction editor. "
+                        "If the passage supports a specific, actionable weakness, return JSON: "
+                        '{"issue":"...","evidence":"short exact excerpt","suggestion":"..."}. '
+                        "Otherwise, return one concrete revision question anchored to an exact excerpt: "
+                        '{"question":"...?","evidence":"short exact excerpt"}. '
+                        "The evidence must be copied exactly from this passage. "
+                        "A question must invite a useful craft decision without implying an unproven fault. "
+                        "Return {} if neither is defensible. "
+                        "No generic praise, filler, or markdown."
+                    ),
+                    user=review_passage,
+                    openai_model=settings.OPENAI_EXTRACT_MODEL,
+                    gemini_model=settings.GEMINI_EXTRACT_MODEL,
+                    temperature=0.2,
+                    max_tokens=500,
+                    response_format={"type": "json_object"},
+                    openai_client=openai_client,
+                    usage_feature="chapter_editorial_review",
+                    usage_user_id=user_id,
+                    usage_book_id=book_id,
+                    usage_metadata={
+                        "chapter_title": title[:160],
+                        "part_index": part_index,
+                        "part_count": len(passages),
+                    },
+                )
+                try:
+                    review_data = json.loads(_strip_json_fence(review_text))
+                except (TypeError, ValueError):
+                    continue
+                merged["editorial_concerns"] = _normalize_editorial_concerns(
+                    [review_data], review_passage
+                )
+                if merged["editorial_concerns"]:
+                    break
+                if revision_question is None:
+                    revision_question = _normalize_revision_question(review_data, review_passage)
+            merged["revision_question"] = (
+                revision_question if not merged["editorial_concerns"] else None
+            )
+        return merged
     content = "\n\n".join(plain_results).strip()
     return {
         "content": content,
@@ -230,6 +290,17 @@ def _merge_detailed_summary_payloads(payloads: list[dict[str, Any]]) -> dict[str
             "theme",
             "evidence",
         ),
+        "editorial_concerns": unique_dicts(
+            [
+                item
+                for payload in payloads
+                for item in (payload.get("editorial_concerns") or [])
+                if isinstance(item, dict)
+            ],
+            "issue",
+            "evidence",
+        )[:3],
+        "revision_question": None,
     }
 
 
@@ -290,7 +361,9 @@ def _strip_json_fence(content: str) -> str:
     return stripped.strip()
 
 
-def _normalize_summary_payload(data: dict, fallback: str) -> dict:
+def _normalize_summary_payload(
+    data: dict, fallback: str, source_text: str = ""
+) -> dict:
     key_events = []
     for item in data.get("key_events") or []:
         if isinstance(item, dict):
@@ -344,7 +417,43 @@ def _normalize_summary_payload(data: dict, fallback: str) -> dict:
         "char_changes": char_changes,
         "clues": data.get("clues") or [],
         "themes": data.get("themes") or [],
+        "editorial_concerns": _normalize_editorial_concerns(
+            data.get("editorial_concerns"), source_text
+        ),
     }
+
+
+def _normalize_editorial_concerns(value: object, source_text: str) -> list[dict[str, str]]:
+    if not isinstance(value, list) or not source_text:
+        return []
+    normalized_source = " ".join(source_text.split()).casefold()
+    concerns: list[dict[str, str]] = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        issue = " ".join(str(item.get("issue") or "").split()).strip()
+        evidence = " ".join(str(item.get("evidence") or "").split()).strip()
+        suggestion = " ".join(str(item.get("suggestion") or "").split()).strip()
+        if not issue or not evidence or evidence.casefold() not in normalized_source:
+            continue
+        concerns.append({"issue": issue[:500], "evidence": evidence[:500], "suggestion": suggestion[:500]})
+        if len(concerns) >= 3:
+            break
+    return concerns
+
+
+def _normalize_revision_question(value: object, source_text: str) -> dict[str, str] | None:
+    if not isinstance(value, dict) or not source_text:
+        return None
+    question = " ".join(str(value.get("question") or "").split()).strip()
+    evidence = " ".join(str(value.get("evidence") or "").split()).strip()
+    if (
+        not question.endswith("?")
+        or not evidence
+        or evidence.casefold() not in " ".join(source_text.split()).casefold()
+    ):
+        return None
+    return {"question": question[:500], "evidence": evidence[:500]}
 
 
 def _normalize_continuity_facts(value: object) -> list[dict[str, Any]]:

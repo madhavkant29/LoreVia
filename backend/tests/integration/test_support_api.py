@@ -6,16 +6,13 @@ from app.core.config import settings
 async def test_support_api_serves_config_guided_answers_and_cases(
     client, auth_headers, monkeypatch
 ):
-    monkeypatch.setattr(
-        settings, "COMMUNITY_DISCORD_URL", "https://discord.gg/mjuWtTWSh", raising=False
-    )
     monkeypatch.setattr(settings, "OPENAI_API_KEY", "", raising=False)
 
     config_response = await client.get("/api/v1/support/config", headers=auth_headers)
     assert config_response.status_code == 200
     config = config_response.json()
     assert config["assistant_enabled"] is True
-    assert config["community_url"] == "https://discord.gg/mjuWtTWSh"
+    assert "community_url" not in config
     assert config["corpus_version"]
 
     guides_response = await client.get("/api/v1/support/guides", headers=auth_headers)

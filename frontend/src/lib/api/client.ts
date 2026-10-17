@@ -15,12 +15,35 @@ export const apiClient = axios.create({
 })
 
 let refreshPromise: Promise<boolean> | null = null
+let csrfBootstrapPromise: Promise<boolean> | null = null
 const AUTH_CSRF_COOKIE_NAME = "lorevia_csrf"
 const AUTH_CSRF_HEADER_NAME = "X-CSRF-Token"
 const ADMIN_CSRF_COOKIE_NAME = "lorevia_admin_csrf"
 const ADMIN_CSRF_HEADER_NAME = "X-Admin-CSRF-Token"
 const AUTH_COOKIE_NAMES = ["lorevia_access_token", "lorevia_refresh_token", "lorevia_csrf"]
 const SAFE_HTTP_METHODS = new Set(["get", "head", "options"])
+
+function isCsrfFailure(error: { response?: { status?: number; data?: { detail?: unknown } } }) {
+  const detail = error.response?.data?.detail
+  return error.response?.status === 403 && typeof detail === "string" && detail.startsWith("Invalid CSRF token")
+}
+
+async function bootstrapAuthCsrfCookie(): Promise<boolean> {
+  if (!csrfBootstrapPromise) {
+    csrfBootstrapPromise = axios
+      .get(`${API_BASE}/auth/csrf`, {
+        withCredentials: true,
+        timeout: AUTH_REFRESH_TIMEOUT_MS,
+      })
+      .then(() => true)
+      .catch(() => false)
+      .finally(() => {
+        csrfBootstrapPromise = null
+      })
+  }
+
+  return csrfBootstrapPromise
+}
 
 export function clearAuthCookies() {
   if (typeof document === "undefined") return
@@ -129,6 +152,17 @@ apiClient.interceptors.response.use(
     const originalRequest = error.config
     const requestUrl = String(originalRequest?.url ?? "")
     const requestPath = requestUrl.split("?")[0]
+    if (
+      isCsrfFailure(error) &&
+      originalRequest &&
+      !originalRequest._csrfRetry &&
+      requestPath !== "/auth/csrf"
+    ) {
+      originalRequest._csrfRetry = true
+      if (await bootstrapAuthCsrfCookie()) {
+        return apiClient(originalRequest)
+      }
+    }
     const isAuthEndpoint =
       requestPath === "/auth/me" ||
       requestPath === "/auth/refresh" ||

@@ -15,7 +15,7 @@ type ChatsPanelProps = {
 }
 
 type PreloadableComponent<Props> = React.ComponentType<Props> & {
-  preload?: () => void
+  preload?: () => void | Promise<unknown>
 }
 
 const loadChatsPanel = () => import("@/components/layout/ChatsPanel").then((module) => module.ChatsPanel)
@@ -30,10 +30,14 @@ const ChatsPanel = dynamic<ChatsPanelProps>(
 
 function preloadChatsPanel() {
   if (ChatsPanel.preload) {
-    ChatsPanel.preload()
+    try {
+      void Promise.resolve(ChatsPanel.preload()).catch(() => undefined)
+    } catch {
+      // A stale development chunk should not become an unhandled preload rejection.
+    }
     return
   }
-  void loadChatsPanel()
+  void loadChatsPanel().catch(() => undefined)
 }
 
 export const ChatLauncher = memo(function ChatLauncher({ enabled = true }: { enabled?: boolean }) {
@@ -58,7 +62,7 @@ export const ChatLauncher = memo(function ChatLauncher({ enabled = true }: { ena
   const preloadPanelAssets = () => {
     preloadChatsPanel()
     if (user) {
-      void prefetchChatsSidebarData()
+      void Promise.resolve(prefetchChatsSidebarData()).catch(() => undefined)
     }
   }
 
@@ -148,7 +152,9 @@ export const ChatLauncher = memo(function ChatLauncher({ enabled = true }: { ena
             aria-hidden={!open}
             className={`fixed right-0 top-0 z-50 hidden h-screen w-[min(50vw,56rem)] border-l transition duration-150 lg:block ${open ? "translate-x-0 opacity-100" : "pointer-events-none translate-x-full opacity-0"} ${isDark ? "border-white/10 bg-[#05070a]" : "border-slate-200 bg-white"}`}
           >
-            <ChatsPanel mode="sidebar" enabled={open} />
+            <ChatPanelErrorBoundary>
+              <ChatsPanel mode="sidebar" enabled={open} />
+            </ChatPanelErrorBoundary>
           </aside>
         </>
       ) : null}
@@ -162,6 +168,35 @@ function PanelLoadingState({ label }: { label: string }) {
       {label}
     </div>
   )
+}
+
+type ChatPanelErrorBoundaryState = { hasError: boolean }
+
+class ChatPanelErrorBoundary extends React.Component<React.PropsWithChildren, ChatPanelErrorBoundaryState> {
+  state: ChatPanelErrorBoundaryState = { hasError: false }
+
+  static getDerivedStateFromError(): ChatPanelErrorBoundaryState {
+    return { hasError: true }
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center text-sm text-muted-foreground">
+          <p>Messages could not load. Refresh and try again.</p>
+          <button
+            type="button"
+            onClick={() => window.location.reload()}
+            className="rounded-lg border border-border bg-card px-3 py-2 font-medium text-foreground transition-colors hover:bg-muted"
+          >
+            Refresh messages
+          </button>
+        </div>
+      )
+    }
+
+    return this.props.children
+  }
 }
 
 function ChatIcon({ hasUnread }: { hasUnread: boolean }) {

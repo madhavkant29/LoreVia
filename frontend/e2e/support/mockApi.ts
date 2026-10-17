@@ -4,6 +4,7 @@ import type { EmailPreferences } from "@/types/email"
 import type { ContinuityFinding, PublicBook, RevisionIntelligence } from "@/types/book"
 import type { PublicForumPost } from "@/types/public"
 import type { DirectMessage } from "@/types/social"
+import { patchRevisionIntelligenceItem } from "@/lib/utils/revisionIntelligence"
 
 type SessionMode = "authenticated" | "guest"
 type LoginMode = "success" | "unauthorized"
@@ -2952,7 +2953,6 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
     if (path === "/api/v1/support/config" && method === "GET") {
       return json(route, {
         assistant_enabled: true,
-        community_url: null,
         corpus_version: "support-e2e-v1",
       })
     }
@@ -4111,7 +4111,11 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
     }
 
     if (path === "/api/v1/books/book-1/revision-intelligence" && method === "GET") {
-      return json(route, activationRevision)
+      const boardItems = mockWriterWorkspace.revision_board?.items ?? []
+      const currentRevision = boardItems.reduce((current: RevisionIntelligence, boardItem: { item_id: string; status: string; task_id?: string | null }) => (
+        patchRevisionIntelligenceItem(current, boardItem.item_id, { status: boardItem.status, task_id: boardItem.task_id ?? null })
+      ), activationRevision as RevisionIntelligence)
+      return json(route, currentRevision)
     }
 
     if (path === "/api/v1/intelligence/book-1/advisor/first-impression" && method === "GET") {

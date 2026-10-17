@@ -352,6 +352,45 @@ def test_validate_auth_csrf_token_accepts_matching_cookie_header_and_origin():
     validate_auth_csrf_token(request)
 
 
+def test_validate_auth_csrf_token_accepts_an_explicit_cors_origin(monkeypatch):
+    token = create_auth_csrf_token()
+    monkeypatch.setattr(
+        "app.core.config.settings.BACKEND_CORS_ORIGINS",
+        "https://app.example.com",
+    )
+    request = Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "headers": [
+                (b"cookie", f"{AUTH_CSRF_COOKIE_NAME}={token}".encode()),
+                (AUTH_CSRF_HEADER_NAME.encode("utf-8"), token.encode("utf-8")),
+                (b"origin", b"https://app.example.com"),
+            ],
+        }
+    )
+
+    validate_auth_csrf_token(request)
+
+
+def test_validate_auth_csrf_token_accepts_any_localhost_port_in_debug(monkeypatch):
+    monkeypatch.setattr("app.core.config.settings.DEBUG", True, raising=False)
+    token = create_auth_csrf_token()
+    request = Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "headers": [
+                (b"cookie", f"{AUTH_CSRF_COOKIE_NAME}={token}".encode()),
+                (AUTH_CSRF_HEADER_NAME.encode("utf-8"), token.encode("utf-8")),
+                (b"origin", b"http://localhost:3001"),
+            ],
+        }
+    )
+
+    validate_auth_csrf_token(request)
+
+
 def test_validate_auth_csrf_token_prefers_last_duplicate_cookie_value():
     stale_token = create_auth_csrf_token()
     fresh_token = create_auth_csrf_token()

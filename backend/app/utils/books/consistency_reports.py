@@ -29,14 +29,16 @@ async def list_chapter_consistency_reports(
     db: AsyncSession,
     book: Book,
     limit: int = 12,
+    *,
+    before_chapter: int | None = None,
 ) -> list[ChapterConsistencyReport]:
+    chapter_query = select(Chapter.number).where(Chapter.book_id == book.id)
+    if before_chapter is not None:
+        chapter_query = chapter_query.where(Chapter.number < before_chapter)
     chapter_numbers = (
         (
             await db.execute(
-                select(Chapter.number)
-                .where(Chapter.book_id == book.id)
-                .order_by(Chapter.number.desc())
-                .limit(limit)
+                chapter_query.order_by(Chapter.number.desc()).limit(limit)
             )
         )
         .scalars()
@@ -53,7 +55,8 @@ async def list_chapter_consistency_reports(
         short_summary = context["summary_by_chapter_id"].get(chapter.id)
         editorial_note = context["editorial_by_chapter_id"].get(chapter.id)
         editorial_concerns, revision_question = (
-            parse_chapter_editorial_note(editorial_note.content) if editorial_note else (None, None)
+            parse_chapter_editorial_note(editorial_note.content)
+            if editorial_note else (None, None)
         )
         new_characters = context["new_characters_by_chapter"].get(chapter_number, [])
         names_by_id = context["names_by_id"]

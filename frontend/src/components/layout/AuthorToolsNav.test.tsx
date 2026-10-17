@@ -262,6 +262,18 @@ describe("AuthorToolsNav", () => {
     expect(view.querySelector('[data-testid="author-nav-helper-overview"]')).toBeNull()
   })
 
+  it("keeps the advanced toggle below the horizontally scrolling tool row", () => {
+    mockBaseState()
+
+    const view = renderAuthorToolsNav({ variant: "bar" })
+    const toggle = Array.from(view.querySelectorAll("button"))
+      .find((button) => button.textContent?.trim() === "Show advanced")
+
+    expect(toggle).not.toBeNull()
+    expect(toggle?.parentElement?.className).toContain("justify-end")
+    expect(toggle?.parentElement?.previousElementSibling?.className).toContain("overflow-x-auto")
+  })
+
   it("limits author navigation for a free owner when the book is in author mode", () => {
     mockBaseState({
       tier: "free",

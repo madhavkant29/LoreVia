@@ -51,13 +51,7 @@ def parse_chapter_editorial_note(
         payload = json.loads(content)
     except (TypeError, ValueError):
         return None, None
-    items = (
-        payload
-        if isinstance(payload, list)
-        else payload.get("concerns")
-        if isinstance(payload, dict)
-        else None
-    )
+    items = payload if isinstance(payload, list) else payload.get("concerns") if isinstance(payload, dict) else None
     question_data = payload.get("revision_question") if isinstance(payload, dict) else None
     if not isinstance(items, list):
         return None, None
@@ -346,6 +340,7 @@ async def build_chapter_consistency_report(
         raise HTTPException(404, "Chapter not found")
 
     short_summary = context["summary_by_chapter_id"].get(chapter.id)
+    editorial_note = context["editorial_by_chapter_id"].get(chapter.id)
     new_characters = context["new_characters_by_chapter"].get(chapter_number, [])
     names_by_id = context["names_by_id"]
 
@@ -395,6 +390,11 @@ async def build_chapter_consistency_report(
     if additions:
         summary_line = f"{summary_line} This upload surfaced " + ", ".join(additions) + "."
 
+    editorial_concerns, revision_question = (
+        parse_chapter_editorial_note(editorial_note.content)
+        if editorial_note else (None, None)
+    )
+
     return ChapterConsistencyReport(
         chapter_number=chapter_number,
         chapter_title=chapter.title,
@@ -413,6 +413,8 @@ async def build_chapter_consistency_report(
         plot_threads_opened=list(dict.fromkeys(thread.title for thread in opened_threads[:6])),
         plot_threads_resolved=list(dict.fromkeys(thread.title for thread in resolved_threads[:6])),
         continuity_flags=list(dict.fromkeys(continuity_flags[:6])),
+        editorial_concerns=editorial_concerns,
+        revision_question=revision_question,
     )
 
 

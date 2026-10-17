@@ -189,7 +189,7 @@ class ChapterSummary(GenerationScopedMixin, Base):
         nullable=False,
         index=True,
     )
-    mode: Mapped[str] = mapped_column(String, nullable=False)  # short | detailed | key_points
+    mode: Mapped[str] = mapped_column(String, nullable=False)  # short | detailed | key_points | editorial_note
     content: Mapped[str] = mapped_column(Text, nullable=False)
     key_events: Mapped[dict | None] = mapped_column(JSONB)
     char_changes: Mapped[dict | None] = mapped_column(JSONB)

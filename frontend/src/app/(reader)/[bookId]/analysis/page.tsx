@@ -1,19 +1,20 @@
 "use client"
 
-import { useQuery } from "@tanstack/react-query"
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query"
 import type { Route } from "next"
 import Link from "next/link"
 import { useParams, useSearchParams } from "next/navigation"
 
 import { ChapterReportsView } from "./analysisPage.reports"
 import { FindingsList } from "./analysisPage.findings"
+import { summarizeEditorialReview } from "./analysisPage.helpers"
 import { SUPPORT_HELP_EVENT } from "@/components/ui/ShortcutHelp"
 import { WorkspaceFamilyHeader } from "@/components/reader/WorkspaceFamilyHeader"
 import { WorkspacePage } from "@/components/ui/Workspace"
 import { booksApi } from "@/lib/api/books"
 import { asQueryKey, bookCacheKey } from "@/lib/query/cacheKeys"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
-import type { Book, ChapterConsistencyReport, ContinuityFinding } from "@/types/book"
+import type { Book, ChapterConsistencyReport, ContinuityFinding, StoryHealth } from "@/types/book"
 
 type ReviewLink = {
   href: string
@@ -71,13 +72,19 @@ export default function AnalysisPage() {
     queryKey: asQueryKey(bookCacheKey(bookId, "continuity-findings")),
     queryFn: () => booksApi.getContinuityFindings(bookId, { includeStale: true }),
     staleTime: 30_000,
-    enabled: activeView === "findings",
   })
-  const reportsQuery = useQuery<ChapterConsistencyReport[]>({
-    queryKey: asQueryKey(bookCacheKey(bookId, "chapter-reports:50")),
-    queryFn: () => booksApi.getChapterReports(bookId, 50),
+  const reportsQuery = useInfiniteQuery<ChapterConsistencyReport[]>({
+    queryKey: asQueryKey(bookCacheKey(bookId, "chapter-reports:pages:50")),
+    initialPageParam: null as number | null,
+    queryFn: ({ pageParam }) => booksApi.getChapterReports(bookId, 50, typeof pageParam === "number" ? pageParam : undefined),
+    getNextPageParam: (lastPage) => lastPage.length === 50 ? lastPage[lastPage.length - 1].chapter_number : undefined,
     staleTime: 30_000,
-    enabled: activeView === "chapters",
+  })
+  const reports = reportsQuery.data?.pages.flat() ?? null
+  const healthQuery = useQuery<StoryHealth>({
+    queryKey: asQueryKey(bookCacheKey(bookId, "story-health")),
+    queryFn: () => booksApi.getStoryHealth(bookId),
+    staleTime: 30_000,
   })
 
   const book = bookQuery.data
@@ -85,6 +92,12 @@ export default function AnalysisPage() {
   const seriesLink = book?.primary_series_id
     ? { href: `/series/${book.primary_series_id}/ask`, title: "Series questions", description: "Ask across every book connected to this series." }
     : null
+  const review = summarizeEditorialReview({
+    health: healthQuery.data ?? null,
+    findings: findingsQuery.data ?? null,
+    reports,
+    failed: findingsQuery.isError || reportsQuery.isError,
+  })
 
   return (
     <WorkspacePage className={isDark ? "text-slate-100" : "text-stone-950"}>
@@ -99,6 +112,20 @@ export default function AnalysisPage() {
         />
 
         {bookQuery.isError ? <div role="alert" className="mt-4 border-l-2 border-amber-400 pl-4 text-sm"><p>Book details could not load.</p><button type="button" disabled={bookQuery.isFetching} onClick={() => void bookQuery.refetch()} className="min-h-10 underline">Retry book details</button></div> : null}
+        <section aria-label="Review in brief" className={`mt-6 rounded-md border p-5 sm:p-6 ${isDark ? "border-white/10 bg-[#101a20]" : "border-stone-200 bg-white"}`}>
+          <p className={`text-xs font-semibold uppercase tracking-[0.14em] ${isDark ? "text-slate-400" : "text-stone-500"}`}>Review in brief</p>
+          <p className="mt-3 max-w-4xl font-serif text-xl leading-8">{review.leadSentence}</p>
+          {review.contextSentence ? <p className={`mt-3 max-w-4xl text-sm leading-7 ${isDark ? "text-slate-300" : "text-stone-700"}`}>{review.contextSentence}</p> : null}
+          {review.storySentence ? <p className={`mt-2 max-w-4xl text-sm leading-7 ${isDark ? "text-slate-300" : "text-stone-700"}`}>{review.storySentence}</p> : null}
+          <p className={`mt-4 border-t pt-3 text-xs leading-6 ${isDark ? "border-white/10 text-slate-400" : "border-stone-200 text-stone-600"}`}>{review.scopeSentence}</p>
+          {findingsQuery.isError || reportsQuery.isError ? (
+            <div role="alert" className={`mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm ${isDark ? "text-amber-300" : "text-amber-800"}`}>
+              <span>Part of this review could not load.</span>
+              {findingsQuery.isError ? <button type="button" onClick={() => void findingsQuery.refetch()} className="underline underline-offset-4">Retry findings evidence</button> : null}
+              {reportsQuery.isError ? <button type="button" onClick={() => void reportsQuery.refetch()} className="underline underline-offset-4">Retry chapter coverage</button> : null}
+            </div>
+          ) : null}
+        </section>
         <div onKeyDown={(event) => {
           if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return
           const tabs = Array.from(event.currentTarget.querySelectorAll<HTMLAnchorElement>("[role=tab]"))
@@ -160,7 +187,7 @@ export default function AnalysisPage() {
           </section>
         ) : null}
         </> : (
-          reportsQuery.data ? <ChapterReportsView bookId={bookId} reports={reportsQuery.data} isDark={isDark} /> : null
+          reports ? <ChapterReportsView bookId={bookId} reports={reports} findings={findingsQuery.data ?? []} canReprocess={book?.mode === "author" && book?.access_class === "owner"} hasMore={reportsQuery.hasNextPage} loadingMore={reportsQuery.isFetchingNextPage} onLoadMore={() => void reportsQuery.fetchNextPage()} isDark={isDark} /> : null
         )}
         </div>
       </main>

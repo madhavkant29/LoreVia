@@ -169,7 +169,7 @@ function AuthorLoopWorkspace({ bookId }: { bookId: string }) {
     window.scrollTo({ top: 0, behavior: "smooth" })
   }
 
-  const { creatingAssignment, savingIssueId, savingFeedbackId, copyingLink, guestLink, lastDismissedId, busy, handleIssueStatus, handleCreateAssignment, handleCopyGuestLink, handleFeedbackStatus } = useAuthorLoopActions({
+  const { creatingAssignment, savingIssueId, savingFeedbackId, copyingLink, guestLink, lastDismissedId, taskCreated, busy, handleIssueStatus, handleCreateAssignment, handleCopyGuestLink, handleFeedbackStatus } = useAuthorLoopActions({
     bookId, totalChapters: book?.total_chapters ?? 0, writerWorkspace, issueCards, selectedAssignment,
     draft: { readerEmail, scopeKind, chapterStart, chapterEnd, deadline, authorQuestions }, setReaderEmail: (value) => { setReaderEmail(value); setInviteDirty(false) }, setSelectedAssignmentId, setStatusMessage,
   })
@@ -209,7 +209,15 @@ function AuthorLoopWorkspace({ bookId }: { bookId: string }) {
         </nav>
 
         <div className="mt-7 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between"><div><p className={`text-xs font-medium ${mutedClass(isDark)}`}>Step {activeIndex + 1}</p><p className="mt-1 text-2xl font-semibold tracking-tight">{activeStepMeta.label}</p><p className={`mt-1 text-sm ${mutedClass(isDark)}`}>{activeStepMeta.description}</p></div><p className={`text-xs ${mutedClass(isDark)}`}>{stepStorageAvailable ? "Your current step is saved on this device." : "Device storage is unavailable. Your step will reset when you leave."}</p></div>
-        {statusMessage ? <p role="status" className={`mt-4 border-l-2 pl-3 text-sm ${isDark ? "border-teal-300 text-slate-300" : "border-teal-700 text-stone-600"}`}>{statusMessage}</p> : null}
+        {statusMessage ? (
+          <div role="status" className={`fixed bottom-4 left-4 right-4 z-50 max-w-sm rounded-lg border p-4 shadow-xl sm:bottom-6 sm:left-auto sm:right-6 ${isDark ? "border-teal-400/30 bg-[#10231f] text-slate-100" : "border-teal-200 bg-teal-50 text-stone-900"}`}>
+            <p className="text-sm">{statusMessage}</p>
+            <div className="mt-3 flex items-center justify-between gap-5">
+              {taskCreated ? <Link href={`/${bookId}#author-project-tasks` as Route} prefetch={false} className="text-sm font-semibold underline underline-offset-4">View tasks</Link> : <span />}
+              <button type="button" onClick={() => setStatusMessage(null)} aria-label="Dismiss notice" className="text-sm font-semibold">Dismiss</button>
+            </div>
+          </div>
+        ) : null}
         {activeStep === "feedback" && assignmentRemoved ? <p className="mt-3 text-sm" role="status">The selected assignment is no longer available. Showing the first available assignment.</p> : null}
 
         {lastDismissedId ? <button type="button" className="app-button-secondary mt-2" disabled={busy} onClick={() => void handleIssueStatus(lastDismissedId, "pending")}>Undo dismissal</button> : null}

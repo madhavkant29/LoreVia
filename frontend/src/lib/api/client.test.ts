@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 const {
   axiosCreateMock,
   axiosPostMock,
+  axiosGetMock,
   isAxiosErrorMock,
   buildDailyCapEventDetailMock,
   dispatchDailyCapEventMock,
@@ -10,6 +11,7 @@ const {
 } = vi.hoisted(() => ({
   axiosCreateMock: vi.fn(),
   axiosPostMock: vi.fn(),
+  axiosGetMock: vi.fn(),
   isAxiosErrorMock: vi.fn(),
   buildDailyCapEventDetailMock: vi.fn(),
   dispatchDailyCapEventMock: vi.fn(),
@@ -24,10 +26,12 @@ vi.mock("axios", () => ({
   default: {
     create: axiosCreateMock,
     post: axiosPostMock,
+    get: axiosGetMock,
     isAxiosError: isAxiosErrorMock,
   },
   create: axiosCreateMock,
   post: axiosPostMock,
+  get: axiosGetMock,
   isAxiosError: isAxiosErrorMock,
 }))
 
@@ -71,6 +75,7 @@ describe("api client", () => {
   beforeEach(() => {
     axiosCreateMock.mockReset()
     axiosPostMock.mockReset()
+    axiosGetMock.mockReset()
     isAxiosErrorMock.mockReset()
     buildDailyCapEventDetailMock.mockReset()
     dispatchDailyCapEventMock.mockReset()
@@ -292,6 +297,26 @@ describe("api client", () => {
     expect(apiClientMock).toHaveBeenCalledWith(originalRequest)
     expect(result).toEqual({ data: { retried: true } })
     vi.stubGlobal("document", originalDocument)
+  })
+
+  it("bootstraps a missing CSRF cookie and retries CSRF-protected writes once", async () => {
+    const { captured, apiClientMock } = await loadClientModule()
+    const originalRequest: { url: string; _csrfRetry?: boolean } = { url: "/notifications/notification-1/read" }
+    axiosGetMock.mockResolvedValue({ status: 204 })
+    apiClientMock.mockResolvedValue({ data: { retried: true } })
+
+    const result = await captured.responseError?.({
+      config: originalRequest,
+      response: { status: 403, data: { detail: "Invalid CSRF token." } },
+    })
+
+    expect(axiosGetMock).toHaveBeenCalledWith("/api/v1/auth/csrf", {
+      withCredentials: true,
+      timeout: 15_000,
+    })
+    expect(originalRequest._csrfRetry).toBe(true)
+    expect(apiClientMock).toHaveBeenCalledWith(originalRequest)
+    expect(result).toEqual({ data: { retried: true } })
   })
 
   it("keeps refresh requests same-origin in the browser even when NEXT_PUBLIC_API_URL is set", async () => {

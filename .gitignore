@@ -135,6 +135,7 @@ yarn-error.log
 frontend\test-results
 
 # Repo-local transient artifacts
+/backend/local/
 .ruff_cache/
 tmp/
 frontend/playwright-report/

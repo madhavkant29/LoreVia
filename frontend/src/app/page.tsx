@@ -138,10 +138,10 @@ function SectionHeading({
 
 function WorkflowPanel() {
   return (
-    <div className="border-y border-white/[0.1] py-8">
+    <div className="rounded-lg border border-white/[0.08] bg-[#121214] p-6 md:p-8">
       <div className="grid gap-10 lg:grid-cols-[0.8fr_1.2fr] lg:items-center">
         <div>
-          <p className="text-sm font-semibold text-[#d6a84f]">Revision workflow</p>
+          <p className="text-3xs font-semibold uppercase tracking-[0.32em] text-[#d6a84f]">Revision workflow</p>
           <h2 className="mt-5 max-w-lg font-display text-4xl font-semibold leading-[1.02] text-[#f4f1ea] md:text-5xl">
             Move from memory-based revision to manuscript evidence.
           </h2>
@@ -150,15 +150,17 @@ function WorkflowPanel() {
           </p>
         </div>
 
-        <ol className="divide-y divide-white/[0.1] border-y border-white/[0.1] md:grid md:grid-cols-3 md:divide-x md:divide-y-0">
+        <div className="grid gap-4 md:grid-cols-3">
           {workflowSteps.map((item, index) => (
-            <li key={item.step} className="py-5 md:px-5 md:first:pl-0 md:last:pr-0">
-              <p className="text-sm font-semibold text-[#d6a84f]">0{index + 1}</p>
-              <h3 className="mt-3 text-lg font-semibold text-[#f4f1ea]">{item.step}</h3>
+            <div key={item.step} className="rounded-md border border-white/[0.08] bg-[#0c0c0d] p-5">
+              <div className="flex h-8 w-8 items-center justify-center rounded-md border border-[#665128] text-sm font-semibold text-[#d6a84f]">
+                {index + 1}
+              </div>
+              <h3 className="mt-5 text-lg font-semibold text-[#f4f1ea]">{item.step}</h3>
               <p className="mt-2 text-sm leading-7 text-[#a09a90]">{item.body}</p>
-            </li>
+            </div>
           ))}
-        </ol>
+        </div>
       </div>
     </div>
   )
@@ -166,14 +168,14 @@ function WorkflowPanel() {
 
 function HeroWorkspaceSummary() {
   return (
-    <aside className="overflow-hidden border border-white/10 bg-[#121214] shadow-[0_22px_70px_rgba(0,0,0,0.3)]">
+    <aside className="overflow-hidden rounded-lg border border-white/10 bg-[#121214] shadow-[0_28px_90px_rgba(0,0,0,0.35)]">
       <div className="flex items-center justify-between border-b border-white/[0.08] px-4 py-3">
-        <p className="text-sm font-semibold text-[#d6a84f]">Live manuscript scan</p>
+        <p className="text-3xs font-semibold uppercase tracking-[0.24em] text-[#d6a84f]">Live manuscript scan</p>
         <span className="text-xs text-[#a09a90]">Sky of Ash / demo draft</span>
       </div>
-      <div className="relative aspect-video bg-[#0c0c0d]">
+      <div className="relative aspect-[2503/1389] bg-[#0c0c0d]">
         <Image
-          src="/landing/manuscript-analysis.webp"
+          src="/landing/manuscript-analysis.png"
           alt="LoreVia manuscript editor showing continuity issues beside a draft"
           fill
           priority
@@ -189,10 +191,10 @@ function HeroWorkspaceSummary() {
 function HomepageComparisonSection() {
   return (
     <Section id="compare" className="py-10">
-      <div className="border-y border-white/[0.1] py-8">
+      <div className="rounded-lg border border-white/[0.08] bg-[#0d1715] px-6 py-8 md:px-10">
         <div className="grid gap-6 lg:grid-cols-[1fr_auto] lg:items-center">
           <div>
-            <p className="text-sm font-semibold text-[#86cabb]">Compare workflows</p>
+            <p className="text-3xs font-semibold uppercase tracking-[0.32em] text-[#6fae9f]">Compare workflows</p>
             <h2 className="mt-4 max-w-2xl font-display text-3xl font-semibold leading-tight text-white md:text-4xl">
               Already comparing writing tools?
             </h2>
@@ -202,7 +204,7 @@ function HomepageComparisonSection() {
           </div>
           <Link
             href="/compare"
-            className="inline-flex items-center justify-center gap-2 border border-white/[0.16] px-6 py-3.5 text-base font-semibold text-[#f4f1ea] transition hover:bg-white/[0.06]"
+            className="inline-flex items-center justify-center gap-2 rounded-md border border-white/[0.12] bg-white/5 px-6 py-3.5 text-base font-semibold text-[#f4f1ea] transition hover:bg-white/[0.08]"
           >
             See detailed comparisons
             <ArrowIcon />
@@ -288,7 +290,16 @@ export default function HomePage() {
 
                   <div className="mt-9">
                     <p className="text-sm text-[#a09a90]">Built for fiction writers, novelists, beta readers, and editors.</p>
-                    <p className="mt-3 text-sm font-medium text-[#d7ddd8]">Imports: {fileFormats.join(" · ")}</p>
+                    <div className="mt-4 flex flex-wrap gap-3">
+                      {fileFormats.map((format) => (
+                        <span
+                          key={format}
+                          className="rounded-md border border-white/10 bg-white/5 px-4 py-2 text-sm font-medium text-[#f4f1ea]"
+                        >
+                          {format}
+                        </span>
+                      ))}
+                    </div>
                   </div>
                 </div>
               </Reveal>

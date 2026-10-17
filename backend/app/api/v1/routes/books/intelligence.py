@@ -197,6 +197,7 @@ async def decide_revision_finding(
 async def get_book_chapter_reports(
     book_id: uuid.UUID,
     limit: int = Query(12, ge=1, le=50),
+    before_chapter: int | None = Query(None, ge=1),
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
@@ -205,7 +206,7 @@ async def get_book_chapter_reports(
         raise HTTPException(403, "This share does not include the continuity report.")
     if collaborator is None:
         require_author_access(current_user)
-    return await list_chapter_consistency_reports(db, book, limit)
+    return await list_chapter_consistency_reports(db, book, limit, before_chapter=before_chapter)
 
 
 @router.get("/{book_id}/chapter-versions", response_model=list[ChapterVersionOut])

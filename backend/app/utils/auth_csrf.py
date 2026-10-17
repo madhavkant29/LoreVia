@@ -8,7 +8,7 @@ from urllib.parse import urlparse
 from fastapi import HTTPException, Request
 from fastapi.responses import Response
 
-from app.core.config import settings
+from app.core.config import cors_origins, settings
 from app.core.security import decode_token
 from app.utils.cookie_utils import (
     auth_cookie_path,
@@ -92,6 +92,7 @@ def _validate_same_origin_request(request: Request) -> None:
         "https://getlorevia.com",
         "https://www.getlorevia.com",
     }
+    allowed_origins.update(origin.rstrip("/") for origin in cors_origins() if origin != "*")
     if settings.DEBUG:
         allowed_origins.update({"http://localhost:3000", "http://127.0.0.1:3000"})
 
@@ -107,6 +108,8 @@ def _validate_same_origin_request(request: Request) -> None:
     except ValueError:
         raise HTTPException(403, "Invalid request origin.")
 
+    if settings.DEBUG and parsed.scheme in {"http", "https"} and parsed.hostname in {"localhost", "127.0.0.1", "[::1]", "::1"}:
+        return
     if request_origin.rstrip("/") not in allowed_origins:
         raise HTTPException(403, "Invalid request origin.")
 

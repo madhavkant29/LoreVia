@@ -94,5 +94,4 @@ class SupportIncidentOut(BaseModel):
 
 class SupportConfigOut(BaseModel):
     assistant_enabled: bool
-    community_url: str | None = None
     corpus_version: str

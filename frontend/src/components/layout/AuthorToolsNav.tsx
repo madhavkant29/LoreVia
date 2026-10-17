@@ -496,16 +496,18 @@ export function AuthorToolsNav({
                 )
               })}
             </div>
-            {currentShell === "author" && allToolsOpen ? (
+          </div>
+          {currentShell === "author" ? (
+            <div className={`flex justify-end border-t py-1.5 ${isDark ? "border-white/[0.06]" : "border-stone-200/70"}`}>
               <button
                 type="button"
                 onClick={toggleAdvancedTools}
-                className={`ml-auto shrink-0 rounded-sm px-3 py-2 text-xs font-medium ${isDark ? "text-slate-400 hover:text-white" : "text-stone-500 hover:text-stone-950"}`}
+                className={`shrink-0 rounded-sm px-3 py-2 text-xs font-medium ${isDark ? "text-slate-400 hover:bg-white/[0.04] hover:text-white" : "text-stone-500 hover:bg-stone-50 hover:text-stone-950"}`}
               >
                 {showAdvanced ? "Hide advanced" : "Show advanced"}
               </button>
-            ) : null}
-          </div>
+            </div>
+          ) : null}
         </div>
       </nav>
     )

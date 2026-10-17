@@ -29,7 +29,6 @@ import {
 import { authApi } from "@/lib/api/auth"
 import { clearAuthCookies } from "@/lib/api/client"
 import { billingApi } from "@/lib/api/billing"
-import { supportApi } from "@/lib/api/support"
 import { getAnalyticsConsentValue, writeAnalyticsConsentCookie } from "@/lib/analytics/posthogConsent"
 import { emailApi } from "@/lib/api/email"
 import { getTrialCountdown } from "@/lib/billing/trialCountdown"
@@ -80,11 +79,9 @@ export default function SettingsPage() {
   const stableUser = authHydrated ? user : null
   const billing = useSettingsResource(stableUser?.email, billingApi.subscription)
   const emails = useSettingsResource(stableUser?.email, emailApi.getPreferences)
-  const community = useSettingsResource(stableUser?.email, supportApi.config)
   const billingStatus = billing.data
   const emailPreferences = emails.data
   const setEmailPreferences = emails.setData
-  const supportConfig = community.data
   const [modeSaving, setModeSaving] = useState(false)
   const [modeMessage, setModeMessage] = useState<string | null>(null)
   const accountLock = useRef(false)
@@ -692,24 +689,6 @@ export default function SettingsPage() {
                   </div>
                 </div>
               </div>
-            </SettingsPanel>
-
-            <SettingsPanel id="community" title="Community">
-              <div className="settings-session-row">
-                <div>
-                  <p className="settings-label">LoreVia Discord</p>
-                  <p className="settings-copy mt-2">Join the general user community. Do not post private manuscript text or account details there.</p>
-                </div>
-                {supportConfig?.community_url ? (
-                  <a href={supportConfig.community_url} target="_blank" rel="noreferrer" className="settings-primary-button">
-                    Join Discord
-                  </a>
-                ) : (
-                  <span className="settings-copy">Community link unavailable</span>
-                )}
-              </div>
-              {community.loading ? <InlineMessage message="Loading community link…" tone="neutral" className="mt-4" /> : null}
-              {community.failed ? <div className="mt-4"><InlineMessage message="Community settings could not load right now." tone="warning" /><button type="button" onClick={community.retry} className="settings-secondary-button mt-3">Retry community link</button></div> : null}
             </SettingsPanel>
 
             <SettingsPanel id="emails" title="LoreVia emails">

@@ -1,4 +1,4 @@
-import type { GoalCalendarItem, RevisionActionItem, RevisionBoard, RevisionIntelligence } from "@/types/book"
+import type { GoalCalendarItem, RevisionActionItem, RevisionBoard, RevisionIntelligence, WriterWorkspace } from "@/types/book"
 
 export function todayDateKey(date = new Date()) {
   const year = date.getFullYear()
@@ -44,15 +44,17 @@ export function patchRevisionIntelligenceItem(
     change_impacts: revision.change_impacts.map(patchItem),
     genre_checks: revision.genre_checks.map((genreCheck) => ({
       ...genreCheck,
-      findings: genreCheck.findings.map(patchItem),
+      findings: (genreCheck.findings ?? []).map(patchItem),
     })),
     revision_plan: revision.revision_plan.map((revisionPass) => ({
       ...revisionPass,
-      items: revisionPass.items.map(patchItem),
+      items: (revisionPass.items ?? []).map(patchItem),
     })),
     scene_advice: revision.scene_advice.map(patchItem),
     confusion_map: revision.confusion_map.map(patchItem),
     voice_alerts: revision.voice_alerts.map(patchItem),
+    external_signals: revision.external_signals?.map(patchItem),
+    priority_findings: revision.priority_findings?.map(patchItem),
   }
   const uniqueItems = new Map<string, RevisionActionItem>()
   for (const item of [
@@ -60,6 +62,8 @@ export function patchRevisionIntelligenceItem(
     ...nextRevision.scene_advice,
     ...nextRevision.confusion_map,
     ...nextRevision.voice_alerts,
+    ...(nextRevision.external_signals ?? []),
+    ...(nextRevision.priority_findings ?? []),
     ...nextRevision.genre_checks.flatMap((genreCheck) => genreCheck.findings),
     ...nextRevision.revision_plan.flatMap((revisionPass) => revisionPass.items),
   ]) {
@@ -90,5 +94,54 @@ export function buildRevisionTask(item: RevisionActionItem, dueDate = todayDateK
     quota_value: 1,
     quota_unit: "tasks",
     completed: false,
+  }
+}
+
+export function findRevisionTaskSource(
+  revision: RevisionIntelligence | null,
+  taskId: string,
+): RevisionActionItem | null {
+  if (!revision || !taskId) return null
+  const findings = [
+    ...(revision.change_impacts ?? []),
+    ...(revision.scene_advice ?? []),
+    ...(revision.confusion_map ?? []),
+    ...(revision.voice_alerts ?? []),
+    ...(revision.external_signals ?? []),
+    ...(revision.priority_findings ?? []),
+    ...(revision.genre_checks ?? []).flatMap((check) => check.findings ?? []),
+    ...(revision.revision_plan ?? []).flatMap((pass) => pass.items ?? []),
+  ]
+  return findings.find((item) => item.task_id === taskId || `revision-task:${item.id}` === taskId) ?? null
+}
+
+export function buildGoalCalendarSavePatch(
+  workspace: WriterWorkspace,
+  goalCalendar: GoalCalendarItem[],
+): { patch: Partial<WriterWorkspace>; removedTaskIds: string[] } {
+  const nextIds = new Set(goalCalendar.map((item) => item.id))
+  const removedTaskIds = workspace.goal_calendar
+    .filter((item) => item.quota_unit === "tasks" && !nextIds.has(item.id))
+    .map((item) => item.id)
+  if (removedTaskIds.length === 0) return { patch: { goal_calendar: goalCalendar }, removedTaskIds }
+
+  const removedIds = new Set(removedTaskIds)
+  return {
+    patch: {
+      goal_calendar: goalCalendar,
+      revision_board: {
+        ...workspace.revision_board,
+        items: (workspace.revision_board?.items ?? []).map((item) => {
+          const linkedTaskId = item.task_id ?? `revision-task:${item.item_id}`
+          if (!removedIds.has(linkedTaskId)) return item
+          return {
+            ...item,
+            task_id: null,
+            status: item.status === "task_created" ? "pending" : item.status,
+          }
+        }),
+      },
+    },
+    removedTaskIds,
   }
 }

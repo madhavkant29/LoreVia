@@ -14,8 +14,8 @@ export function PublicContextChrome() {
     <header className="border-b border-[rgba(var(--border),0.75)] bg-[rgb(var(--background))]">
       <nav aria-label="Public navigation" className="mx-auto flex min-h-16 max-w-[1240px] items-center gap-3 px-4 md:px-8 lg:px-10">
         <Link href="/public" className="mr-auto inline-flex min-h-11 items-center" aria-label="LoreVia public library">
-          <ThemeBrandImage variant="icon" alt="LoreVia" className="h-9 w-9 object-contain sm:hidden" priority />
-          <ThemeBrandImage variant="lockup" alt="" className="hidden h-9 w-auto object-contain sm:block" priority />
+          <ThemeBrandImage variant="icon" mode={theme} alt="LoreVia" className="h-9 w-9 object-contain sm:hidden" priority />
+          <ThemeBrandImage variant="lockup" mode={theme} alt="LoreVia" className="hidden h-9 w-auto object-contain sm:block" priority />
         </Link>
         <div className="hidden items-center gap-1 sm:flex">
           <Link href="/public" className="inline-flex min-h-11 items-center gap-2 px-3 text-sm font-semibold text-[rgb(var(--muted-foreground))] hover:text-[rgb(var(--foreground))]">

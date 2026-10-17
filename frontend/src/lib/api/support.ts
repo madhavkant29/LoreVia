@@ -1,7 +1,6 @@
 import { apiClient } from "./client"
 import type {
   SupportAnswer,
-  SupportConfig,
   SupportGuideSummary,
   SupportIncident,
   SupportRecentMessage,
@@ -9,7 +8,6 @@ import type {
 } from "@/types/support"
 
 export const supportApi = {
-  config: () => apiClient.get<SupportConfig>("/support/config").then((response) => response.data),
   guides: () => apiClient.get<{ guides: SupportGuideSummary[] }>("/support/guides").then((response) => response.data.guides),
   ask: (message: string, context: SupportUiContext, recentMessages: SupportRecentMessage[] = []) =>
     apiClient.post<SupportAnswer>("/support/chat", {

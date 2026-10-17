@@ -10,7 +10,7 @@ from sqlalchemy import delete
 from app.core.config import settings
 from app.engine.embeddings.embedder import build_chunk_embedding_text, embed_batch
 from app.models.intelligence import BookChunk
-from app.parsers.chunker import ChunkingConfig, chunk_text
+from app.parsers.chunker import ChunkingConfig, chunk_text, count_tokens
 from app.utils.ingestion_utils import chunked, elapsed_ms
 
 log = logging.getLogger("lorevia.extraction")
@@ -28,7 +28,7 @@ async def prepare_chapter_chunks_with_embeddings(
     chapter,
     chapter_number: int,
     ch_data: dict,
-) -> list[str]:
+) -> PreparedChapterChunks:
     chunk_started = time.perf_counter()
     chunks = chunk_text(
         ch_data["text"],
@@ -105,7 +105,7 @@ async def prepare_chapter_chunks_with_embeddings(
             chunk_index=index,
             text=chunk_text_val,
             embedding=emb,
-            token_count=len(chunk_text_val.split()),
+            token_count=count_tokens(chunk_text_val),
         )
         for index, (chunk_text_val, emb) in enumerate(zip(chunks, chunk_embeddings))
     ]

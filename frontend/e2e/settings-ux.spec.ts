@@ -49,7 +49,7 @@ test("settings search has a clear recovery and preserves hidden unsaved fields",
 
 test("settings resource failures retry independently without inventing billing or email choices", async ({ page }) => {
   let fail = true
-  for (const endpoint of ["billing/subscription", "email/preferences", "support/config"]) await page.route(`**/api/v1/${endpoint}`, (route) => fail ? route.fulfill({ status: 503, json: {} }) : route.fallback())
+  for (const endpoint of ["billing/subscription", "email/preferences"]) await page.route(`**/api/v1/${endpoint}`, (route) => fail ? route.fulfill({ status: 503, json: {} }) : route.fallback())
   await page.goto("/settings")
   await expect(page.getByRole("button", { name: "Retry billing details" })).toBeVisible()
   await expect(page.getByText(/renewal and payment status are unverified/)).toBeVisible()
@@ -59,8 +59,6 @@ test("settings resource failures retry independently without inventing billing o
   await expect(page.getByText(/Your subscription renews automatically/)).toBeVisible()
   await page.getByRole("button", { name: "Retry email preferences" }).click()
   await expect(page.getByRole("button", { name: /Product updates/ })).toHaveAttribute("aria-pressed", "true")
-  await page.getByRole("button", { name: "Retry community link" }).click()
-  await expect(page.getByRole("button", { name: "Retry community link" })).toHaveCount(0)
 })
 
 test("daily goals keep invalid and failed input and save the exact valid value", async ({ page }) => {

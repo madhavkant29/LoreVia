@@ -1,8 +1,11 @@
 "use client"
 
 import { useMemo, useState } from "react"
+import Link from "next/link"
+import type { Route } from "next"
 
 import { booksApi } from "@/lib/api/books"
+import { getApiErrorDetail } from "@/lib/utils/apiErrors"
 import { applyRevisionBoardState, buildRevisionTask, patchRevisionIntelligenceItem } from "@/lib/utils/revisionIntelligence"
 import type {
   CharacterKnowledgeFact,
@@ -20,6 +23,7 @@ type Props = {
   isDark: boolean
   onRevisionChange: (revision: RevisionIntelligence) => void
   onWriterWorkspaceChange: (workspace: WriterWorkspace) => void
+  onTaskCreated?: (count: number) => void
   variant?: "full" | "preview" | "story-map"
 }
 
@@ -53,6 +57,18 @@ function mergeGoalCalendar(existing: GoalCalendarItem[], additions: GoalCalendar
   return [...existing, ...additions.filter((item) => !seen.has(item.id))]
 }
 
+function RevisionActionNotice({ bookId, message, taskSaved, isDark, onDismiss }: { bookId: string; message: string; taskSaved: boolean; isDark: boolean; onDismiss: () => void }) {
+  return (
+    <div role="status" className={`fixed bottom-4 left-4 right-4 z-50 max-w-sm rounded-lg border p-4 shadow-xl sm:bottom-6 sm:left-auto sm:right-6 ${isDark ? "border-teal-400/30 bg-[#10231f] text-slate-100" : "border-teal-200 bg-teal-50 text-stone-900"}`}>
+      <p className="text-sm">{message}</p>
+      <div className="mt-3 flex items-center justify-between gap-5">
+        {taskSaved ? <Link href={`/${bookId}#author-project-tasks` as Route} prefetch={false} className="text-sm font-semibold underline underline-offset-4">View tasks</Link> : <span />}
+        <button type="button" onClick={onDismiss} aria-label="Dismiss revision notice" className="text-sm font-semibold">Dismiss</button>
+      </div>
+    </div>
+  )
+}
+
 function SectionFrame({ title, body, isDark, children }: { title: string; body: string; isDark: boolean; children: React.ReactNode }) {
   return (
     <section className={`rounded-md border p-5 ${isDark ? "border-white/[0.06] bg-white/[0.025]" : "border-slate-200/70 bg-slate-50/60"}`}>
@@ -67,6 +83,7 @@ function RevisionItemCard({
   item,
   isDark,
   busy,
+  canCreateTask,
   onMarkFixed,
   onIgnore,
   onConvertToTask,
@@ -75,6 +92,7 @@ function RevisionItemCard({
   item: RevisionActionItem
   isDark: boolean
   busy: boolean
+  canCreateTask: boolean
   onMarkFixed: () => void
   onIgnore: () => void
   onConvertToTask: () => void
@@ -93,7 +111,7 @@ function RevisionItemCard({
         <p className={`mt-2 text-xs leading-5 ${isDark ? "text-sky-300" : "text-sky-700"}`}>{item.recommendation}</p>
       ) : null}
       {item.assigned_version_id ? (
-        <p className={`mt-2 text-xs ${isDark ? "text-violet-300" : "text-violet-700"}`}>Assigned to a draft snapshot for follow-up.</p>
+        <p className={`mt-2 text-xs ${isDark ? "text-teal-300" : "text-teal-700"}`}>Assigned to a draft snapshot for follow-up.</p>
       ) : null}
       <div className="mt-4 flex flex-wrap gap-2">
         <button
@@ -114,17 +132,18 @@ function RevisionItemCard({
         </button>
         <button
           type="button"
-          disabled={busy}
+          disabled={busy || !canCreateTask || item.status === "task_created"}
           onClick={onConvertToTask}
+          title={!canCreateTask ? "Project planning data is not available yet." : undefined}
           className={`rounded-full px-3 py-1.5 text-xs font-semibold transition disabled:opacity-50 ${isDark ? "bg-sky-500/12 text-sky-200 hover:bg-sky-500/20" : "bg-sky-50 text-sky-700 hover:bg-sky-100"}`}
         >
-          Convert to task
+          {item.status === "task_created" ? "Task created" : "Convert to task"}
         </button>
         <button
           type="button"
           disabled={busy}
           onClick={onAssignVersion}
-          className={`rounded-full px-3 py-1.5 text-xs font-semibold transition disabled:opacity-50 ${isDark ? "bg-violet-500/12 text-violet-200 hover:bg-violet-500/20" : "bg-violet-50 text-violet-700 hover:bg-violet-100"}`}
+          className={`rounded-full px-3 py-1.5 text-xs font-semibold transition disabled:opacity-50 ${isDark ? "bg-teal-500/12 text-teal-200 hover:bg-teal-500/20" : "bg-teal-50 text-teal-700 hover:bg-teal-100"}`}
         >
           Assign to draft version
         </button>
@@ -265,9 +284,11 @@ export function RevisionIntelligencePanel({
   isDark,
   onRevisionChange,
   onWriterWorkspaceChange,
+  onTaskCreated,
   variant = "full",
 }: Props) {
   const [statusMessage, setStatusMessage] = useState<string | null>(null)
+  const [taskSaved, setTaskSaved] = useState(false)
   const [creatingChecklist, setCreatingChecklist] = useState(false)
   const [busyItemId, setBusyItemId] = useState<string | null>(null)
   const [showKnowledgeDetails, setShowKnowledgeDetails] = useState(false)
@@ -294,13 +315,14 @@ export function RevisionIntelligencePanel({
     extraWorkspace?: Partial<WriterWorkspace>,
     message?: string
   ) => {
-    const nextBoard = applyRevisionBoardState(board, item.id, {
-      ...patch,
-      updated_at: new Date().toISOString(),
-    })
-    const nextRevision = patchRevisionIntelligenceItem(revision, item.id, patch)
     setBusyItemId(item.id)
+    setTaskSaved(false)
     try {
+      const nextBoard = applyRevisionBoardState(board, item.id, {
+        ...patch,
+        updated_at: new Date().toISOString(),
+      })
+      const nextRevision = patchRevisionIntelligenceItem(revision, item.id, patch)
       await persistWorkspace(
         {
           ...extraWorkspace,
@@ -308,9 +330,11 @@ export function RevisionIntelligencePanel({
         },
         nextRevision
       )
+      if (patch.status === "task_created") onTaskCreated?.(1)
+      setTaskSaved(patch.status === "task_created")
       setStatusMessage(message ?? `${item.title} updated.`)
-    } catch {
-      setStatusMessage("We could not save that revision action right now.")
+    } catch (error) {
+      setStatusMessage(getApiErrorDetail(error) ?? "We could not save that revision action right now.")
     } finally {
       setBusyItemId(null)
     }
@@ -358,6 +382,7 @@ export function RevisionIntelligencePanel({
   }
 
   const createChecklist = async () => {
+    setTaskSaved(false)
     if (!writerWorkspace || creatingChecklist) return
     const planItems = revision.revision_plan.flatMap((revisionPass) => revisionPass.items)
     const actionable = planItems.filter((item, index, array) => array.findIndex((candidate) => candidate.id === item.id) === index)
@@ -386,9 +411,11 @@ export function RevisionIntelligencePanel({
         },
         nextRevision
       )
+      onTaskCreated?.(pending.length)
+      setTaskSaved(true)
       setStatusMessage(`Created ${pending.length} revision checklist item${pending.length === 1 ? "" : "s"}.`)
-    } catch {
-      setStatusMessage("We could not create the revision checklist right now.")
+    } catch (error) {
+      setStatusMessage(getApiErrorDetail(error) ?? "We could not create the revision checklist right now.")
     } finally {
       setCreatingChecklist(false)
     }
@@ -408,6 +435,7 @@ export function RevisionIntelligencePanel({
             item={item}
             isDark={isDark}
             busy={busyItemId === item.id}
+            canCreateTask={Boolean(writerWorkspace)}
             onMarkFixed={() => void updateItemState(item, { status: "fixed" }, undefined, `Marked "${item.title}" as fixed.`)}
             onIgnore={() => void updateItemState(item, { status: "ignored" }, undefined, `Ignored "${item.title}".`)}
             onConvertToTask={() => void convertItemToTask(item)}
@@ -453,7 +481,7 @@ export function RevisionIntelligencePanel({
               type="button"
               onClick={() => void createChecklist()}
               disabled={!writerWorkspace || creatingChecklist}
-              className={`min-h-10 rounded-sm px-4 py-2 text-sm font-semibold transition ${isDark ? "bg-violet-700 text-white hover:bg-violet-600" : "bg-violet-600 text-white hover:bg-violet-500"}`}
+              className={`min-h-10 rounded-sm px-4 py-2 text-sm font-semibold transition ${isDark ? "bg-teal-700 text-white hover:bg-teal-600" : "bg-teal-700 text-white hover:bg-teal-600"}`}
             >
               {creatingChecklist ? "Creating checklist..." : "Create checklist"}
             </button>
@@ -475,7 +503,7 @@ export function RevisionIntelligencePanel({
           </div>
 
           {!writerWorkspace ? <p className={`mt-4 text-sm ${isDark ? "text-slate-300" : "text-slate-600"}`}>Checklist creation is available once project planning data loads. Retry from Project details if needed.</p> : null}
-          {statusMessage ? <p role="status" className={`mt-4 text-sm ${isDark ? "text-violet-300" : "text-violet-700"}`}>{statusMessage}</p> : null}
+          {statusMessage ? <RevisionActionNotice bookId={bookId} message={statusMessage} taskSaved={taskSaved} isDark={isDark} onDismiss={() => setStatusMessage(null)} /> : null}
 
           <div className="mt-5">
             {renderActionSummaryList(
@@ -492,6 +520,7 @@ export function RevisionIntelligencePanel({
   if (variant === "story-map") {
     return (
       <section className={panelClass(isDark)}>
+        {statusMessage && !(taskSaved && onTaskCreated) ? <RevisionActionNotice bookId={bookId} message={statusMessage} taskSaved={taskSaved} isDark={isDark} onDismiss={() => setStatusMessage(null)} /> : null}
         <div className="border-b px-5 py-5">
           <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-300" : "text-slate-600"}`}>Story map details</p>
           <h2 className={`mt-2 text-xl font-semibold ${isDark ? "text-white" : "text-slate-900"}`}>Knowledge state, timeline clarity, and reader friction.</h2>
@@ -591,7 +620,7 @@ export function RevisionIntelligencePanel({
           <h2 className={`mt-2 text-2xl font-semibold ${isDark ? "text-white" : "text-slate-900"}`}>Know what your edit breaks before your readers do.</h2>
           <p className={`mt-2 max-w-3xl text-sm leading-7 ${isDark ? "text-slate-300" : "text-slate-600"}`}>{revision.summary.hero_message}</p>
           {revision.summary.recent_edit_label ? (
-            <p className={`mt-2 max-w-3xl text-sm leading-7 ${isDark ? "text-violet-300" : "text-violet-700"}`}>{revision.summary.recent_edit_label}</p>
+            <p className={`mt-2 max-w-3xl text-sm leading-7 ${isDark ? "text-teal-300" : "text-teal-700"}`}>{revision.summary.recent_edit_label}</p>
           ) : null}
         </div>
         <button
@@ -599,7 +628,7 @@ export function RevisionIntelligencePanel({
           onClick={() => void createChecklist()}
           disabled={!writerWorkspace || creatingChecklist}
           title={!writerWorkspace ? "Wait for project planning data to load." : undefined}
-          className={`rounded-full px-4 py-2 text-sm font-semibold transition ${isDark ? "bg-violet-500 text-white hover:bg-violet-400" : "bg-violet-600 text-white hover:bg-violet-500"}`}
+          className={`rounded-full px-4 py-2 text-sm font-semibold transition ${isDark ? "bg-teal-700 text-white hover:bg-teal-600" : "bg-teal-700 text-white hover:bg-teal-600"}`}
         >
           {creatingChecklist ? "Creating checklist..." : "Open revision board"}
         </button>
@@ -619,9 +648,7 @@ export function RevisionIntelligencePanel({
           ))}
         </div>
 
-        {statusMessage ? (
-          <p className={`mt-4 text-sm ${isDark ? "text-violet-300" : "text-violet-700"}`}>{statusMessage}</p>
-        ) : null}
+        {statusMessage ? <RevisionActionNotice bookId={bookId} message={statusMessage} taskSaved={taskSaved} isDark={isDark} onDismiss={() => setStatusMessage(null)} /> : null}
 
         <div className="mt-6 grid gap-5 xl:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
           <SectionFrame

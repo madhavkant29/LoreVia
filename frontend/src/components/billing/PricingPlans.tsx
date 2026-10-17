@@ -50,7 +50,10 @@ export function PricingPageIntro() {
 
 export function PricingPlans({ nonce, surface = "public" }: PricingPlansProps) {
   const router = useRouter()
-  const { user } = useAuthStore()
+  const { user, hydrated: authHydrated } = useAuthStore()
+  // Keep the first render identical on the server and client. The auth store
+  // can have a cached browser user before the session has been confirmed.
+  const stableUser = authHydrated ? user : null
   const { theme } = usePreferencesStore()
   const isDark = theme === "dark"
   const paddleToken = getPaddleClientToken()
@@ -77,7 +80,7 @@ export function PricingPlans({ nonce, surface = "public" }: PricingPlansProps) {
   }, [surface])
 
   useEffect(() => {
-    if (!user) {
+    if (!stableUser) {
       setSubscriptionState(null)
       return
     }
@@ -93,7 +96,7 @@ export function PricingPlans({ nonce, surface = "public" }: PricingPlansProps) {
     return () => {
       cancelled = true
     }
-  }, [user])
+  }, [stableUser])
 
   function redirectToSuccess(transactionId: string, confirmationToken: string | null) {
     const params = new URLSearchParams({ txn: transactionId })
@@ -169,7 +172,7 @@ export function PricingPlans({ nonce, surface = "public" }: PricingPlansProps) {
 
   async function handlePlanClick(tier: PricingTier) {
     if (tier.access === "free") {
-      if (!user) {
+      if (!stableUser) {
         router.push("/register")
         return
       }
@@ -178,7 +181,7 @@ export function PricingPlans({ nonce, surface = "public" }: PricingPlansProps) {
       return
     }
 
-    if (!user) {
+    if (!stableUser) {
       capture("upgrade_prompt_clicked", {
         surface,
         plan: tier.key,
@@ -317,8 +320,8 @@ export function PricingPlans({ nonce, surface = "public" }: PricingPlansProps) {
     }
   }
 
-  const helperCopy = user
-    ? user.trial_active
+  const helperCopy = stableUser
+    ? stableUser.trial_active
       ? "Your free trial is already active. It does not require payment and will not turn into a paid subscription automatically."
       : "Free is included with your account. Upgrade to Author or Architect to unlock more."
     : surface === "public"
@@ -326,15 +329,15 @@ export function PricingPlans({ nonce, surface = "public" }: PricingPlansProps) {
       : "Free is included with every account. Sign in to upgrade to a paid plan."
 
   const isPaidSubscriber = Boolean(
-    user && !user.trial_active && (user.plan_tier === "author" || user.plan_tier === "architect"),
+    stableUser && !stableUser.trial_active && (stableUser.plan_tier === "author" || stableUser.plan_tier === "architect"),
   )
-  const activePlanLabel = user?.trial_active
+  const activePlanLabel = stableUser?.trial_active
     ? "Author — temporary trial access"
-    : user
-      ? tierLabel(user.plan_tier)
+    : stableUser
+      ? tierLabel(stableUser.plan_tier)
       : null
   const subscriptionDisplayState = subscriptionState?.display_state
-  const subscriptionPlanLabel = tierLabel(subscriptionState?.plan_tier ?? user?.plan_tier)
+  const subscriptionPlanLabel = tierLabel(subscriptionState?.plan_tier ?? stableUser?.plan_tier)
   const subscriptionPriceLabel = subscriptionState
     ? `$${subscriptionState.price.amount}${subscriptionState.price.interval === "year" ? "/year" : "/month"}`
     : null
@@ -426,12 +429,12 @@ export function PricingPlans({ nonce, surface = "public" }: PricingPlansProps) {
           </div>
         </div>
 
-        {user?.trial_active ? (
+        {stableUser?.trial_active ? (
           <div className={`mt-4 border-y px-1 py-4 ${messageClass}`} role="status">
             <p className="text-sm font-semibold">Your free trial is already active.</p>
             <p className="mt-1 text-sm leading-7">
-              {user.trial_ends_at
-                ? `It ends on ${formatTrialEndDate(user.trial_ends_at)}. No payment is scheduled when it ends.`
+              {stableUser.trial_ends_at
+                ? `It ends on ${formatTrialEndDate(stableUser.trial_ends_at)}. No payment is scheduled when it ends.`
                 : "No payment is scheduled when it ends."}
             </p>
             <button
@@ -444,7 +447,7 @@ export function PricingPlans({ nonce, surface = "public" }: PricingPlansProps) {
           </div>
         ) : null}
 
-        {user && activePlanLabel ? (
+        {stableUser && activePlanLabel ? (
           <section
             aria-labelledby="current-plan-heading"
             className={`mt-4 border-y px-1 py-4 ${noticeClass}`}
@@ -457,7 +460,7 @@ export function PricingPlans({ nonce, surface = "public" }: PricingPlansProps) {
                 <h3 id="current-plan-heading" className={`mt-2 text-lg font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>
                   {activePlanLabel}
                 </h3>
-                {user.trial_active ? (
+                {stableUser.trial_active ? (
                   <p className={`mt-1 text-sm leading-6 ${bodyCopyClass}`}>
                     This is temporary Author access. A payment method is not required for the trial, and there is no subscription to cancel or refund.
                   </p>
@@ -507,12 +510,12 @@ export function PricingPlans({ nonce, surface = "public" }: PricingPlansProps) {
             const savings = billingCycle === "annual" ? pricingTierAnnualSavings(tier) : 0
             const selectedPlanCode = billingCycle === "annual" ? tier.annualCode : tier.monthlyCode
             const isBusy = selectedPlanCode ? busyPlan === selectedPlanCode : false
-            const buttonLabel = user
+            const buttonLabel = stableUser
               ? isPaidSubscriber && tier.access === "paid"
-                ? tier.key === user.plan_tier
+                ? tier.key === stableUser.plan_tier
                   ? "Current plan — manage"
                   : "Manage subscription"
-                : user.trial_active && tier.access === "paid"
+                : stableUser.trial_active && tier.access === "paid"
                 ? "View payment details"
                 : tier.cta
               : pricingTierGuestCtaLabel(tier)
@@ -526,7 +529,7 @@ export function PricingPlans({ nonce, surface = "public" }: PricingPlansProps) {
             const priceCopyClass = isDark ? "text-white" : "text-stone-950"
             const textCopyClass = isDark ? "text-slate-300" : "text-stone-700"
             const subCopyClass = isDark ? "text-slate-400" : "text-stone-500"
-            const planMarker = isPaidSubscriber && tier.key === user?.plan_tier
+            const planMarker = isPaidSubscriber && tier.key === stableUser?.plan_tier
               ? "Current plan"
               : tier.highlight
                 ? "Recommended"
@@ -591,7 +594,7 @@ export function PricingPlans({ nonce, surface = "public" }: PricingPlansProps) {
                   </button>
                   {tier.access === "paid" ? (
                     <p className={`mt-3 text-center text-sm ${subCopyClass}`}>
-                      {user?.trial_active
+                      {stableUser?.trial_active
                         ? `Choosing this paid plan charges $${price} now. Your free trial does not auto-convert.`
                         : `Paid checkout charges $${price} now, then ${billingCycle === "annual" ? `$${price}/year` : `$${price}/mo`} until canceled.`}
                     </p>

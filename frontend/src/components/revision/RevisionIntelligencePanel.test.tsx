@@ -103,9 +103,79 @@ describe("RevisionIntelligencePanel", () => {
     expect(view.textContent).toContain("could not create the revision checklist")
   })
 
+  it("reports the number of persisted tasks after checklist creation", async () => {
+    const onTaskCreated = vi.fn()
+    const workspace = { goal_calendar: [], revision_board: { items: [], last_generated_at: null } } as unknown as WriterWorkspace
+    vi.mocked(booksApi.updateWriterWorkspace).mockResolvedValue(workspace)
+    const view = renderPanel("preview", buildRevision(), workspace, onTaskCreated)
+    const button = Array.from(view.querySelectorAll("button")).find((candidate) => candidate.textContent === "Create checklist")!
+
+    await act(async () => {
+      button.click()
+      await Promise.resolve()
+    })
+
+    expect(onTaskCreated).toHaveBeenCalledWith(1)
+    expect(view.textContent).toContain("Created 1 revision checklist item.")
+    expect(view.querySelector('a[href="/book-1#author-project-tasks"]')?.textContent).toBe("View tasks")
+  })
+
+  it("saves a Story Map task and reports the save to the overview", async () => {
+    const onTaskCreated = vi.fn()
+    const workspace = { goal_calendar: [], revision_board: { items: [], last_generated_at: null } } as unknown as WriterWorkspace
+    vi.mocked(booksApi.updateWriterWorkspace).mockResolvedValue(workspace)
+    const view = renderPanel("story-map", buildRevision(), workspace, onTaskCreated)
+    const button = Array.from(view.querySelectorAll("button")).find((candidate) => candidate.textContent === "Convert to task")!
+
+    await act(async () => { button.click(); await Promise.resolve() })
+
+    expect(booksApi.updateWriterWorkspace).toHaveBeenCalledWith("book-1", expect.objectContaining({
+      goal_calendar: [expect.objectContaining({ id: "revision-task:issue-1", title: "Top continuity issue", quota_unit: "tasks" })],
+    }))
+    expect(onTaskCreated).toHaveBeenCalledWith(1)
+  })
+
+  it("shows a dismissible error beside Story Map when task saving fails", async () => {
+    vi.mocked(booksApi.updateWriterWorkspace).mockRejectedValue(new Error("offline"))
+    const workspace = { goal_calendar: [], revision_board: { items: [], last_generated_at: null } } as unknown as WriterWorkspace
+    const view = renderPanel("story-map", buildRevision(), workspace)
+    const button = Array.from(view.querySelectorAll("button")).find((candidate) => candidate.textContent === "Convert to task")!
+
+    await act(async () => { button.click(); await Promise.resolve() })
+
+    expect(view.querySelector('[role="status"]')?.textContent).toContain("could not save")
+    await act(async () => { view.querySelector<HTMLButtonElement>('[aria-label="Dismiss revision notice"]')?.click() })
+    expect(view.querySelector('[role="status"]')).toBeNull()
+  })
+
+  it("shows the API reason when task creation is forbidden", async () => {
+    const forbidden = Object.assign(new Error("Request failed"), {
+      isAxiosError: true,
+      response: { data: { detail: "This authoring feature requires an Author or Architect plan." } },
+    })
+    vi.mocked(booksApi.updateWriterWorkspace).mockRejectedValue(forbidden)
+    const workspace = { goal_calendar: [], revision_board: { items: [], last_generated_at: null } } as unknown as WriterWorkspace
+    const view = renderPanel("story-map", buildRevision(), workspace)
+    const button = Array.from(view.querySelectorAll("button")).find((candidate) => candidate.textContent === "Convert to task")!
+
+    await act(async () => { button.click(); await Promise.resolve() })
+
+    expect(view.querySelector('[role="status"]')?.textContent).toContain("requires an Author or Architect plan")
+  })
+
+  it("disables conversion until project planning data is available", () => {
+    const view = renderPanel("story-map")
+    expect(Array.from(view.querySelectorAll("button")).find((button) => button.textContent === "Convert to task")?.disabled).toBe(true)
+  })
+
 })
 
-function renderPanel(variant: "full" | "preview" | "story-map" = "full", revision: RevisionIntelligence = buildRevision(), writerWorkspace: WriterWorkspace | null = null) {
+function renderPanel(
+  variant: "full" | "preview" | "story-map" = "full",
+  revision: RevisionIntelligence = buildRevision(),
+  writerWorkspace: WriterWorkspace | null = null,
+  onTaskCreated: (count: number) => void = vi.fn(),
+) {
   container = document.createElement("div")
   document.body.appendChild(container)
   root = createRoot(container)
@@ -118,6 +188,7 @@ function renderPanel(variant: "full" | "preview" | "story-map" = "full", revisio
         isDark={false}
         onRevisionChange={vi.fn()}
         onWriterWorkspaceChange={vi.fn()}
+        onTaskCreated={onTaskCreated}
         variant={variant}
       />
     )
