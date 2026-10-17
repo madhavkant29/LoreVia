@@ -130,8 +130,44 @@ jobs:
         flags: backend
         name: backend-coverage
 
-  frontend-tests:
+  frontend-checks:
     runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v6
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v6
+      with:
+        node-version: '24'
+        cache: 'npm'
+        cache-dependency-path: frontend/package-lock.json
+
+    - name: Install dependencies
+      run: |
+        cd frontend
+        npm ci
+
+    - name: Run frontend unit tests and type checking
+      run: |
+        cd frontend
+        npm run test
+        npm run type-check
+        npm run lint
+
+    - name: Build application
+      run: |
+        cd frontend
+        npm run build
+
+  frontend-e2e:
+    name: Frontend E2E shard ${{ matrix.shard }}/4
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
 
     steps:
     - uses: actions/checkout@v6
@@ -159,24 +195,12 @@ jobs:
         cd frontend
         npx playwright install --with-deps chromium
 
-    - name: Run frontend unit tests and type checking
-      run: |
-        cd frontend
-        npm run test
-        npm run type-check
-        npm run lint
-
-    - name: Build application
-      run: |
-        cd frontend
-        npm run build
-
     - name: Run frontend E2E smoke tests
       env:
         CI: "true"
       run: |
         cd frontend
-        npm run test:e2e
+        npm run test:e2e -- --fully-parallel --shard=${{ matrix.shard }}/4
 
   security-scan:
     runs-on: ubuntu-latest
@@ -255,7 +279,7 @@ jobs:
         print("Trivy found no blocking HIGH/CRITICAL findings.")
 
   container-image-scan:
-    needs: [backend-tests, frontend-tests, security-scan]
+    needs: [backend-tests, frontend-checks, frontend-e2e, security-scan]
     runs-on: ubuntu-latest
 
     steps:
