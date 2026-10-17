@@ -9,6 +9,7 @@ import pytest
 from fastapi import HTTPException
 from redis.exceptions import RedisError
 from sqlalchemy import delete, func, select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.models.user import LlmUsageEvent, ProcessingUsageEvent, User
@@ -771,6 +772,38 @@ async def test_reservation_settlement_replaces_or_retains_upper_bound(db, monkey
     assert events[2].total_tokens == 0
     assert events[2].total_cost_usd == Decimal("0E-8")
     assert events[2].metadata_json["cost_disposition"] == "released_before_provider"
+
+
+@pytest.mark.parametrize("settlement", ["response", "counts", "failure"])
+async def test_reservation_settlement_releases_concurrency_when_database_fails(
+    monkeypatch, settlement
+):
+    class BrokenDb:
+        async def execute(self, _query):
+            raise SQLAlchemyError("database unavailable")
+
+    reservation = llm_control_service.LlmReservation(
+        id=str(uuid.uuid4()), operation="embedding", user_id=uuid.uuid4()
+    )
+    redis = _FakeRedis()
+    concurrency_key = f"llm:concurrency:{reservation.user_id}"
+    redis.sets[concurrency_key] = {reservation.id}
+    monkeypatch.setattr(
+        llm_control_service, "AsyncSessionLocal", lambda: _SessionContext(BrokenDb())
+    )
+    monkeypatch.setattr(llm_control_service, "get_redis", lambda: _async_value(redis))
+
+    with pytest.raises(SQLAlchemyError, match="database unavailable"):
+        if settlement == "response":
+            await llm_control_service.finish_llm_reservation(reservation, None)
+        elif settlement == "counts":
+            await llm_control_service.finish_llm_reservation_counts(
+                reservation, prompt_tokens=1, completion_tokens=0, total_tokens=1
+            )
+        else:
+            await llm_control_service.fail_llm_reservation(reservation)
+
+    assert redis.sets[concurrency_key] == set()
 
 
 async def test_success_without_provider_usage_retains_upper_cost_and_tokens(db, monkeypatch):

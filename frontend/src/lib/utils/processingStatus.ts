@@ -145,11 +145,19 @@ function buildAutoResumeDetail(
   chaptersTotal: number | null,
 ) {
   const parsed = nextResumeAt ? new Date(nextResumeAt) : null
-  const limitLabel = blockerKind === "llm_budget" ? "Monthly AI capacity" : "Token limit"
-  const fallbackLabel = blockerKind === "llm_budget" ? "the monthly reset" : "the rolling window refreshes"
-  const resumeCopy = parsed && !Number.isNaN(parsed.getTime())
-    ? `${limitLabel} reached. Reprocessing will resume automatically around ${parsed.toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}.`
-    : `${limitLabel} reached. Reprocessing will resume automatically when ${fallbackLabel}.`
+  const scheduledResume = parsed && !Number.isNaN(parsed.getTime()) ? parsed : null
+  let resumeCopy: string
+  if (blockerKind === "llm_capacity") {
+    resumeCopy = scheduledResume
+      ? `AI processing capacity is temporarily busy. Reprocessing will retry automatically around ${scheduledResume.toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}.`
+      : "AI processing capacity is temporarily busy. Reprocessing will retry automatically shortly."
+  } else {
+    const limitLabel = blockerKind === "llm_budget" ? "Monthly AI capacity" : "Token limit"
+    const fallbackLabel = blockerKind === "llm_budget" ? "the monthly reset" : "the rolling window refreshes"
+    resumeCopy = scheduledResume
+      ? `${limitLabel} reached. Reprocessing will resume automatically around ${scheduledResume.toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}.`
+      : `${limitLabel} reached. Reprocessing will resume automatically when ${fallbackLabel}.`
+  }
   const progressCopy = chaptersCompleted !== null && chaptersTotal
     ? ` ${chaptersCompleted}/${chaptersTotal} chapters complete.`
     : ""

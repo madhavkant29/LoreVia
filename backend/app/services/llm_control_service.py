@@ -723,50 +723,54 @@ async def finish_llm_reservation(reservation: LlmReservation, response: Any) -> 
     total = int(getattr(usage, "total_tokens", 0) or prompt + completion)
     details = getattr(usage, "prompt_tokens_details", None)
     cached = int(getattr(details, "cached_tokens", 0) or 0)
-    async with AsyncSessionLocal() as db:
-        event = (
-            await db.execute(
-                select(LlmUsageEvent).where(LlmUsageEvent.reservation_id == reservation.id)
-            )
-        ).scalar_one_or_none()
-        if event is not None:
-            input_cost, output_cost, total_cost, version = (
-                calculate_llm_cost(
-                    event.model,
-                    prompt_tokens=prompt,
-                    completion_tokens=completion,
-                    cached_prompt_tokens=cached,
+    try:
+        async with AsyncSessionLocal() as db:
+            event = (
+                await db.execute(
+                    select(LlmUsageEvent).where(LlmUsageEvent.reservation_id == reservation.id)
                 )
-                if usage is not None
-                else (
-                    event.input_cost_usd,
-                    event.output_cost_usd,
-                    event.total_cost_usd,
-                    event.pricing_version,
+            ).scalar_one_or_none()
+            if event is not None:
+                input_cost, output_cost, total_cost, version = (
+                    calculate_llm_cost(
+                        event.model,
+                        prompt_tokens=prompt,
+                        completion_tokens=completion,
+                        cached_prompt_tokens=cached,
+                    )
+                    if usage is not None
+                    else (
+                        event.input_cost_usd,
+                        event.output_cost_usd,
+                        event.total_cost_usd,
+                        event.pricing_version,
+                    )
                 )
-            )
-            event.status = "succeeded"
-            if usage is not None:
-                event.prompt_tokens = prompt
-                event.completion_tokens = completion
-                event.total_tokens = total
-            else:
-                event.total_tokens = max(
-                    int(event.total_tokens or 0),
-                    int(event.estimated_tokens or 0),
-                )
-            event.cached_prompt_tokens = cached
-            event.cached = cached > 0
-            event.input_cost_usd = input_cost
-            event.output_cost_usd = output_cost
-            event.total_cost_usd = total_cost
-            event.pricing_version = version
-            event.metadata_json = {
-                **dict(event.metadata_json or {}),
-                "cost_disposition": "actual" if usage is not None else "usage_missing_upper_bound",
-            }
-            await db.commit()
-    await _release_redis_concurrency(reservation)
+                event.status = "succeeded"
+                if usage is not None:
+                    event.prompt_tokens = prompt
+                    event.completion_tokens = completion
+                    event.total_tokens = total
+                else:
+                    event.total_tokens = max(
+                        int(event.total_tokens or 0),
+                        int(event.estimated_tokens or 0),
+                    )
+                event.cached_prompt_tokens = cached
+                event.cached = cached > 0
+                event.input_cost_usd = input_cost
+                event.output_cost_usd = output_cost
+                event.total_cost_usd = total_cost
+                event.pricing_version = version
+                event.metadata_json = {
+                    **dict(event.metadata_json or {}),
+                    "cost_disposition": "actual"
+                    if usage is not None
+                    else "usage_missing_upper_bound",
+                }
+                await db.commit()
+    finally:
+        await _release_redis_concurrency(reservation)
 
 
 async def finish_llm_reservation_counts(
@@ -777,35 +781,37 @@ async def finish_llm_reservation_counts(
     total_tokens: int,
     cached_prompt_tokens: int = 0,
 ) -> None:
-    async with AsyncSessionLocal() as db:
-        event = (
-            await db.execute(
-                select(LlmUsageEvent).where(LlmUsageEvent.reservation_id == reservation.id)
-            )
-        ).scalar_one_or_none()
-        if event is not None:
-            input_cost, output_cost, total_cost, version = calculate_llm_cost(
-                event.model,
-                prompt_tokens=prompt_tokens,
-                completion_tokens=completion_tokens,
-                cached_prompt_tokens=cached_prompt_tokens,
-            )
-            event.status = "succeeded"
-            event.prompt_tokens = max(prompt_tokens, 0)
-            event.completion_tokens = max(completion_tokens, 0)
-            event.total_tokens = max(total_tokens, 0)
-            event.cached_prompt_tokens = max(cached_prompt_tokens, 0)
-            event.cached = cached_prompt_tokens > 0
-            event.input_cost_usd = input_cost
-            event.output_cost_usd = output_cost
-            event.total_cost_usd = total_cost
-            event.pricing_version = version
-            event.metadata_json = {
-                **dict(event.metadata_json or {}),
-                "cost_disposition": "actual",
-            }
-            await db.commit()
-    await _release_redis_concurrency(reservation)
+    try:
+        async with AsyncSessionLocal() as db:
+            event = (
+                await db.execute(
+                    select(LlmUsageEvent).where(LlmUsageEvent.reservation_id == reservation.id)
+                )
+            ).scalar_one_or_none()
+            if event is not None:
+                input_cost, output_cost, total_cost, version = calculate_llm_cost(
+                    event.model,
+                    prompt_tokens=prompt_tokens,
+                    completion_tokens=completion_tokens,
+                    cached_prompt_tokens=cached_prompt_tokens,
+                )
+                event.status = "succeeded"
+                event.prompt_tokens = max(prompt_tokens, 0)
+                event.completion_tokens = max(completion_tokens, 0)
+                event.total_tokens = max(total_tokens, 0)
+                event.cached_prompt_tokens = max(cached_prompt_tokens, 0)
+                event.cached = cached_prompt_tokens > 0
+                event.input_cost_usd = input_cost
+                event.output_cost_usd = output_cost
+                event.total_cost_usd = total_cost
+                event.pricing_version = version
+                event.metadata_json = {
+                    **dict(event.metadata_json or {}),
+                    "cost_disposition": "actual",
+                }
+                await db.commit()
+    finally:
+        await _release_redis_concurrency(reservation)
 
 
 async def fail_llm_reservation(
@@ -813,34 +819,36 @@ async def fail_llm_reservation(
     *,
     provider_attempted: bool = True,
 ) -> None:
-    async with AsyncSessionLocal() as db:
-        event = (
-            await db.execute(
-                select(LlmUsageEvent).where(LlmUsageEvent.reservation_id == reservation.id)
-            )
-        ).scalar_one_or_none()
-        if event is not None:
-            event.status = "failed"
-            if provider_attempted:
-                event.total_tokens = max(
-                    int(event.total_tokens or 0),
-                    int(event.estimated_tokens or 0),
+    try:
+        async with AsyncSessionLocal() as db:
+            event = (
+                await db.execute(
+                    select(LlmUsageEvent).where(LlmUsageEvent.reservation_id == reservation.id)
                 )
-                event.metadata_json = {
-                    **dict(event.metadata_json or {}),
-                    "cost_disposition": "uncertain_provider_attempt",
-                }
-            else:
-                event.total_tokens = 0
-                event.input_cost_usd = Decimal("0")
-                event.output_cost_usd = Decimal("0")
-                event.total_cost_usd = Decimal("0")
-                event.metadata_json = {
-                    **dict(event.metadata_json or {}),
-                    "cost_disposition": "released_before_provider",
-                }
-            await db.commit()
-    await _release_redis_concurrency(reservation)
+            ).scalar_one_or_none()
+            if event is not None:
+                event.status = "failed"
+                if provider_attempted:
+                    event.total_tokens = max(
+                        int(event.total_tokens or 0),
+                        int(event.estimated_tokens or 0),
+                    )
+                    event.metadata_json = {
+                        **dict(event.metadata_json or {}),
+                        "cost_disposition": "uncertain_provider_attempt",
+                    }
+                else:
+                    event.total_tokens = 0
+                    event.input_cost_usd = Decimal("0")
+                    event.output_cost_usd = Decimal("0")
+                    event.total_cost_usd = Decimal("0")
+                    event.metadata_json = {
+                        **dict(event.metadata_json or {}),
+                        "cost_disposition": "released_before_provider",
+                    }
+                await db.commit()
+    finally:
+        await _release_redis_concurrency(reservation)
 
 
 async def _release_redis_concurrency(reservation: LlmReservation) -> None:

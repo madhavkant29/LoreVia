@@ -288,7 +288,7 @@ async def test_tracked_chat_completion_preserves_provider_error_when_failure_rec
 
 
 @pytest.mark.asyncio
-async def test_tracked_embedding_propagates_unexpected_client_bugs_without_failed_reservation(
+async def test_tracked_embedding_releases_reservation_on_unexpected_client_error(
     monkeypatch,
 ):
     user_id = uuid.uuid4()
@@ -322,7 +322,64 @@ async def test_tracked_embedding_propagates_unexpected_client_bugs_without_faile
             input="text",
         )
 
-    assert failed is False
+    assert failed is True
+
+
+@pytest.mark.parametrize("operation", ["chat", "embedding"])
+async def test_tracked_call_releases_circuit_permit_when_settlement_fails(monkeypatch, operation):
+    user_id = uuid.uuid4()
+    permit = object()
+    released = []
+
+    async def _return_permit(**_kwargs):
+        return permit
+
+    async def _release(value):
+        released.append(value)
+
+    async def _reserve(**_kwargs):
+        return SimpleNamespace(id="reservation", user_id=user_id)
+
+    async def _provider_response(**_kwargs):
+        return SimpleNamespace(usage=None)
+
+    async def _finish(*_args):
+        raise SQLAlchemyError("settlement unavailable")
+
+    monkeypatch.setattr(
+        "app.services.llm_circuit_breaker_service.acquire_provider_circuit_permit",
+        _return_permit,
+    )
+    monkeypatch.setattr(
+        "app.services.llm_circuit_breaker_service.release_provider_circuit_permit",
+        _release,
+    )
+    monkeypatch.setattr("app.services.llm_control_service.reserve_llm_call", _reserve)
+    monkeypatch.setattr("app.services.llm_control_service.finish_llm_reservation", _finish)
+
+    with pytest.raises(SQLAlchemyError, match="settlement unavailable"):
+        if operation == "chat":
+            client = SimpleNamespace(
+                chat=SimpleNamespace(completions=SimpleNamespace(create=_provider_response))
+            )
+            await create_tracked_chat_completion(
+                client=client,
+                feature="chapter_summary_detailed",
+                model="gpt-test",
+                user_id=user_id,
+                messages=[],
+            )
+        else:
+            client = SimpleNamespace(embeddings=SimpleNamespace(create=_provider_response))
+            await create_tracked_embedding(
+                client=client,
+                feature="chapter_chunk_embedding",
+                model="text-embedding-3-small",
+                user_id=user_id,
+                input="text",
+            )
+
+    assert released == [permit]
 
 
 def test_llm_token_caps_select_tier_limits(monkeypatch):
