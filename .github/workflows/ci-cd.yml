@@ -161,13 +161,13 @@ jobs:
         npm run build
 
   frontend-e2e:
-    name: Frontend E2E shard ${{ matrix.shard }}/4
+    name: Frontend E2E ${{ matrix.shard }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4]
+        shard: ['1', '2', '3', '4', 'author-audit', 'public-audit']
 
     steps:
     - uses: actions/checkout@v6
@@ -200,7 +200,13 @@ jobs:
         CI: "true"
       run: |
         cd frontend
-        npm run test:e2e -- --fully-parallel --shard=${{ matrix.shard }}/4
+        if [ "${{ matrix.shard }}" = "author-audit" ]; then
+          npm run test:e2e -- --grep "authenticated launch surfaces avoid"
+        elif [ "${{ matrix.shard }}" = "public-audit" ]; then
+          npm run test:e2e -- --grep "public launch surfaces avoid"
+        else
+          npm run test:e2e -- --fully-parallel --grep-invert "launch surfaces avoid" --shard=${{ matrix.shard }}/4
+        fi
 
   security-scan:
     runs-on: ubuntu-latest
