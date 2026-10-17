@@ -240,11 +240,7 @@ _UNSTABLE_EXPRESSION_INDEXES = {
 
 
 def include_object(obj, name, type_, reflected, compare_to):
-    if (
-        type_ == "table"
-        and reflected
-        and getattr(obj, "schema", None) not in (None, "public")
-    ):
+    if type_ == "table" and reflected and getattr(obj, "schema", None) not in (None, "public"):
         return False
     # PostgreSQL deparses these tsvector expressions differently from their
     # SQLAlchemy text forms, causing Alembic 1.13 to report false drop/add pairs.
