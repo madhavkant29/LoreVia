@@ -109,15 +109,17 @@ test("authenticated launch surfaces avoid clipping, duplicate ids, and fixed-lay
   if (CAPTURE_AUDIT) await mkdir("test-results/ui-audit", { recursive: true })
   const violations: string[] = []
 
-  for (const viewport of [
+  const viewports = [
     { name: "desktop", width: 1440, height: 900 },
     { name: "laptop", width: 1280, height: 800 },
     { name: "tablet", width: 768, height: 1024 },
     { name: "mobile", width: 390, height: 844 },
-  ] as const) {
-    await page.setViewportSize(viewport)
-    for (const route of selectedAuthenticatedRoutes) {
-      await gotoAndWaitForHeading(page, route.path)
+  ] as const
+
+  for (const route of selectedAuthenticatedRoutes) {
+    await gotoAndWaitForHeading(page, route.path)
+    for (const viewport of viewports) {
+      await page.setViewportSize(viewport)
       await page.waitForTimeout(100)
 
       const audit = await collectLayoutAudit(page)
