@@ -339,6 +339,136 @@ async def test_reservation_rehydrate_unexpected_failure_propagates(monkeypatch):
         )
 
 
+@pytest.mark.parametrize(
+    ("budget_class", "redis_results", "expected_status", "expected_calls"),
+    [
+        ("processing", [[0, 5], [1, 0]], "reserved", 2),
+        ("processing", [[0, 5], [0, 5]], "failed", 2),
+        ("processing", [[0, 60]], "failed", 1),
+        ("interactive", [[0, 5]], "failed", 1),
+    ],
+)
+async def test_reservation_waits_only_for_processing_slot_contention(
+    db, monkeypatch, budget_class, redis_results, expected_status, expected_calls
+):
+    user = User(
+        email=f"slot-wait-{uuid.uuid4().hex[:8]}@lorevia.app",
+        username=f"slotwait{uuid.uuid4().hex[:8]}",
+        password_hash="fake",
+        tier="architect",
+    )
+    db.add(user)
+    await db.commit()
+
+    class SlotRedis(_FakeRedis):
+        def __init__(self):
+            super().__init__()
+            self.calls = []
+
+        async def eval(self, script, key_count, *args):
+            if key_count == 2:
+                self.calls.append(args)
+                return redis_results[min(len(self.calls) - 1, len(redis_results) - 1)]
+            return await super().eval(script, key_count, *args)
+
+    redis = SlotRedis()
+
+    async def ready(*, force=False):
+        return {"rehydrated": False, "active_reservations": 0, "stale_released": 0}
+
+    monkeypatch.setattr(llm_control_service, "AsyncSessionLocal", async_sessionmaker(db.bind))
+    monkeypatch.setattr(llm_control_service, "get_redis", lambda: _async_value(redis))
+    monkeypatch.setattr(llm_control_service, "rehydrate_llm_coordination_state", ready)
+    monkeypatch.setattr(llm_control_service.settings, "LLM_PROCESSING_SLOT_WAIT_SECONDS", 0.001)
+    monkeypatch.setattr(llm_control_service.settings, "LLM_MAX_CONCURRENT_CALLS_PER_USER", 4)
+
+    if expected_status == "reserved":
+        reservation = await llm_control_service.reserve_llm_call(
+            user_id=user.id,
+            estimated_tokens=100,
+            feature="chapter_chunk_embedding",
+            operation="embedding",
+            model="text-embedding-3-small",
+            book_id=None,
+            budget_class=budget_class,
+        )
+    else:
+        with pytest.raises(HTTPException) as exc_info:
+            await llm_control_service.reserve_llm_call(
+                user_id=user.id,
+                estimated_tokens=100,
+                feature="chapter_chunk_embedding",
+                operation="embedding",
+                model="text-embedding-3-small",
+                book_id=None,
+                budget_class=budget_class,
+            )
+        assert exc_info.value.status_code == 429
+        assert exc_info.value.headers == {"Retry-After": str(redis_results[-1][1])}
+
+    events = (
+        (await db.execute(select(LlmUsageEvent).where(LlmUsageEvent.user_id == user.id)))
+        .scalars()
+        .all()
+    )
+    assert len(redis.calls) == expected_calls
+    assert all(call[-1] == 4 for call in redis.calls)
+    assert len(events) == 1
+    assert events[0].status == expected_status
+    if expected_status == "reserved":
+        assert events[0].reservation_id == reservation.id
+    else:
+        assert events[0].total_tokens == 0
+        assert events[0].metadata_json["cost_disposition"] == "released_before_provider"
+
+
+async def test_cancelled_slot_wait_releases_reservation(db, monkeypatch):
+    user = User(
+        email=f"slot-cancel-{uuid.uuid4().hex[:8]}@lorevia.app",
+        username=f"slotcancel{uuid.uuid4().hex[:8]}",
+        password_hash="fake",
+        tier="architect",
+    )
+    db.add(user)
+    await db.commit()
+    denied = asyncio.Event()
+
+    class BusyRedis(_FakeRedis):
+        async def eval(self, script, key_count, *args):
+            if key_count == 2:
+                denied.set()
+                return [0, 5]
+            return await super().eval(script, key_count, *args)
+
+    async def ready(*, force=False):
+        return {"rehydrated": False, "active_reservations": 0, "stale_released": 0}
+
+    monkeypatch.setattr(llm_control_service, "AsyncSessionLocal", async_sessionmaker(db.bind))
+    monkeypatch.setattr(llm_control_service, "get_redis", lambda: _async_value(BusyRedis()))
+    monkeypatch.setattr(llm_control_service, "rehydrate_llm_coordination_state", ready)
+    monkeypatch.setattr(llm_control_service.settings, "LLM_PROCESSING_SLOT_WAIT_SECONDS", 15.0)
+
+    task = asyncio.create_task(
+        llm_control_service.reserve_llm_call(
+            user_id=user.id,
+            estimated_tokens=100,
+            feature="chapter_chunk_embedding",
+            operation="embedding",
+            model="text-embedding-3-small",
+            book_id=None,
+            budget_class="processing",
+        )
+    )
+    await asyncio.wait_for(denied.wait(), timeout=5)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    event = await db.scalar(select(LlmUsageEvent).where(LlmUsageEvent.user_id == user.id))
+    assert event.status == "failed"
+    assert event.total_tokens == 0
+
+
 async def test_cost_capacity_protects_unprocessed_words_and_releases_capacity(db):
     user = User(
         email=f"protected-{uuid.uuid4().hex[:8]}@lorevia.app",

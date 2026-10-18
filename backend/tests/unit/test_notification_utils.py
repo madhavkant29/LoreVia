@@ -209,7 +209,7 @@ def test_build_book_ready_notification_stays_honest_while_analysis_is_pending():
 
     notification = build_book_ready_notification(book, stats)
 
-    assert notification.title == "Metamorphosis finished processing"
+    assert notification.title == "Metamorphosis: chapters ready, analysis continues"
     assert "saved 3 characters and 1 relationship" in notification.body
     assert "analysis is still running" in notification.body
     assert notification.data["analysis_complete"] is False
@@ -296,7 +296,8 @@ def test_build_book_ready_notification_marks_partial_analysis_failure():
 
     notification = build_book_ready_notification(book, stats)
 
-    assert "analysis pipeline failed" in notification.body
+    assert notification.title == "Metamorphosis needs story analysis retry"
+    assert "analysis failed" in notification.body
     assert notification.data["analysis_status"] == "failed"
     assert notification.data["retry_actions"] == ["retry_analysis"]
 

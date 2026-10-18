@@ -29,7 +29,7 @@ export function ProcessingStatusStrip({ status, onRetry, retrying = false, class
           <a href="/library" className="app-button-secondary inline-flex min-h-9 items-center px-3 text-xs">
             Upload again
           </a>
-        ) : status.retryAvailable && onRetry ? (
+        ) : (status.retryAvailable || status.resumeAvailable) && onRetry ? (
           <button type="button" className="app-button-secondary min-h-9 px-3 text-xs" onClick={onRetry} disabled={retrying}>
             {retrying ? pendingLabel : actionLabel}
           </button>
@@ -76,7 +76,7 @@ export function ProcessingStatusPanel({ status, onRetry, retrying = false, class
           <a href="/library" className="app-button-secondary inline-flex shrink-0 items-center">
             Upload again
           </a>
-        ) : status.retryAvailable && onRetry ? (
+        ) : (status.retryAvailable || status.resumeAvailable) && onRetry ? (
           <button type="button" className="app-button-secondary shrink-0" onClick={onRetry} disabled={retrying}>
             {retrying ? pendingLabel : actionLabel}
           </button>

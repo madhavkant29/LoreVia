@@ -17,6 +17,7 @@ from app.models.intelligence import BookChunk, ChapterSummary
 from app.models.operations import BookProcessingRun, TaskExecution
 from app.models.user import User
 from app.schemas.books import WriterWorkspaceOut
+from app.services.analysis_retry_service import retry_failed_analysis_only
 from app.utils.books.writer_workspace import (
     build_book_processing_payload,
     build_writer_workspace_payload,
@@ -60,9 +61,7 @@ async def enqueue_processing_state_repair_if_needed(book: Book) -> bool:
 
 
 def _book_processing_retry_actions(book: Book) -> list[str]:
-    workspace = normalize_writer_workspace(
-        book.writer_workspace if isinstance(book.writer_workspace, dict) else None
-    )
+    workspace = book.writer_workspace if isinstance(book.writer_workspace, dict) else {}
     processing = (
         workspace.get("processing") if isinstance(workspace.get("processing"), dict) else {}
     )
@@ -70,28 +69,23 @@ def _book_processing_retry_actions(book: Book) -> list[str]:
     return [
         " ".join(str(action).split()).strip()
         for action in (actions if isinstance(actions, list) else [])
-        if " ".join(str(action).split()).strip()
+        if isinstance(action, str) and " ".join(action.split()).strip()
     ]
-
-
-def _book_processing_last_error(book: Book) -> str | None:
-    workspace = normalize_writer_workspace(
-        book.writer_workspace if isinstance(book.writer_workspace, dict) else None
-    )
-    processing = (
-        workspace.get("processing") if isinstance(workspace.get("processing"), dict) else {}
-    )
-    last_error = " ".join(str((processing or {}).get("last_error") or "").split()).strip()
-    return last_error or None
 
 
 def _book_has_retryable_processing_state(book: Book) -> bool:
     if book.status == "failed":
         return True
+    workspace = book.writer_workspace if isinstance(book.writer_workspace, dict) else {}
+    processing = (
+        workspace.get("processing") if isinstance(workspace.get("processing"), dict) else {}
+    )
+    if processing.get("status") in {"failed", "cancelled", "canceled"}:
+        return True
     actions = [
         action for action in _book_processing_retry_actions(book) if action != "wait_for_analysis"
     ]
-    return bool(actions or _book_processing_last_error(book))
+    return bool(actions)
 
 
 async def _dispatch_durable_book_processing(
@@ -166,11 +160,19 @@ async def retry_book_processing(db: AsyncSession, book: Book) -> dict[str, Any] 
         workspace.get("processing") if isinstance(workspace.get("processing"), dict) else {}
     )
     processing_status = str((processing or {}).get("status") or "").strip().lower()
+    pipeline = processing.get("pipeline") if isinstance(processing.get("pipeline"), dict) else {}
+    extraction = pipeline.get("extraction") if isinstance(pipeline.get("extraction"), dict) else {}
+    if (
+        "retry_analysis" in actions
+        and "retry_extraction" not in actions
+        and extraction.get("status") == "succeeded"
+    ):
+        return await retry_failed_analysis_only(db, book)
+
     should_restart_extraction = (
         book.status == "failed"
         or processing_status in {"failed", "cancelled", "canceled"}
         or "retry_extraction" in actions
-        or "retry_analysis" in actions
     )
 
     if should_restart_extraction:

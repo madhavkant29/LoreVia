@@ -419,6 +419,7 @@ describe("LibraryPage shared-book filtering", () => {
           stage: "extracting",
           progress_pct: 34,
           retry_available: true,
+          retry_actions: ["retry_extraction"],
           updated_at: "2026-06-06T00:00:00Z",
         },
       }),

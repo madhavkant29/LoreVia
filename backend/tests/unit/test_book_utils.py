@@ -155,6 +155,11 @@ def test_processing_retry_available_requires_actionable_state():
         processing_retry_available("processing", "analyzing", ["wait_for_analysis"], None) is False
     )
     assert processing_retry_available("ready", "ready", [], None) is False
+    assert processing_retry_available("processing", "analyzing", [], "old error") is False
+    assert (
+        processing_retry_available("processing", "analyzing", ["continue_processing"], None)
+        is False
+    )
 
 
 class _FakeAnnotationDB:

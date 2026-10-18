@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import math
 import time
@@ -657,56 +658,7 @@ async def reserve_llm_call(
             )
         )
         await db.commit()
-    rpm, tpm = _limits(operation)
-    try:
-        redis = await get_redis()
-        allowed, retry_after = await redis.eval(
-            _ACQUIRE_SCRIPT,
-            2,
-            f"llm:rate:{operation}",
-            f"llm:concurrency:{user_id}",
-            int(time.time() * 1000),
-            reservation_id,
-            total_estimate,
-            rpm,
-            tpm,
-            settings.LLM_MAX_CONCURRENT_CALLS_PER_USER,
-        )
-    except RedisError as exc:
-        async with AsyncSessionLocal() as db:
-            event = await db.scalar(
-                select(LlmUsageEvent).where(LlmUsageEvent.reservation_id == reservation_id)
-            )
-            if event is not None:
-                event.status = "failed"
-                event.total_tokens = 0
-                event.input_cost_usd = Decimal("0")
-                event.output_cost_usd = Decimal("0")
-                event.total_cost_usd = Decimal("0")
-                event.metadata_json = {
-                    **dict(event.metadata_json or {}),
-                    "cost_disposition": "released_before_provider",
-                }
-                await db.commit()
-        raise HTTPException(503, "LLM coordination is temporarily unavailable.") from exc
-    if not int(allowed):
-        await fail_llm_reservation(
-            LlmReservation(
-                reservation_id,
-                operation,
-                user_id,
-                provider,
-                model,
-                reserved_cost,
-            ),
-            provider_attempted=False,
-        )
-        raise HTTPException(
-            429,
-            "LLM capacity is temporarily busy. Retry shortly.",
-            headers={"Retry-After": str(int(retry_after))},
-        )
-    return LlmReservation(
+    reservation = LlmReservation(
         reservation_id,
         operation,
         user_id,
@@ -714,6 +666,44 @@ async def reserve_llm_call(
         model,
         reserved_cost,
     )
+    rpm, tpm = _limits(operation)
+    try:
+        redis = await get_redis()
+        wait_seconds = (
+            settings.LLM_PROCESSING_SLOT_WAIT_SECONDS
+            if budget_class == PROCESSING_BUDGET_CLASS
+            else 0.0
+        )
+        deadline = time.monotonic() + wait_seconds
+        while True:
+            allowed, retry_after = await redis.eval(
+                _ACQUIRE_SCRIPT,
+                2,
+                f"llm:rate:{operation}",
+                f"llm:concurrency:{user_id}",
+                int(time.time() * 1000),
+                reservation_id,
+                total_estimate,
+                rpm,
+                tpm,
+                settings.LLM_MAX_CONCURRENT_CALLS_PER_USER,
+            )
+            if int(allowed):
+                return reservation
+            remaining = deadline - time.monotonic()
+            # The Redis guard returns 5 for slot contention and 60 for minute-rate limits.
+            if int(retry_after) != 5 or remaining <= 0:
+                raise HTTPException(
+                    429,
+                    "LLM capacity is temporarily busy. Retry shortly.",
+                    headers={"Retry-After": str(int(retry_after))},
+                )
+            await asyncio.sleep(min(1.0, remaining))
+    except (Exception, asyncio.CancelledError) as exc:
+        await fail_llm_reservation(reservation, provider_attempted=False)
+        if isinstance(exc, RedisError):
+            raise HTTPException(503, "LLM coordination is temporarily unavailable.") from exc
+        raise
 
 
 async def finish_llm_reservation(reservation: LlmReservation, response: Any) -> None:

@@ -50,6 +50,30 @@ const handlers = {
 }
 
 describe("LibraryClient project presentation", () => {
+  it("offers continuation for allowance-paused projects in cards and rows", () => {
+    const pausedBook = book({
+      status: "processing",
+      processing: {
+        status: "paused",
+        stage: "paused",
+        chapters_completed: 1,
+        chapters_total: 3,
+        pause_reason: "monthly_processed_words",
+        resume_available: true,
+        retry_available: true,
+      },
+    })
+    const cardMarkup = renderToStaticMarkup(
+      <ProjectCard book={pausedBook} isDark busy={false} isPinned={false} menuOpen={false} {...handlers} />
+    )
+    const rowMarkup = renderToStaticMarkup(
+      <ProjectRow book={pausedBook} isDark={false} busy={false} isPinned={false} menuOpen={false} {...handlers} />
+    )
+
+    expect(cardMarkup).toContain("Continue processing")
+    expect(rowMarkup).toContain("Continue processing")
+  })
+
   it("renders project cards, rows, empty panels, and create cards", () => {
     const cardMarkup = renderToStaticMarkup(
       <ProjectCard

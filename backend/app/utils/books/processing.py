@@ -111,12 +111,15 @@ def processing_retry_available(
         return False
     normalized_status = str(status or "").strip().lower()
     normalized_stage = str(stage or "").strip().lower()
-    actionable_retries = [action for action in retry_actions if action != "wait_for_analysis"]
+    actionable_retries = [
+        action
+        for action in retry_actions
+        if action not in {"wait_for_analysis", "continue_processing"}
+    ]
     return bool(
         normalized_status in {"failed", "error"}
         or normalized_stage in {"failed", "error"}
         or actionable_retries
-        or last_error
     )
 
 
@@ -148,9 +151,9 @@ def _normalize_processing_state(raw: dict | None) -> dict | None:
     freeze_message = " ".join(str(source.get("freeze_message") or "").split()).strip() or None
     frozen_at = source.get("frozen_at")
     retry_actions = [
-        " ".join(str(item).split()).strip()
+        " ".join(item.split()).strip()
         for item in (source.get("retry_actions") or [])
-        if " ".join(str(item).split()).strip()
+        if isinstance(item, str) and " ".join(item.split()).strip()
     ]
     raw_pipeline = source.get("pipeline") if isinstance(source.get("pipeline"), dict) else {}
 

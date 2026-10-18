@@ -5,11 +5,14 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.book import Book
+from app.models.book import Book, Chapter
 from app.models.operations import BookProcessingRun, TaskExecution
 from app.services.book_freeze_service import is_book_frozen
+from app.utils.ingestion_utils import build_analysis_chapter_state, merge_processing_pipeline
+from app.utils.notification_utils import collect_book_ready_stats, upsert_book_ready_notification
 
 
 def parse_processing_blocker(error_detail: str | None) -> dict[str, Any]:
@@ -91,6 +94,7 @@ async def write_book_terminal_processing_state(
     *,
     error: str,
     rebuild_run_id: str | None = None,
+    execution: TaskExecution | None = None,
 ) -> None:
     book = await db.get(Book, run.book_id, with_for_update=True)
     if book is None:
@@ -117,6 +121,61 @@ async def write_book_terminal_processing_state(
     processing = dict(
         workspace.get("processing") if isinstance(workspace.get("processing"), dict) else {}
     )
+    pipeline = processing.get("pipeline") if isinstance(processing.get("pipeline"), dict) else {}
+    extraction = pipeline.get("extraction") if isinstance(pipeline.get("extraction"), dict) else {}
+    if (
+        execution is not None
+        and execution.task_name == "analysis_tasks.analyse_chapter"
+        and execution.chapter_id is not None
+        and extraction.get("status") == "succeeded"
+    ):
+        chapter = await db.get(Chapter, execution.chapter_id, with_for_update=True)
+        if chapter is not None and chapter.book_id == book.id and chapter.processed:
+            chapter.analysis_state = build_analysis_chapter_state(
+                chapter.analysis_state if isinstance(chapter.analysis_state, dict) else None,
+                status="failed",
+                last_error=user_visible_error,
+            )
+            stats = await collect_book_ready_stats(db, book)
+            chapter_rows = (
+                await db.execute(
+                    select(Chapter.number, Chapter.analysis_state).where(
+                        Chapter.book_id == book.id, Chapter.word_count > 0
+                    )
+                )
+            ).all()
+            failed_chapters = sorted(
+                number
+                for number, state in chapter_rows
+                if isinstance(state, dict) and state.get("status") == "failed"
+            )
+            processing = merge_processing_pipeline(
+                processing,
+                analysis={
+                    "status": "failed",
+                    "completed_chapters": stats.analyzed_chapter_count,
+                    "total_chapters": stats.chapter_count,
+                    "failed_chapters": failed_chapters,
+                    "updated_at": (run.completed_at or datetime.now(UTC)).isoformat(),
+                },
+            )
+            processing.update(
+                {
+                    "status": "processing",
+                    "stage": "analysis",
+                    "pause_reason": None,
+                    "auto_resume": False,
+                    "resume_available": False,
+                    "resume_blockers": [],
+                    "next_resume_at": None,
+                    "last_error": user_visible_error,
+                }
+            )
+            workspace["processing"] = processing
+            book.writer_workspace = workspace
+            book.status = "processing"
+            await upsert_book_ready_notification(db, book, stats)
+            return
     processing.update(
         {
             "status": "failed",
@@ -190,5 +249,6 @@ async def settle_terminal_processing_failure(
         run,
         error=error,
         rebuild_run_id=execution.rebuild_run_id,
+        execution=execution,
     )
     return run

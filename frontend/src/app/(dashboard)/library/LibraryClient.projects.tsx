@@ -229,7 +229,7 @@ export function ProjectCard({
           <ProcessingStatusStrip
             status={processingStatus}
             retrying={busy}
-            onRetry={processingStatus.retryAvailable ? onRetryProcessing : undefined}
+            onRetry={processingStatus.retryAvailable || processingStatus.resumeAvailable ? onRetryProcessing : undefined}
             className="mt-4"
           />
         ) : null}
@@ -337,7 +337,7 @@ export function ProjectRow({
             <ProcessingStatusStrip
               status={processingStatus}
               retrying={busy}
-              onRetry={processingStatus.retryAvailable ? onRetryProcessing : undefined}
+              onRetry={processingStatus.retryAvailable || processingStatus.resumeAvailable ? onRetryProcessing : undefined}
             />
           ) : null}
         </div>

@@ -50,6 +50,7 @@ async def _user_and_book(db):
 async def test_operations_quality_and_margin_metrics_include_control_plane_allocations(
     db,
 ):
+    baseline_operations = await operations_metrics(db)
     baseline_quality = await quality_metrics(db)
     user, book = await _user_and_book(db)
     now = datetime.now(UTC)
@@ -129,7 +130,7 @@ async def test_operations_quality_and_margin_metrics_include_control_plane_alloc
     quality = await quality_metrics(db)
     margin = await contribution_margin(db)
 
-    assert operations["retry_count"] == 1
+    assert operations["retry_count"] == baseline_operations["retry_count"] + 1
     analysis_task = next(
         t for t in operations["by_task"] if t["task_name"] == "analysis_tasks.analyse_chapter"
     )
@@ -170,6 +171,8 @@ async def test_admin_retry_reopens_run_and_dismiss_closes_it(db, monkeypatch):
         user_id=user.id,
         book_id=book.id,
         status="failed_terminal",
+        attempt_count=2,
+        max_attempts=2,
         arguments_json={"book_id": str(book.id)},
     )
     db.add(execution)
@@ -184,6 +187,7 @@ async def test_admin_retry_reopens_run_and_dismiss_closes_it(db, monkeypatch):
     await db.refresh(run)
     assert run.status == "queued"
     assert run.completed_at is None
+    assert execution.attempt_count == 0
     dispatch.assert_awaited_once()
 
     execution.status = "failed_terminal"
