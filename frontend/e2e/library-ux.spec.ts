@@ -105,6 +105,46 @@ test("library archive errors preserve the project and offer actionable feedback"
   await expect(page.getByRole("link", { name: "Open Sky of Ash" })).toBeVisible()
 })
 
+test("library distinguishes running analysis from a failed chapter that can be retried", async ({ page }) => {
+  let failed = false
+  let retryCalls = 0
+  await page.route("**/api/v1/books/page**", (route) => route.fulfill({
+    json: {
+      items: [{
+        ...projects[3],
+        processing: {
+          status: "processing",
+          stage: "analysis",
+          last_error: "Old provider error",
+          retry_available: true,
+          retry_actions: failed ? ["retry_analysis"] : ["wait_for_analysis"],
+          pipeline: {
+            extraction: { status: "succeeded", completed_chapters: 3, total_chapters: 3 },
+            analysis: { status: failed ? "failed" : "running", completed_chapters: 2, total_chapters: 3, failed_chapters: failed ? [3] : [] },
+          },
+        },
+      }],
+      next_cursor: null,
+    },
+  }))
+  await page.route("**/api/v1/books/book-4/processing/retry", (route) => {
+    retryCalls += 1
+    return route.fulfill({ json: { status: "processing", stage: "analysis", retry_actions: ["wait_for_analysis"] } })
+  })
+
+  await page.goto("/library")
+  const project = page.getByRole("article").filter({ hasText: "The Unfinished Atlas" })
+  await expect(project).toContainText("Running story analysis")
+  await expect(project.getByRole("button", { name: "Retry", exact: true })).toHaveCount(0)
+
+  failed = true
+  await page.reload()
+  await expect(project).toContainText("Story analysis incomplete")
+  await expect(project).toContainText("2/3 chapters analysed")
+  await project.getByRole("button", { name: "Retry", exact: true }).click()
+  await expect.poll(() => retryCalls).toBe(1)
+})
+
 test("library loading, error recovery and first-use states", async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 390, height: 844 })
   let release: () => void = () => {}

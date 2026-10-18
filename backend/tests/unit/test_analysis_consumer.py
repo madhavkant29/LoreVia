@@ -270,11 +270,27 @@ async def test_manual_analyse_chapter_refreshes_all_summary_modes_after_commit(m
         return None
 
     cache_commit_counts = []
+    transaction_open = False
+    original_commit = db.commit
+
+    async def commit_and_release_transaction():
+        nonlocal transaction_open
+        await original_commit()
+        transaction_open = False
+
+    async def frozen_read(_db, _book_id):
+        nonlocal transaction_open
+        transaction_open = True
+        return False
+
+    db.commit = commit_and_release_transaction
+    monkeypatch.setattr(analysis_consumer, "book_is_frozen", frozen_read)
 
     async def cache_summary(*args, **kwargs):
         cache_commit_counts.append(db.commit_count)
 
     async def generate(*args, **kwargs):
+        assert transaction_open is False
         return {
             "content": "Mara opens the gate and chooses trust.",
             "key_events": [{"event_title": "Gate opens", "description": "Mara turns the key"}],
@@ -284,6 +300,7 @@ async def test_manual_analyse_chapter_refreshes_all_summary_modes_after_commit(m
         }
 
     async def extract_threads(*args, **kwargs):
+        assert transaction_open is False
         return []
 
     async def persist_summaries(fake_db, *, chapter_id, payloads):
@@ -342,8 +359,8 @@ async def test_manual_analyse_chapter_refreshes_all_summary_modes_after_commit(m
     assert chapter.analysis_state["status"] == "succeeded"
     assert chapter.title == "Gate Opens"
     assert book.writer_workspace["processing"]["pipeline"]["analysis"]["status"] == "succeeded"
-    assert db.commit_count == 4
-    assert cache_commit_counts == [3, 3, 3]
+    assert db.commit_count == 7
+    assert cache_commit_counts == [5, 5, 5]
     assert len(deleted_keys) == 2
 
 
@@ -584,7 +601,7 @@ async def test_analyse_chapter_skips_results_when_source_changes_during_provider
 
     assert result == {"skipped": expected_skip}
     assert db.added == []
-    assert db.commit_count == 2
+    assert db.commit_count == 4
     assert len(deleted_keys) == 2
 
 
@@ -796,3 +813,42 @@ async def test_refresh_book_analysis_pipeline_calculates_runtime_status(
     assert analysis["status"] == expected
     assert analysis["completed_chapters"] == completed
     assert analysis["total_chapters"] == total
+
+
+@pytest.mark.asyncio
+async def test_failed_analysis_clears_stale_capacity_pause():
+    book = SimpleNamespace(
+        id=uuid.uuid4(),
+        writer_workspace={
+            "processing": {
+                "auto_resume": True,
+                "pause_reason": "llm_capacity",
+                "next_resume_at": "2026-10-18T05:13:00+00:00",
+                "resume_available": True,
+                "resume_blockers": [{"kind": "llm_capacity"}],
+            }
+        },
+    )
+    db = FakeAnalysisDb(
+        results=[
+            FakeResult(scalar=3),
+            FakeResult(scalar=2),
+            FakeResult(
+                rows=[
+                    (1, {"status": "succeeded"}),
+                    (2, {"status": "succeeded"}),
+                    (3, {"status": "failed"}),
+                ]
+            ),
+        ]
+    )
+
+    await _refresh_book_analysis_pipeline(db, book)
+
+    processing = book.writer_workspace["processing"]
+    assert processing["retry_actions"] == ["retry_analysis"]
+    assert processing["auto_resume"] is False
+    assert processing["pause_reason"] is None
+    assert processing["next_resume_at"] is None
+    assert processing["resume_available"] is False
+    assert processing["resume_blockers"] == []

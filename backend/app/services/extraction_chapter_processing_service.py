@@ -140,7 +140,9 @@ async def _process_chapter_in_generation(
         # Stage/reset the chapter in a short transaction. Provider calls below
         # must not hold a checked-out connection or chapter locks.
         await db.commit()
-        if await book_is_frozen(db, book.id):
+        frozen_before_embedding = await book_is_frozen(db, book.id)
+        await db.commit()
+        if frozen_before_embedding:
             log.info(
                 "Aborting frozen chapter extraction book_id=%s chapter=%s",
                 book.id,
@@ -189,7 +191,9 @@ async def _process_chapter_in_generation(
         }
 
         llm_started = time.perf_counter()
-        if await book_is_frozen(db, book.id):
+        frozen_before_extraction = await book_is_frozen(db, book.id)
+        await db.commit()
+        if frozen_before_extraction:
             log.info(
                 "Aborting frozen chapter extraction before LLM book_id=%s chapter=%s",
                 book.id,

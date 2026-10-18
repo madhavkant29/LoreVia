@@ -54,6 +54,57 @@ describe("normalizeProcessingStatus", () => {
     expect(normalizeProcessingStatus({ status: "processing", stage: "analysis", retry_actions: ["retry_analysis"] })?.retryAvailable).toBe(true)
   })
 
+  it("shows failed analysis progress instead of extracted-chapter progress", () => {
+    const status = normalizeProcessingStatus({
+      status: "processing",
+      stage: "analysis",
+      chapters_completed: 3,
+      chapters_total: 3,
+      progress_pct: 100,
+      retry_actions: ["retry_analysis"],
+      pipeline: {
+        extraction: { status: "succeeded", completed_chapters: 3, total_chapters: 3 },
+        analysis: { status: "failed", completed_chapters: 2, total_chapters: 3, failed_chapters: [3] },
+      },
+    })
+
+    expect(status?.label).toBe("Story analysis incomplete")
+    expect(status?.detail).toContain("2/3 chapters analysed")
+    expect(status?.progressPct).toBeCloseTo(66.7, 1)
+    expect(status?.retryAvailable).toBe(true)
+    expect(status?.failed).toBe(true)
+  })
+
+  it("does not offer retry because of a stale error while analysis is running", () => {
+    const status = normalizeProcessingStatus({
+      status: "processing",
+      stage: "analysis",
+      last_error: "Old provider error",
+      retry_available: true,
+      retry_actions: ["wait_for_analysis"],
+      pipeline: { analysis: { status: "running", completed_chapters: 2, total_chapters: 3 } },
+    })
+
+    expect(status?.label).toBe("Running story analysis")
+    expect(status?.retryAvailable).toBe(false)
+    expect(status?.lastError).toBeNull()
+  })
+
+  it("treats terminal analysis failure as authoritative over a stale capacity pause", () => {
+    const status = normalizeProcessingStatus({
+      status: "paused",
+      stage: "usage_limited",
+      auto_resume: true,
+      resume_available: true,
+      retry_actions: ["retry_analysis"],
+      pipeline: { analysis: { status: "failed", completed_chapters: 2, total_chapters: 3, failed_chapters: [3] } },
+    })
+
+    expect(status?.label).toBe("Story analysis incomplete")
+    expect(status?.autoResume).toBe(false)
+    expect(status?.retryAvailable).toBe(true)
+  })
+
   it("treats a cancelled rebuild as an interrupted retryable state", () => {
     const status = normalizeProcessingStatus({
       status: "cancelled",

@@ -12,10 +12,11 @@ from datetime import UTC, datetime
 import pytest
 from fastapi import HTTPException
 from sqlalchemy import inspect as sa_inspect
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.book import Book, Chapter
-from app.models.intelligence import ChapterSummary
+from app.models.intelligence import ChapterSummary, Notification
 from app.models.operations import BookProcessingRun, TaskExecution
 from app.models.user import User
 from app.services.extraction_budget_service import _mark_budget_blocked
@@ -121,6 +122,94 @@ async def test_settle_terminal_failure_marks_book_failed_for_initial_upload(db: 
     assert processing["status"] == "failed"
     assert processing["retry_actions"] == ["retry_extraction"]
     assert "readable text" in processing["last_error"].lower()
+
+
+@pytest.mark.asyncio
+async def test_terminal_analysis_failure_preserves_extraction_and_offers_analysis_retry(
+    db: AsyncSession,
+):
+    user = await _create_user(db)
+    book = await _create_book(db, user=user, status="processing")
+    book.total_chapters = 2
+    book.writer_workspace = {
+        "processing": {
+            "status": "paused",
+            "stage": "usage_limited",
+            "auto_resume": True,
+            "pause_reason": "llm_capacity",
+            "pipeline": {
+                "extraction": {"status": "succeeded", "completed_chapters": 2, "total_chapters": 2},
+                "analysis": {"status": "running", "completed_chapters": 1, "total_chapters": 2},
+            },
+        }
+    }
+    chapters = [
+        Chapter(
+            book_id=book.id,
+            number=number,
+            title=f"Chapter {number}",
+            s3_key=f"chapters/{book.id}/{number}.txt",
+            word_count=100,
+            processed=True,
+            analysis_state={"status": "succeeded" if number == 1 else "queued"},
+        )
+        for number in (1, 2)
+    ]
+    db.add_all(chapters)
+    await db.flush()
+    db.add(
+        ChapterSummary(
+            chapter_id=chapters[0].id,
+            mode="detailed",
+            content="A successful chapter summary.",
+        )
+    )
+    run = BookProcessingRun(
+        user_id=user.id,
+        book_id=book.id,
+        run_kind="initial_upload",
+        status="running",
+    )
+    db.add(run)
+    await db.flush()
+    execution = TaskExecution(
+        identity_key=f"terminal-analysis-{uuid.uuid4().hex}",
+        task_name="analysis_tasks.analyse_chapter",
+        feature="analysis",
+        processing_run_id=run.id,
+        user_id=user.id,
+        book_id=book.id,
+        chapter_id=chapters[1].id,
+        chapter_number=2,
+        status="running",
+    )
+    db.add(execution)
+    await db.flush()
+
+    await settle_terminal_processing_failure(
+        db,
+        execution,
+        error="terminating connection due to idle-in-transaction timeout",
+        completed_at=datetime.now(UTC),
+    )
+    await db.commit()
+    await db.refresh(book)
+
+    processing = book.writer_workspace["processing"]
+    assert book.status == "processing"
+    assert processing["pipeline"]["extraction"]["status"] == "succeeded"
+    assert processing["pipeline"]["analysis"]["failed_chapters"] == [2]
+    assert processing["retry_actions"] == ["retry_analysis"]
+    assert processing["auto_resume"] is False
+    assert chapters[1].analysis_state["status"] == "failed"
+    assert chapters[0].analysis_state["status"] == "succeeded"
+    notification = await db.scalar(
+        select(Notification).where(
+            Notification.book_id == book.id, Notification.kind == "book_ready"
+        )
+    )
+    assert notification is not None
+    assert "needs story analysis retry" in notification.title
 
 
 @pytest.mark.asyncio

@@ -189,6 +189,134 @@ async def test_continue_resumes_paused_analysis_without_reextracting(db, monkeyp
     analysis_dispatch.assert_awaited_once()
 
 
+@pytest.mark.asyncio
+async def test_retry_failed_analysis_only_queues_failed_chapter_with_fresh_attempts(
+    db, monkeypatch
+):
+    user = User(
+        email=f"analysis-retry-{uuid.uuid4().hex[:8]}@lorevia.app",
+        username=f"analysisretry{uuid.uuid4().hex[:8]}",
+        password_hash="fake",
+        tier="author",
+    )
+    db.add(user)
+    await db.flush()
+    book = Book(
+        user_id=user.id,
+        title="Analysis Retry",
+        format="txt",
+        s3_key=f"books/{uuid.uuid4()}.txt",
+        status="processing",
+        total_chapters=3,
+        writer_workspace={
+            "processing": {
+                "status": "processing",
+                "stage": "analysis",
+                "retry_actions": ["retry_analysis"],
+                "pipeline": {
+                    "extraction": {
+                        "status": "succeeded",
+                        "completed_chapters": 3,
+                        "total_chapters": 3,
+                    },
+                    "analysis": {
+                        "status": "failed",
+                        "completed_chapters": 2,
+                        "total_chapters": 3,
+                        "failed_chapters": [3],
+                    },
+                },
+            }
+        },
+    )
+    db.add(book)
+    await db.flush()
+    chapters = [
+        Chapter(
+            book_id=book.id,
+            number=number,
+            title=f"Chapter {number}",
+            s3_key=f"chapters/{book.id}/{number}.txt",
+            word_count=100,
+            processed=True,
+            analysis_state={"status": "failed" if number == 3 else "succeeded"},
+        )
+        for number in range(1, 4)
+    ]
+    db.add_all(chapters)
+    await db.flush()
+    old_run = BookProcessingRun(
+        user_id=user.id,
+        book_id=book.id,
+        run_kind="initial_ingestion",
+        status="failed_terminal",
+        chapters_total=3,
+    )
+    db.add(old_run)
+    await db.flush()
+    old_task = TaskExecution(
+        identity_key=uuid.uuid4().hex,
+        task_name="analysis_tasks.analyse_chapter",
+        processing_run_id=old_run.id,
+        user_id=user.id,
+        book_id=book.id,
+        chapter_id=chapters[2].id,
+        chapter_number=3,
+        status="failed_terminal",
+        attempt_count=2,
+        max_attempts=2,
+    )
+    db.add(old_task)
+    await db.commit()
+
+    async def no_cutoff(_db):
+        return None
+
+    async def no_cache(_key):
+        return None
+
+    analysis_dispatch = AsyncMock(return_value=1)
+    monkeypatch.setattr("app.services.book_freeze_service.load_persisted_freeze_cutoff", no_cutoff)
+    monkeypatch.setattr("app.services.analysis_retry_service.mark_book_cache_dirty", no_cache)
+    monkeypatch.setattr(
+        "app.services.analysis_retry_service.mark_user_dashboard_cache_dirty", no_cache
+    )
+    monkeypatch.setattr(
+        "app.services.analysis_retry_service.dispatch_pending_analysis_tasks",
+        analysis_dispatch,
+    )
+
+    payload = await pipeline_state_service.retry_book_processing(db, book)
+
+    tasks = (
+        (
+            await db.execute(
+                select(TaskExecution).where(
+                    TaskExecution.book_id == book.id,
+                    TaskExecution.task_name == "analysis_tasks.analyse_chapter",
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert payload["retry_actions"] == ["wait_for_analysis"]
+    assert chapters[2].analysis_state["status"] == "queued"
+    assert [chapter.analysis_state["status"] for chapter in chapters[:2]] == [
+        "succeeded",
+        "succeeded",
+    ]
+    assert len(tasks) == 2
+    assert old_task.status == "failed_terminal"
+    assert old_task.attempt_count == 2
+    new_task = next(task for task in tasks if task.id != old_task.id)
+    assert new_task.chapter_number == 3
+    assert new_task.status == "pending_dispatch"
+    assert new_task.attempt_count == 0
+    assert await pipeline_state_service.retry_book_processing(db, book) is None
+    analysis_dispatch.assert_awaited_once()
+
+
 def test_build_writer_workspace_response_preserves_processing_pipeline_fields():
     book = SimpleNamespace(
         title="Atlas",
@@ -587,9 +715,16 @@ def test_retry_state_helpers_normalize_actions_errors_and_chapter_timestamps():
             }
         },
     )
-    assert pipeline_state_service._book_processing_retry_actions(book) == ["retry_analysis", "None"]
-    assert pipeline_state_service._book_processing_last_error(book) == "provider failed"
+    assert pipeline_state_service._book_processing_retry_actions(book) == ["retry_analysis"]
     assert pipeline_state_service._book_has_retryable_processing_state(book) is True
+    assert (
+        pipeline_state_service._book_has_retryable_processing_state(
+            SimpleNamespace(
+                status="processing", writer_workspace={"processing": {"last_error": "old error"}}
+            )
+        )
+        is False
+    )
     assert (
         pipeline_state_service._book_has_retryable_processing_state(
             SimpleNamespace(status="failed", writer_workspace=None)
@@ -776,8 +911,8 @@ async def test_retry_book_processing_uses_repair_path_and_handles_non_retryable(
     monkeypatch.setattr(
         pipeline_state_service, "mark_user_dashboard_cache_dirty", lambda *_args: _async_none()
     )
-    assert await pipeline_state_service.retry_book_processing(db, book) == {}
-    assert repairs == [book]
+    assert await pipeline_state_service.retry_book_processing(db, book) is None
+    assert repairs == []
 
 
 def test_processing_pipeline_failure_detection_handles_status_and_failed_chapters():

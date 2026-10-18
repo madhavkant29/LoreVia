@@ -74,31 +74,41 @@ export function normalizeProcessingStage(processing?: BookProcessing | null, boo
 export function normalizeProcessingStatus(processing?: BookProcessing | null, book?: Pick<Book, "status"> | null): NormalizedProcessingStatus | null {
   if (!processing && (!book || book.status === "ready")) return null
 
-  const stage = normalizeProcessingStage(processing, book)
+  const reportedStage = normalizeProcessingStage(processing, book)
+  const analysisFailed = reportedStage !== "ready" && reportedStage !== "frozen" && processing?.pipeline?.analysis?.status === "failed"
+  const stage = analysisFailed ? "failed" : reportedStage
   const frozen = stage === "frozen"
-  const progressPct = clampProgress(processing?.progress_pct)
-  const chaptersCompleted = nonNegativeInt(processing?.chapters_completed)
-  const chaptersTotal = nonNegativeInt(processing?.chapters_total)
+  const chaptersCompleted = nonNegativeInt(analysisFailed
+    ? processing?.pipeline?.analysis?.completed_chapters
+    : processing?.chapters_completed)
+  const chaptersTotal = nonNegativeInt(analysisFailed
+    ? processing?.pipeline?.analysis?.total_chapters
+    : processing?.chapters_total)
+  const progressPct = analysisFailed && chaptersCompleted !== null && chaptersTotal
+    ? clampProgress((chaptersCompleted / chaptersTotal) * 100)
+    : clampProgress(processing?.progress_pct)
   const retryActions = Array.isArray(processing?.retry_actions) ? processing.retry_actions : []
   const retryExplicitlyDisabled = processing?.retry_available === false
   const blocker = processing?.resume_blockers?.[0]
-  const autoResume = Boolean(
+  const autoResume = !analysisFailed && Boolean(
     processing?.auto_resume
     || (processing?.pause_reason === "llm_token_limit" && blocker?.auto_resume)
   )
   const nextResumeAt = processing?.next_resume_at || blocker?.next_resume_at || null
-  const retryAvailable = !frozen && !autoResume && Boolean(
-    processing?.retry_available
-    || retryActions.some((action) => action !== "wait_for_analysis")
-    || (stage === "failed" && !retryExplicitlyDisabled)
-    || processing?.last_error
-  )
-  const resumeAvailable = !frozen && !autoResume && Boolean(
+  const resumeAvailable = !frozen && !analysisFailed && !autoResume && Boolean(
     processing?.resume_available || retryActions.includes("continue_processing")
+  )
+  const retryAvailable = !frozen && !autoResume && !resumeAvailable && !retryExplicitlyDisabled && Boolean(
+    retryActions.some((action) => action !== "wait_for_analysis" && action !== "continue_processing")
+    || stage === "failed"
   )
   const partialReady = stage !== "ready" && stage !== "failed" && stage !== "frozen" && chaptersCompleted !== null && chaptersCompleted > 0
   const detail = frozen
     ? FROZEN_FALLBACK_DETAIL
+    : analysisFailed
+      ? retryAvailable
+        ? `${chaptersCompleted ?? 0}/${chaptersTotal ?? 0} chapters analysed. Retry failed analysis to finish processing.`
+        : "Story analysis did not finish. Contact support for help."
     : autoResume
       ? buildAutoResumeDetail(blocker?.kind, nextResumeAt, chaptersCompleted, chaptersTotal)
       : buildProcessingDetail(stage, chaptersCompleted, chaptersTotal, progressPct, partialReady)
@@ -106,14 +116,14 @@ export function normalizeProcessingStatus(processing?: BookProcessing | null, bo
 
   return {
     stage,
-    label: frozen ? "Import interrupted" : resumeAvailable || autoResume ? "Processing paused" : processing?.current_step_label || STAGE_LABELS[stage],
+    label: frozen ? "Import interrupted" : analysisFailed ? "Story analysis incomplete" : resumeAvailable || autoResume ? "Processing paused" : processing?.current_step_label || STAGE_LABELS[stage],
     detail: resumeAvailable
       ? blocker?.detail || "Continue when processing capacity is available"
       : detail,
     progressPct,
     chaptersCompleted,
     chaptersTotal,
-    lastError: frozen || autoResume ? null : processing?.last_error || null,
+    lastError: frozen || autoResume || stage !== "failed" ? null : processing?.last_error || null,
     retryAvailable,
     resumeAvailable,
     autoResume,

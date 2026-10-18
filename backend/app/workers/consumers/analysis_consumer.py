@@ -232,7 +232,11 @@ async def _analyse_chapter_in_generation(
             await db.commit()
 
             llm_started = time.perf_counter()
-            if await book_is_frozen(db, book.id):
+            frozen_before_summary = await book_is_frozen(db, book_id_value)
+            # A read starts an implicit transaction. Close it before the LLM
+            # request, which may outlive PostgreSQL's idle-transaction timeout.
+            await db.commit()
+            if frozen_before_summary:
                 log.info("Aborting analysis for frozen book %s", book.id)
                 return {"skipped": "frozen"}
             client = get_openai_client() if settings.OPENAI_API_KEY else None
@@ -284,7 +288,9 @@ async def _analyse_chapter_in_generation(
                     if mode in pending_modes:
                         summary_payloads[mode] = derived_payloads[mode]
 
-            if await book_is_frozen(db, book.id):
+            frozen_before_threads = await book_is_frozen(db, book_id_value)
+            await db.commit()
+            if frozen_before_threads:
                 log.info("Aborting plot-thread analysis for frozen book %s", book.id)
                 return {"skipped": "frozen"}
             threads = await extract_plot_threads(
@@ -482,7 +488,9 @@ async def _analyse_chapter_in_generation(
                     run_live_canon_guard_if_needed,
                 )
 
-                if not await book_is_frozen(db, book_id_value):
+                frozen_before_canon_guard = await book_is_frozen(db, book_id_value)
+                await db.commit()
+                if not frozen_before_canon_guard:
                     await run_live_canon_guard_if_needed(
                         db,
                         book_id=book_id_value,
@@ -779,5 +787,14 @@ async def _refresh_book_analysis_pipeline(db, book: Book) -> None:
             "failed_chapters": failed_chapters,
         },
     )
+    if analysis_status == "failed":
+        # A terminal chapter failure supersedes any earlier capacity pause.
+        processing.update(
+            auto_resume=False,
+            pause_reason=None,
+            next_resume_at=None,
+            resume_available=False,
+            resume_blockers=[],
+        )
     workspace["processing"] = processing
     book.writer_workspace = workspace

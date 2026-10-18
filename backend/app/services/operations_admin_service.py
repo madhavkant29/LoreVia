@@ -106,6 +106,7 @@ async def retry_terminal_execution(db: AsyncSession, execution_id: uuid.UUID) ->
             )
         reservation.task_id = str(row.id)
     row.status = "pending_dispatch"
+    row.attempt_count = 0
     row.completed_at = None
     row.error_category = None
     row.error_detail = None

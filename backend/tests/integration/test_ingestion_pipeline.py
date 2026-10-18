@@ -531,7 +531,7 @@ async def test_upload_pipeline_stages_and_processes_multiple_chapters(
     assert ready_notification.data["analysis_complete"] is False
     assert "plot_thread_count" not in ready_notification.data
     assert "continuity_issue_count" not in ready_notification.data
-    assert "story-intelligence pass is still running" in ready_notification.body
+    assert "story analysis is still running" in ready_notification.body
     assert sent_ready_emails == []
 
 
@@ -1597,7 +1597,7 @@ async def test_upload_pipeline_recovers_named_characters_when_llm_extraction_fai
     ).scalar_one()
 
     assert ready_notification.data is not None
-    assert "finished processing this book" in ready_notification.body
+    assert "Chapter extraction is complete" in ready_notification.body
 
     refreshed_book = await db.get(Book, book_id)
     processing = (refreshed_book.writer_workspace or {}).get("processing", {})

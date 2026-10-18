@@ -52,9 +52,11 @@ class BookReadyStats:
 
 
 def _compose_book_ready_title(book: Book, stats: BookReadyStats) -> str:
-    return (
-        f"{book.title} is ready" if stats.analysis_complete else f"{book.title} finished processing"
-    )
+    if stats.analysis_complete:
+        return f"{book.title} is ready"
+    if _analysis_pipeline_status(book) == "failed":
+        return f"{book.title} needs story analysis retry"
+    return f"{book.title}: chapters ready, analysis continues"
 
 
 def _character_extraction_failures(book: Book) -> int:
@@ -134,8 +136,8 @@ def _compose_book_ready_body(book: Book, stats: BookReadyStats) -> str:
 
     if analysis_status == "failed":
         return (
-            "LoreVia finished processing this book, but part of the analysis pipeline failed. "
-            "Saved extraction results are available now, and the failed analysis chapters can be retried."
+            "Chapter extraction is complete, but story analysis failed for some chapters. "
+            "Saved extraction results are available, and the failed analysis chapters can be retried."
         )
 
     saved_findings: list[str] = []
@@ -151,18 +153,18 @@ def _compose_book_ready_body(book: Book, stats: BookReadyStats) -> str:
     if saved_findings:
         saved_summary = " and ".join(saved_findings[:2])
         return (
-            f"LoreVia finished processing this book and has already saved {saved_summary}. "
+            f"Chapter extraction is complete and LoreVia has already saved {saved_summary}. "
             "Plot-thread and continuity analysis is still running, so deeper results will appear once that finishes."
         )
 
     if extraction_failures > 0:
         return (
-            "LoreVia finished processing this book, but character extraction hit an internal issue before it could save "
+            "Chapter extraction is complete, but character extraction hit an internal issue before it could save "
             "reliable character results. LoreVia will keep showing the rest of the analysis once it is ready."
         )
 
     return (
-        "LoreVia finished processing this book, but the story-intelligence pass is still running. "
+        "Chapter extraction is complete, but story analysis is still running. "
         "Character, relationship, plot-thread, and continuity results will appear here once they are ready."
     )
 

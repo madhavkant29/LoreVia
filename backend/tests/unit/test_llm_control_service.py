@@ -380,7 +380,7 @@ async def test_reservation_waits_only_for_processing_slot_contention(
     monkeypatch.setattr(llm_control_service, "get_redis", lambda: _async_value(redis))
     monkeypatch.setattr(llm_control_service, "rehydrate_llm_coordination_state", ready)
     monkeypatch.setattr(llm_control_service.settings, "LLM_PROCESSING_SLOT_WAIT_SECONDS", 0.001)
-    monkeypatch.setattr(llm_control_service.settings, "LLM_MAX_CONCURRENT_CALLS_PER_USER", 3)
+    monkeypatch.setattr(llm_control_service.settings, "LLM_MAX_CONCURRENT_CALLS_PER_USER", 4)
 
     if expected_status == "reserved":
         reservation = await llm_control_service.reserve_llm_call(
@@ -412,7 +412,7 @@ async def test_reservation_waits_only_for_processing_slot_contention(
         .all()
     )
     assert len(redis.calls) == expected_calls
-    assert all(call[-1] == 3 for call in redis.calls)
+    assert all(call[-1] == 4 for call in redis.calls)
     assert len(events) == 1
     assert events[0].status == expected_status
     if expected_status == "reserved":
