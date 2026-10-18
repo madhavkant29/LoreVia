@@ -8,8 +8,9 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import { ActionableEmptyState } from "../ActionableEmptyState"
 import { ConfirmDialog } from "../ConfirmDialog"
 import { MobileActionBar } from "../MobileActionBar"
-import { ProcessingStatusStrip, SaveStatePill } from "../ResponsivenessStatus"
+import { ProcessingStatusPanel, ProcessingStatusStrip, SaveStatePill } from "../ResponsivenessStatus"
 import { StatusToastProvider, useStatusToast } from "../StatusToast"
+import { normalizeProcessingStatus } from "../../../lib/utils/processingStatus"
 
 let container: HTMLDivElement | null = null
 let root: Root | null = null
@@ -118,30 +119,33 @@ describe("UX primitives", () => {
   })
 
   it("labels allowance-paused processing as continuable", () => {
+    const onRetry = vi.fn()
+    const status = normalizeProcessingStatus({
+      status: "paused",
+      stage: "paused",
+      chapters_completed: 1,
+      chapters_total: 3,
+      pause_reason: "monthly_processed_words",
+      resume_available: true,
+      retry_available: true,
+      resume_blockers: [{ kind: "monthly_processed_words", detail: "Monthly allowance reached" }],
+    })
     const rendered = render(
-      <ProcessingStatusStrip
-        status={{
-          stage: "queued",
-          label: "Processing paused",
-          detail: "Monthly allowance reached",
-          progressPct: 50,
-          chaptersCompleted: 1,
-          chaptersTotal: 3,
-          lastError: null,
-          retryAvailable: true,
-          resumeAvailable: true,
-          partialReady: true,
-          ready: false,
-          failed: false,
-          frozen: false,
-          failureKind: null,
-          stateVariant: "partial_ready",
-        }}
-        onRetry={() => undefined}
-      />
+      <>
+        <ProcessingStatusStrip status={status} onRetry={onRetry} />
+        <ProcessingStatusPanel status={status} onRetry={onRetry} />
+      </>
     )
 
-    expect(rendered.querySelector("button")?.textContent).toContain("Continue processing")
+    expect(status?.resumeAvailable).toBe(true)
+    expect(status?.retryAvailable).toBe(false)
+    const buttons = Array.from(rendered.querySelectorAll("button"))
+    expect(buttons).toHaveLength(2)
+    for (const button of buttons) {
+      expect(button.textContent).toContain("Continue processing")
+      act(() => button.dispatchEvent(new MouseEvent("click", { bubbles: true })))
+    }
+    expect(onRetry).toHaveBeenCalledTimes(2)
   })
 
   it("shows auto-resume token pauses without a manual action", () => {

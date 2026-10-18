@@ -90,7 +90,7 @@ export const UploadModal = memo(function UploadModal({
             <ProcessingStatusPanel
               status={processingSummary}
               retrying={processingRetrying}
-              onRetry={processingSummary?.retryAvailable ? () => void retryProcessing() : undefined}
+              onRetry={processingSummary?.retryAvailable || processingSummary?.resumeAvailable ? () => void retryProcessing() : undefined}
             />
             {!isManagingExisting && wizard.mode === "author" ? (
               <p className={`rounded-lg border px-4 py-3 text-sm leading-6 ${isDark ? "border-teal-300/15 bg-teal-300/5 text-slate-300" : "border-teal-900/10 bg-teal-50 text-stone-700"}`}>

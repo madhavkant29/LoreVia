@@ -655,7 +655,7 @@ export default function BookOverviewPage() {
           <ProcessingStatusPanel
             status={normalizedProcessingStatus}
             retrying={processingRetrying}
-            onRetry={normalizedProcessingStatus?.retryAvailable ? () => void retryProcessing() : undefined}
+            onRetry={normalizedProcessingStatus?.retryAvailable || normalizedProcessingStatus?.resumeAvailable ? () => void retryProcessing() : undefined}
           />
 
           {featureGateMessage ? (

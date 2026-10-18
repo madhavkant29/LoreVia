@@ -263,7 +263,7 @@ export function ManuscriptHeader({
             <ProcessingStatusStrip
               status={normalizedProcessingStatus}
               retrying={processingRetrying}
-              onRetry={normalizedProcessingStatus.retryAvailable ? onRetryProcessing : undefined}
+              onRetry={normalizedProcessingStatus.retryAvailable || normalizedProcessingStatus.resumeAvailable ? onRetryProcessing : undefined}
             />
           </div>
         ) : null}
