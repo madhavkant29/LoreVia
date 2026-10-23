@@ -86,92 +86,89 @@ async def editorial_review(
     total_ch = int(book.total_chapters or 0)
     client = get_openai_client()
 
-    try:
-        hits = await hybrid_story_search(
-            db,
-            book_id,
-            body.text,
-            total_ch,
-            limit=settings.ADVISOR_GENERAL_SEARCH_CHUNKS,
-            candidate_limit=settings.ADVISOR_GENERAL_SEARCH_CHUNKS * 3,
-            similarity_threshold=settings.ADVISOR_GENERAL_SEARCH_SIMILARITY_THRESHOLD,
-            usage_user_id=current_user.id,
-            usage_feature="advisor_editorial_search",
+    hits = await hybrid_story_search(
+        db,
+        book_id,
+        body.text,
+        total_ch,
+        limit=settings.ADVISOR_GENERAL_SEARCH_CHUNKS,
+        candidate_limit=settings.ADVISOR_GENERAL_SEARCH_CHUNKS * 3,
+        similarity_threshold=settings.ADVISOR_GENERAL_SEARCH_SIMILARITY_THRESHOLD,
+        usage_user_id=current_user.id,
+        usage_feature="advisor_editorial_search",
+    )
+    passages_block = (
+        "\n\n".join(
+            f"Ch. {h['chapter_num']} - {h.get('chapter_title') or 'Untitled'}:\n{h['text'][:320]}"
+            for h in hits
         )
-        passages_block = (
-            "\n\n".join(
-                f"Ch. {h['chapter_num']} - {h.get('chapter_title') or 'Untitled'}:\n{h['text'][:320]}"
-                for h in hits
-            )
-            or "No closely matching passages found."
-        )
+        or "No closely matching passages found."
+    )
 
-        story_ctx = await build_story_context(db, book_id, total_ch)
-        chapter_hint = (
-            f"This passage will appear in Chapter {body.chapter_num}."
-            if body.chapter_num
-            else "Chapter number not specified."
-        )
+    story_ctx = await build_story_context(db, book_id, total_ch)
+    chapter_hint = (
+        f"This passage will appear in Chapter {body.chapter_num}."
+        if body.chapter_num
+        else "Chapter number not specified."
+    )
 
-        system_msg = EDITORIAL_SYSTEM.format(
-            title=_safe_prompt_str(book.title),
-            story_context=_safe_prompt_str(story_ctx),
+    system_msg = EDITORIAL_SYSTEM.format(
+        title=_safe_prompt_str(book.title),
+        story_context=_safe_prompt_str(story_ctx),
+    )
+    review_results: list[dict] = []
+    review_passages = _analysis_passages(body.text, max_chars=3800)
+    for part_index, review_passage in enumerate(review_passages, start=1):
+        part_hint = chapter_hint
+        if len(review_passages) > 1:
+            part_hint = (
+                f"{chapter_hint} This is passage {part_index} of "
+                f"{len(review_passages)} from the same submitted chapter."
+            )
+        user_msg = EDITORIAL_USER.format(
+            chapter_hint=part_hint,
+            text=review_passage,
+            passages=passages_block,
         )
-        review_results: list[dict] = []
-        review_passages = _analysis_passages(body.text, max_chars=3800)
-        for part_index, review_passage in enumerate(review_passages, start=1):
-            part_hint = chapter_hint
-            if len(review_passages) > 1:
-                part_hint = (
-                    f"{chapter_hint} This is passage {part_index} of "
-                    f"{len(review_passages)} from the same submitted chapter."
-                )
-            user_msg = EDITORIAL_USER.format(
-                chapter_hint=part_hint,
-                text=review_passage,
-                passages=passages_block,
-            )
-            response = await create_tracked_chat_completion(
-                client=client,
-                feature="advisor_editorial_review",
-                model=settings.OPENAI_INTEL_MODEL,
-                db=db,
-                user_id=current_user.id,
-                book_id=book.id,
-                temperature=0.2,
-                max_tokens=1400,
-                response_format={"type": "json_object"},
-                messages=[
-                    {"role": "system", "content": system_msg},
-                    {"role": "user", "content": user_msg},
-                ],
-            )
-            raw = response.choices[0].message.content or "{}"
-            review_results.append(normalize_editorial_review_result(raw))
-        result = merge_editorial_review_results(review_results)
-        response_payload = {
-            "review": result,
-            "retrieved_passages": [
-                {
-                    "chapter_num": h["chapter_num"],
-                    "chapter_title": h.get("chapter_title"),
-                    "chunk_index": h.get("chunk_index"),
-                    "excerpt": h["text"][:220],
-                    "relevance": round(h.get("score", 0.0), 3),
-                }
-                for h in hits[:4]
+        response = await create_tracked_chat_completion(
+            client=client,
+            feature="advisor_editorial_review",
+            model=settings.OPENAI_INTEL_MODEL,
+            db=db,
+            user_id=current_user.id,
+            book_id=book.id,
+            temperature=0.2,
+            max_tokens=1400,
+            response_format={"type": "json_object"},
+            messages=[
+                {"role": "system", "content": system_msg},
+                {"role": "user", "content": user_msg},
             ],
-            "cached": False,
-        }
-        await set_editorial_review_cache(
-            str(book.id),
-            cache_key,
-            response_payload,
-            expected_version=cache_version,
         )
-        return response_payload
-    finally:
-        await client.close()
+        raw = response.choices[0].message.content or "{}"
+        review_results.append(normalize_editorial_review_result(raw))
+    result = merge_editorial_review_results(review_results)
+    response_payload = {
+        "review": result,
+        "retrieved_passages": [
+            {
+                "chapter_num": h["chapter_num"],
+                "chapter_title": h.get("chapter_title"),
+                "chunk_index": h.get("chunk_index"),
+                "excerpt": h["text"][:220],
+                "relevance": round(h.get("score", 0.0), 3),
+            }
+            for h in hits[:4]
+        ],
+        "cached": False,
+    }
+    await set_editorial_review_cache(
+        str(book.id),
+        cache_key,
+        response_payload,
+        expected_version=cache_version,
+    )
+    return response_payload
 
 
 @router.post("/{book_id}/advisor/editorial-review-stream")
@@ -222,48 +219,45 @@ async def prose_tighten(
         return ProseTightenResponse(**{**cached, "cached": True})
 
     client = get_openai_client()
-    try:
-        chapter_hint = (
-            f"This selection is from Chapter {body.chapter_num}."
-            if body.chapter_num
-            else "Chapter number not specified."
-        )
-        response = await create_tracked_chat_completion(
-            client=client,
-            feature="advisor_prose_tighten",
-            model=settings.OPENAI_INTEL_MODEL,
-            db=db,
-            user_id=current_user.id,
-            book_id=book.id,
-            temperature=0.2,
-            max_tokens=700,
-            response_format={"type": "json_object"},
-            messages=[
-                {
-                    "role": "system",
-                    "content": PROSE_TIGHTEN_SYSTEM.format(title=_safe_prompt_str(book.title)),
-                },
-                {
-                    "role": "user",
-                    "content": PROSE_TIGHTEN_USER.format(
-                        chapter_hint=chapter_hint, text=body.text[:3500]
-                    ),
-                },
-            ],
-        )
-        normalized = normalize_prose_tighten_result(
-            response.choices[0].message.content or "{}", body.text
-        )
-        response_payload = {**normalized, "cached": False}
-        await set_prose_tighten_cache(
-            str(book.id),
-            cache_key,
-            response_payload,
-            expected_version=cache_version,
-        )
-        return ProseTightenResponse(**response_payload)
-    finally:
-        await client.close()
+    chapter_hint = (
+        f"This selection is from Chapter {body.chapter_num}."
+        if body.chapter_num
+        else "Chapter number not specified."
+    )
+    response = await create_tracked_chat_completion(
+        client=client,
+        feature="advisor_prose_tighten",
+        model=settings.OPENAI_INTEL_MODEL,
+        db=db,
+        user_id=current_user.id,
+        book_id=book.id,
+        temperature=0.2,
+        max_tokens=700,
+        response_format={"type": "json_object"},
+        messages=[
+            {
+                "role": "system",
+                "content": PROSE_TIGHTEN_SYSTEM.format(title=_safe_prompt_str(book.title)),
+            },
+            {
+                "role": "user",
+                "content": PROSE_TIGHTEN_USER.format(
+                    chapter_hint=chapter_hint, text=body.text[:3500]
+                ),
+            },
+        ],
+    )
+    normalized = normalize_prose_tighten_result(
+        response.choices[0].message.content or "{}", body.text
+    )
+    response_payload = {**normalized, "cached": False}
+    await set_prose_tighten_cache(
+        str(book.id),
+        cache_key,
+        response_payload,
+        expected_version=cache_version,
+    )
+    return ProseTightenResponse(**response_payload)
 
 
 @router.post("/{book_id}/advisor/prose-tighten-stream")

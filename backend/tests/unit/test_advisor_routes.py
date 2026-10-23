@@ -552,7 +552,7 @@ async def test_whats_the_word_validates_book_and_returns_result(monkeypatch):
 
     assert payload.word == "acerbic"
     assert payload.gloss == "sharp with cutting contempt"
-    assert client.closed is True
+    assert client.closed is False
 
 
 @pytest.mark.asyncio
@@ -738,7 +738,7 @@ async def test_advisor_suggestions_adds_sparse_proactive_audit(monkeypatch):
     assert payload["meta"]["audit_summary"] == "Sparse heuristics triggered a deeper audit."
     assert any(item["source"] == "proactive_audit" for item in payload["suggestions"])
     assert cache.set_calls
-    assert client.closed is True
+    assert client.closed is False
 
 
 @pytest.mark.asyncio
@@ -828,7 +828,7 @@ async def test_editorial_review_validates_cache_and_happy_path(monkeypatch):
     assert search_calls[0]["limit"] == 8
     assert search_calls[0]["similarity_threshold"] == 0.28
     assert cache.set_calls
-    assert client.closed is True
+    assert client.closed is False
 
 
 @pytest.mark.asyncio
@@ -870,7 +870,7 @@ async def test_prose_tighten_requires_text_and_normalizes(monkeypatch):
 
     assert payload.tightened_text == "Trimmed"
     assert payload.rationale[0].startswith("{")
-    assert client.closed is True
+    assert client.closed is False
 
 
 @pytest.mark.asyncio
@@ -957,7 +957,7 @@ async def test_manuscript_synopsis_requires_chapters_and_returns_coverage(monkey
     assert payload.synopsis.startswith("{")
     assert payload.coverage_chapters == [1, 2]
     assert payload.cached is False
-    assert client.closed is True
+    assert client.closed is False
 
 
 @pytest.mark.asyncio
@@ -1140,7 +1140,7 @@ async def test_voice_consistency_review_builds_character_matches(monkeypatch):
     assert payload["character_matches"][0]["closest_other_character"] == "Milo"
     assert search_calls[0]["limit"] == 8
     assert search_calls[0]["similarity_threshold"] == 0.28
-    assert client.closed is True
+    assert client.closed is False
 
 
 @pytest.mark.asyncio
@@ -1256,7 +1256,7 @@ async def test_voice_consistency_review_respects_selected_character(monkeypatch)
     assert payload["characters_reviewed"] == ["Iris"]
     assert [item["character_name"] for item in payload["character_matches"]] == ["Iris"]
     assert payload["warnings"] == []
-    assert client.closed is True
+    assert client.closed is False
 
 
 @pytest.mark.asyncio
@@ -1411,7 +1411,7 @@ async def test_voice_consistency_review_warns_when_selected_character_needs_full
         "Dialogue could not be confidently attributed to Iris; the review used the full submitted passage instead."
     ]
     assert payload["character_matches"][0]["sample_dialogue_count"] == 1
-    assert client.closed is True
+    assert client.closed is False
 
 
 def test_make_editorial_cache_key_varies_with_character_selection():
@@ -1680,4 +1680,4 @@ async def test_series_continuity_check_handles_no_prior_books_and_full_review(mo
     assert payload["review"]["overall_verdict"].startswith("{")
     assert payload["retrieved_passages"][0]["book_title"] == "Book One"
     assert cache.set_calls
-    assert client.closed is True
+    assert client.closed is False

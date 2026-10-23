@@ -243,55 +243,16 @@ async def _reader_feedback_synthesis(
         return normalize_beta_reader_synthesis("{}")
     client = get_openai_client()
     batch_results: list[dict[str, Any]] = []
-    try:
-        for index, batch in enumerate(batches, start=1):
-            if progress:
-                await progress(
-                    {
-                        "stage": "reader_feedback",
-                        "completed": index - 1,
-                        "total": len(batches),
-                        "message": f"Reading manuscript batch {index} of {len(batches)}...",
-                    }
-                )
-            response = await create_tracked_chat_completion(
-                client=client,
-                feature="advisor_beta_reader",
-                model=settings.OPENAI_INTEL_MODEL,
-                db=db,
-                user_id=user_id,
-                book_id=book.id,
-                temperature=0.2,
-                max_tokens=1800,
-                response_format={"type": "json_object"},
-                messages=[
-                    {"role": "system", "content": _BATCH_SYSTEM},
-                    {
-                        "role": "user",
-                        "content": f"Book: {book.title}\n\n{_batch_text(batch)}",
-                    },
-                ],
-            )
-            batch_results.append(
-                normalize_beta_reader_synthesis(response.choices[0].message.content or "{}")
-            )
-        if len(batch_results) == 1:
-            return batch_results[0]
-        deterministic = {
-            "top_repetitions": [
-                {"term": item["term"], "count": item["count"], "rate": item["rate_per_1000"]}
-                for item in overused_terms[:12]
-            ],
-            "voice_distinctness": [
+    for index, batch in enumerate(batches, start=1):
+        if progress:
+            await progress(
                 {
-                    "character": item["character_name"],
-                    "distinctness": item["distinctness_score"],
-                    "closest": item["closest_character_name"],
-                    "confidence": item["confidence"],
+                    "stage": "reader_feedback",
+                    "completed": index - 1,
+                    "total": len(batches),
+                    "message": f"Reading manuscript batch {index} of {len(batches)}...",
                 }
-                for item in voices
-            ],
-        }
+            )
         response = await create_tracked_chat_completion(
             client=client,
             feature="advisor_beta_reader",
@@ -299,22 +260,58 @@ async def _reader_feedback_synthesis(
             db=db,
             user_id=user_id,
             book_id=book.id,
-            temperature=0.1,
-            max_tokens=2200,
+            temperature=0.2,
+            max_tokens=1800,
             response_format={"type": "json_object"},
             messages=[
-                {"role": "system", "content": _SYNTHESIS_SYSTEM},
+                {"role": "system", "content": _BATCH_SYSTEM},
                 {
                     "role": "user",
-                    "content": json.dumps(
-                        {"section_reports": batch_results, "deterministic_metrics": deterministic}
-                    ),
+                    "content": f"Book: {book.title}\n\n{_batch_text(batch)}",
                 },
             ],
         )
-        return normalize_beta_reader_synthesis(response.choices[0].message.content or "{}")
-    finally:
-        await client.close()
+        batch_results.append(
+            normalize_beta_reader_synthesis(response.choices[0].message.content or "{}")
+        )
+    if len(batch_results) == 1:
+        return batch_results[0]
+    deterministic = {
+        "top_repetitions": [
+            {"term": item["term"], "count": item["count"], "rate": item["rate_per_1000"]}
+            for item in overused_terms[:12]
+        ],
+        "voice_distinctness": [
+            {
+                "character": item["character_name"],
+                "distinctness": item["distinctness_score"],
+                "closest": item["closest_character_name"],
+                "confidence": item["confidence"],
+            }
+            for item in voices
+        ],
+    }
+    response = await create_tracked_chat_completion(
+        client=client,
+        feature="advisor_beta_reader",
+        model=settings.OPENAI_INTEL_MODEL,
+        db=db,
+        user_id=user_id,
+        book_id=book.id,
+        temperature=0.1,
+        max_tokens=2200,
+        response_format={"type": "json_object"},
+        messages=[
+            {"role": "system", "content": _SYNTHESIS_SYSTEM},
+            {
+                "role": "user",
+                "content": json.dumps(
+                    {"section_reports": batch_results, "deterministic_metrics": deterministic}
+                ),
+            },
+        ],
+    )
+    return normalize_beta_reader_synthesis(response.choices[0].message.content or "{}")
 
 
 async def build_beta_reader_report(
