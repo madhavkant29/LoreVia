@@ -88,44 +88,41 @@ async def manuscript_synopsis(
 
     story_context = await build_story_context(db, book_id, book.total_chapters or len(chapter_rows))
     client = get_openai_client()
-    try:
-        response = await create_tracked_chat_completion(
-            client=client,
-            feature="advisor_synopsis",
-            model=settings.OPENAI_INTEL_MODEL,
-            db=db,
-            user_id=current_user.id,
-            book_id=book.id,
-            temperature=0.3,
-            max_tokens=700,
-            response_format={"type": "json_object"},
-            messages=[
-                {
-                    "role": "system",
-                    "content": SYNOPSIS_SYSTEM.format(
-                        title=_safe_prompt_str(book.title),
-                        spoiler_level=spoiler_level,
-                        story_context=_safe_prompt_str(story_context),
-                    ),
-                },
-                {
-                    "role": "user",
-                    "content": SYNOPSIS_USER.format(
-                        coverage=", ".join(coverage),
-                        passages="\n\n".join(passage_blocks),
-                    ),
-                },
-            ],
-        )
-        normalized = normalize_synopsis_result(
-            response.choices[0].message.content or "{}", spoiler_level
-        )
-        normalized["coverage_chapters"] = [int(item) for item in coverage]
-        normalized["cached"] = False
-        await set_synopsis_cache(str(book_id), spoiler_level, content_hash, normalized)
-        return SynopsisResponse(**normalized)
-    finally:
-        await client.close()
+    response = await create_tracked_chat_completion(
+        client=client,
+        feature="advisor_synopsis",
+        model=settings.OPENAI_INTEL_MODEL,
+        db=db,
+        user_id=current_user.id,
+        book_id=book.id,
+        temperature=0.3,
+        max_tokens=700,
+        response_format={"type": "json_object"},
+        messages=[
+            {
+                "role": "system",
+                "content": SYNOPSIS_SYSTEM.format(
+                    title=_safe_prompt_str(book.title),
+                    spoiler_level=spoiler_level,
+                    story_context=_safe_prompt_str(story_context),
+                ),
+            },
+            {
+                "role": "user",
+                "content": SYNOPSIS_USER.format(
+                    coverage=", ".join(coverage),
+                    passages="\n\n".join(passage_blocks),
+                ),
+            },
+        ],
+    )
+    normalized = normalize_synopsis_result(
+        response.choices[0].message.content or "{}", spoiler_level
+    )
+    normalized["coverage_chapters"] = [int(item) for item in coverage]
+    normalized["cached"] = False
+    await set_synopsis_cache(str(book_id), spoiler_level, content_hash, normalized)
+    return SynopsisResponse(**normalized)
 
 
 @router.get("/{book_id}/advisor/synopsis-stream")
