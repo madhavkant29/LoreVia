@@ -8,6 +8,74 @@ from app.services import beta_reader_analysis_service
 from app.utils.advisor_beta_reader_report_utils import bound_beta_reader_report
 
 
+@pytest.mark.asyncio
+async def test_reader_feedback_synthesis_reuses_shared_openai_client(monkeypatch):
+    class Client:
+        closed = False
+
+        async def close(self):
+            self.closed = True
+
+    client = Client()
+    calls = []
+
+    async def complete(**kwargs):
+        assert kwargs["client"] is client
+        assert client.closed is False
+        calls.append(kwargs)
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content='{"overall_impression":"Clear"}'))]
+        )
+
+    monkeypatch.setattr(beta_reader_analysis_service, "get_openai_client", lambda: client)
+    monkeypatch.setattr(beta_reader_analysis_service, "create_tracked_chat_completion", complete)
+
+    for _ in range(2):
+        result = await beta_reader_analysis_service._reader_feedback_synthesis(
+            db=SimpleNamespace(),
+            book=SimpleNamespace(id=uuid.uuid4(), title="The Silver Gate"),
+            user_id=uuid.uuid4(),
+            chapter_texts={1: "The silver gate opened."},
+            overused_terms=[],
+            voices=[],
+            progress=None,
+        )
+        assert result["overall_impression"] == "Clear"
+
+    assert len(calls) == 2
+    assert client.closed is False
+
+
+@pytest.mark.asyncio
+async def test_reader_feedback_synthesis_preserves_shared_client_after_provider_error(monkeypatch):
+    class Client:
+        closed = False
+
+        async def close(self):
+            self.closed = True
+
+    client = Client()
+
+    async def fail(**_kwargs):
+        raise RuntimeError("provider unavailable")
+
+    monkeypatch.setattr(beta_reader_analysis_service, "get_openai_client", lambda: client)
+    monkeypatch.setattr(beta_reader_analysis_service, "create_tracked_chat_completion", fail)
+
+    with pytest.raises(RuntimeError, match="provider unavailable"):
+        await beta_reader_analysis_service._reader_feedback_synthesis(
+            db=SimpleNamespace(),
+            book=SimpleNamespace(id=uuid.uuid4(), title="The Silver Gate"),
+            user_id=uuid.uuid4(),
+            chapter_texts={1: "The silver gate opened."},
+            overused_terms=[],
+            voices=[],
+            progress=None,
+        )
+
+    assert client.closed is False
+
+
 def _stored_report() -> dict:
     return {
         "report_id": "report-1",

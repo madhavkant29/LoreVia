@@ -648,8 +648,6 @@ async def build_advisor_suggestions_payload(
                         "findings": [],
                         "overall_note": "Proactive audit was unavailable, so this scan is showing heuristic-only results.",
                     }
-                finally:
-                    await client.close()
             else:
                 proactive_result = {
                     "findings": [],
