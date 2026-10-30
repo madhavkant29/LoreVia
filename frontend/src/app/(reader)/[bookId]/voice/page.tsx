@@ -43,7 +43,7 @@ function VoiceWorkspace({ bookId }: { bookId: string }) {
         <div className="mt-2 flex items-center gap-1 text-sm text-[rgb(var(--foreground))]">
           <span>How voice review works</span>
           <HelpBubble label="How Voice Consistency works" icon="info">
-            Choose a chapter or paste up to 12,000 characters, then select dialogue or first-person narration. The review compares attributable voice in that passage with earlier, source-backed samples from the manuscript. It shows possible shifts with supporting excerpts and tells you when there is too little evidence for a reliable verdict. Your manuscript is not changed; save a note or snapshot if you want to keep the result.
+            The current chapter loads automatically; you can switch chapters or paste a passage up to 12,000 characters. In dialogue mode, Auto-detect checks up to five known characters separately, using only speech it can attribute to each one. First-person narration checks one identified narrator. The review compares those samples with earlier manuscript evidence, shows supported shifts, and warns when speech or baseline evidence is missing. Longer chapters need a shorter passage. Your manuscript is not changed; save a note or snapshot to keep the result.
           </HelpBubble>
         </div>
 
@@ -69,7 +69,7 @@ function VoiceWorkspace({ bookId }: { bookId: string }) {
                 {characters.map((character) => <option key={character.id} value={character.id}>{character.name}</option>)}
               </select>
               {selectedCharacterId && !selectedCharacter ? <p className="mt-2" role="status">Select an available character or auto-detect before reviewing.</p> : null}
-              <span className="mt-2 block text-xs text-[rgb(var(--muted-foreground))]">Choose a character only when you need a targeted baseline comparison.</span>
+              <span className="mt-2 block text-xs text-[rgb(var(--muted-foreground))]">In dialogue mode, Auto-detect checks up to five known characters with attributable speech. Select one character for a focused comparison or to check someone the automatic review skips.</span>
               <label htmlFor="voice-mode" className="mt-4 block font-semibold">Voice to review</label>
               <select id="voice-mode" value={voiceMode} onChange={(event) => setVoiceMode(event.target.value as "dialogue" | "first_person_narration")} className="app-input mt-2 w-full">
                 <option value="dialogue">Character dialogue</option>
