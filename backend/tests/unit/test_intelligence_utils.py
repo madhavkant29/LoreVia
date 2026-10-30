@@ -166,6 +166,21 @@ def test_compute_voice_metrics_tracks_formality_and_punctuation():
     assert metrics["exclamation_rate_x1000"] > 0
 
 
+def test_compute_voice_metrics_counts_unicode_words_and_curly_contractions():
+    metrics = compute_voice_metrics(["We’ll go to the café, abuela. ¡Sí, vamos!"])
+
+    assert metrics["sample_word_count"] == 8
+    assert metrics["contraction_rate_x1000"] == 125
+    assert metrics["avg_sentence_length"] == 4
+
+
+def test_compute_voice_metrics_preserves_bilingual_signature_phrases():
+    metrics = compute_voice_metrics(["Café claro. We’ll wait."] * 2)
+
+    assert "café claro" in metrics["signature_phrases"]
+    assert "we’ll wait" in metrics["signature_phrases"]
+
+
 def test_score_voice_match_penalizes_drift_and_explains_signals():
     profile = compute_voice_metrics(
         [

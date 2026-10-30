@@ -1,3 +1,4 @@
+import json
 import uuid
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -10,6 +11,7 @@ from app.models.character import Character
 from app.models.intelligence import PlotThread
 from app.models.user import User
 from app.utils import advisor_chat_utils, advisor_utils
+from app.utils.advisor_prompt_templates import PROACTIVE_SCAN_SYSTEM
 from app.utils.advisor_story_context_utils import build_series_story_context, build_story_context
 from app.utils.advisor_utils import (
     advisor_retrieval_settings,
@@ -203,11 +205,307 @@ def test_normalize_proactive_scan_result_keeps_valid_findings():
     assert payload["findings"][0]["chapter_ref"] == 9
 
 
+def test_proactive_scan_keeps_more_than_four_independent_supported_checks():
+    source_blocks = [
+        f"Chapter {index}: A separate event {index} needs review." for index in range(1, 7)
+    ]
+    findings = [
+        {
+            "severity": "warning",
+            "type": "event_conflict",
+            "title": f"Check event {index}",
+            "description": f"Event {index} may conflict with established timing.",
+            "evidence_excerpt": f"A separate event {index} needs review.",
+            "chapter_ref": index,
+            "action_label": "Check timeline",
+            "ask_prompt": f"What happened at event {index}?",
+        }
+        for index in range(1, 7)
+    ]
+    raw = json.dumps({"findings": findings, "overall_note": "Six independent checks."})
+
+    strict = normalize_proactive_scan_result(raw, strict=True, source_blocks=source_blocks)
+    relaxed = normalize_proactive_scan_result(raw)
+
+    assert [item["title"] for item in strict["findings"]] == [
+        f"Check event {index}" for index in range(1, 7)
+    ]
+    assert len(relaxed["findings"]) == 6
+    assert "Do not stop at four" in PROACTIVE_SCAN_SYSTEM
+
+
 def test_normalize_proactive_scan_result_falls_back_on_invalid_json():
     payload = normalize_proactive_scan_result("not-json")
 
     assert payload["findings"] == []
     assert "not-json" in payload["overall_note"]
+
+
+@pytest.mark.parametrize(
+    ("raw", "reason"),
+    [
+        ("not-json", "advisor_scan_invalid_json"),
+        ('{"findings": "none", "overall_note": "Clear"}', "advisor_scan_invalid_shape"),
+        ('{"findings": [], "overall_note": "  "}', "advisor_scan_invalid_shape"),
+        (
+            '{"findings": [{"title": "No evidence"}], "overall_note": "Clear"}',
+            "advisor_scan_invalid_findings",
+        ),
+    ],
+)
+def test_proactive_scan_strict_mode_rejects_malformed_success(raw, reason):
+    with pytest.raises(ValueError, match=reason):
+        normalize_proactive_scan_result(raw, strict=True)
+
+
+def test_proactive_scan_strict_mode_accepts_genuine_empty_scan():
+    payload = normalize_proactive_scan_result(
+        '{"findings": [], "overall_note": "No supported checks found."}', strict=True
+    )
+
+    assert payload == {"findings": [], "overall_note": "No supported checks found."}
+
+
+@pytest.mark.parametrize(
+    "invalid_label",
+    [{"severity": "high"}, {"type": "mystery_problem"}],
+)
+def test_proactive_scan_rejects_findings_that_the_ui_cannot_render(invalid_label):
+    valid = {
+        "severity": "warning",
+        "type": "event_conflict",
+        "title": "Check the bridge",
+        "description": "The route may have changed.",
+        "evidence_excerpt": "The bridge remained open.",
+        "chapter_ref": 2,
+        "action_label": "Check the route",
+        "ask_prompt": "Was the crossing possible?",
+    }
+    raw = json.dumps(
+        {
+            "findings": [valid, {**valid, **invalid_label, "title": "Invisible check"}],
+            "overall_note": "Two checks were proposed.",
+        }
+    )
+    source_blocks = ["Chapter 2: The bridge remained open."]
+
+    with pytest.raises(ValueError, match="advisor_scan_invalid_labels"):
+        normalize_proactive_scan_result(raw, strict=True, source_blocks=source_blocks)
+
+    partial = normalize_proactive_scan_result(
+        raw, strict=True, source_blocks=source_blocks, allow_partial=True
+    )
+    assert partial["partial"] is True
+    assert [finding["title"] for finding in partial["findings"]] == ["Check the bridge"]
+    assert "omitted" in partial["overall_note"]
+
+
+def test_proactive_scan_partial_mode_retains_only_source_verified_findings():
+    valid = {
+        "title": "Check bridge route",
+        "description": "The route may have changed.",
+        "evidence_excerpt": "The bridge remained open.",
+        "chapter_ref": 2,
+        "action_label": "Check route",
+        "ask_prompt": "Which route was used?",
+    }
+    raw = json.dumps(
+        {
+            "findings": [
+                valid,
+                {**valid, "title": "Invented route", "evidence_excerpt": "A phantom road."},
+            ],
+            "overall_note": "Two issues were found.",
+        }
+    )
+
+    partial = normalize_proactive_scan_result(
+        raw,
+        strict=True,
+        source_blocks=["Chapter 2: The bridge remained open."],
+        allow_partial=True,
+    )
+
+    assert partial["partial"] is True
+    assert [finding["title"] for finding in partial["findings"]] == ["Check bridge route"]
+    assert "omitted" in partial["overall_note"]
+    with pytest.raises(ValueError, match="advisor_scan_unsupported_evidence"):
+        normalize_proactive_scan_result(
+            json.dumps(
+                {
+                    "findings": [{**valid, "evidence_excerpt": "A phantom road."}],
+                    "overall_note": "One.",
+                }
+            ),
+            strict=True,
+            source_blocks=["Chapter 2: The bridge remained open."],
+            allow_partial=True,
+        )
+
+
+def test_proactive_scan_strict_mode_rejects_fabricated_evidence_excerpt():
+    raw = (
+        '{"findings":[{"severity":"warning","type":"event_conflict",'
+        '"title":"Changed route","description":"The route changed.",'
+        '"evidence_excerpt":"The bridge was destroyed.","chapter_ref":2,'
+        '"action_label":"Check route","ask_prompt":"Which route was used?"}],'
+        '"overall_note":"One possible issue."}'
+    )
+
+    with pytest.raises(ValueError, match="advisor_scan_unsupported_evidence"):
+        normalize_proactive_scan_result(
+            raw, strict=True, source_blocks=["Chapter 2: The bridge remained open."]
+        )
+
+    valid = normalize_proactive_scan_result(
+        raw.replace("The bridge was destroyed.", "The bridge remained open."),
+        strict=True,
+        source_blocks=["Chapter 2: The bridge remained open."],
+    )
+    assert valid["findings"][0]["evidence_excerpt"] == "The bridge remained open."
+
+
+def test_proactive_scan_rejects_chapter_link_unsupported_by_cited_evidence():
+    finding = {
+        "title": "Check bridge route",
+        "description": "The route may have changed.",
+        "evidence_excerpt": "The bridge remained open.",
+        "chapter_ref": 9,
+        "action_label": "Check route",
+        "ask_prompt": "Which route was used?",
+    }
+    raw = json.dumps({"findings": [finding], "overall_note": "One check."})
+    source = ["Chapter 2 (The Crossing): The bridge remained open."]
+
+    with pytest.raises(ValueError, match="advisor_scan_unsupported_chapter"):
+        normalize_proactive_scan_result(raw, strict=True, source_blocks=source)
+
+    partial = normalize_proactive_scan_result(
+        json.dumps(
+            {"findings": [{**finding, "chapter_ref": 2}, finding], "overall_note": "Two checks."}
+        ),
+        strict=True,
+        source_blocks=source,
+        allow_partial=True,
+    )
+    assert partial["partial"] is True
+    assert len(partial["findings"]) == 1
+    assert partial["findings"][0]["chapter_ref"] == 2
+
+
+def test_proactive_scan_infers_unique_source_chapter_but_not_world_element_chapter():
+    finding = {
+        "title": "Check the bridge",
+        "description": "The bridge description may have shifted.",
+        "evidence_excerpt": "The bridge remained open.",
+        "chapter_ref": None,
+        "action_label": "Check the passage",
+        "ask_prompt": "Where is the bridge described?",
+    }
+    source_result = normalize_proactive_scan_result(
+        json.dumps({"findings": [finding], "overall_note": "One check."}),
+        strict=True,
+        source_blocks=["Chapter 2: The bridge remained open."],
+    )
+    assert source_result["findings"][0]["chapter_ref"] == 2
+
+    world_result = normalize_proactive_scan_result(
+        json.dumps({"findings": [{**finding, "chapter_ref": 99}], "overall_note": "One check."}),
+        strict=True,
+        source_blocks=["- Stone bridge [place] usage=3. The bridge remained open."],
+    )
+    assert world_result["findings"][0]["chapter_ref"] is None
+
+
+@pytest.mark.parametrize(
+    ("block", "chapter"),
+    [
+        ("- Bridge bargain [developing] introduced ch.4: The crossing was promised.", 4),
+        ("- Mara / Lina: allies at chapter 7. The crossing was promised.", 7),
+    ],
+)
+def test_proactive_scan_chapter_link_matches_thread_or_relationship_source(block, chapter):
+    finding = {
+        "title": "Review the crossing",
+        "description": "The promise may need a payoff.",
+        "evidence_excerpt": "The crossing was promised.",
+        "chapter_ref": chapter,
+        "action_label": "Review the evidence",
+        "ask_prompt": "Where does the promise appear?",
+    }
+    result = normalize_proactive_scan_result(
+        json.dumps({"findings": [finding], "overall_note": "One check."}),
+        strict=True,
+        source_blocks=[block],
+    )
+    assert result["findings"][0]["chapter_ref"] == chapter
+
+
+@pytest.mark.parametrize(
+    "label",
+    [
+        "Chapter 2",
+        "Ch. 2",
+        "Chapter 2 (The Crossing)",
+        "Chapter 2:",
+        "Chapter 2 (The Crossing):",
+    ],
+)
+def test_proactive_scan_rejects_chapter_heading_as_the_only_evidence(label):
+    raw = json.dumps(
+        {
+            "findings": [
+                {
+                    "title": "Unsupported concern",
+                    "description": "The route may be inconsistent.",
+                    "evidence_excerpt": label,
+                    "chapter_ref": 2,
+                    "action_label": "Check route",
+                    "ask_prompt": "What happened on the route?",
+                }
+            ],
+            "overall_note": "One check.",
+        }
+    )
+
+    with pytest.raises(ValueError, match="advisor_scan_unsupported_evidence"):
+        normalize_proactive_scan_result(
+            raw,
+            strict=True,
+            source_blocks=["Chapter 2 (The Crossing): The bridge remained open."],
+        )
+
+
+def test_proactive_scan_strict_mode_rejects_partial_invalid_output_and_keeps_all_valid_findings():
+    valid = {
+        "severity": "warning",
+        "type": "event_conflict",
+        "title": "Changed route",
+        "description": "The route changed.",
+        "evidence_excerpt": "The bridge remained open.",
+        "chapter_ref": 2,
+        "action_label": "Check route",
+        "ask_prompt": "Which route was used?",
+    }
+    source = ["Chapter 2: The bridge remained open."]
+    with pytest.raises(ValueError, match="advisor_scan_invalid_findings"):
+        normalize_proactive_scan_result(
+            json.dumps({"findings": [valid, {"title": "Incomplete"}], "overall_note": "Partial"}),
+            strict=True,
+            source_blocks=source,
+        )
+
+    result = normalize_proactive_scan_result(
+        json.dumps(
+            {
+                "findings": [{**valid, "title": f"Issue {index}"} for index in range(5)],
+                "overall_note": "Five supported checks.",
+            }
+        ),
+        strict=True,
+        source_blocks=source,
+    )
+    assert len(result["findings"]) == 5
 
 
 @pytest.mark.asyncio

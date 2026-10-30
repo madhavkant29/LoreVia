@@ -33,6 +33,19 @@ LLM_PROVIDER_CALL_EXCEPTIONS = (
 )
 CUSTOMER_BILLING_SCOPE = "customer"
 SYSTEM_BILLING_SCOPE = "system"
+
+
+class LLMIncompleteResponseError(ValueError):
+    """The provider stopped generation before completing the requested answer."""
+
+
+def require_complete_llm_response(response: Any) -> None:
+    """Reject missing or non-final chat choices before parsing structured output."""
+    choices = getattr(response, "choices", None)
+    if not choices or getattr(choices[0], "finish_reason", None) != "stop":
+        raise LLMIncompleteResponseError("llm_response_incomplete")
+
+
 PROCESSING_FEATURE_PREFIXES = (
     "chapter_",
     "character_",
@@ -107,6 +120,18 @@ def is_retryable_llm_call_error(exc: BaseException) -> bool:
     return is_transient_llm_provider_error(exc)
 
 
+def short_llm_coordination_retry_delay(exc: HTTPException) -> float | None:
+    """Honor only short, explicit coordination backoffs; never retry plan denials."""
+    if exc.status_code not in {429, 503} or isinstance(exc.detail, dict):
+        return None
+    retry_after = (exc.headers or {}).get("Retry-After")
+    try:
+        delay = float(retry_after)
+    except (TypeError, ValueError):
+        return None
+    return delay if math.isfinite(delay) and 0 < delay <= 5 else None
+
+
 def public_llm_http_error_message(exc: HTTPException) -> str:
     """Preserve safe AI allowance messages while hiding unrelated HTTP details."""
 
@@ -115,7 +140,9 @@ def public_llm_http_error_message(exc: HTTPException) -> str:
         "llm_attribution",
         "llm_budget",
         "llm_configuration",
+        "llm_provider",
         "llm_tokens",
+        "manuscript_source",
     }:
         message = detail.get("message") or detail.get("detail")
         if message:

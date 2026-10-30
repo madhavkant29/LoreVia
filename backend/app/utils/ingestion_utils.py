@@ -107,9 +107,11 @@ async def load_staged_chapter_payload(
     chapter_s3_key: str | None = None,
 ) -> dict[str, str | None] | None:
     candidate_keys: list[str] = []
-    normalized_key = " ".join(str(chapter_s3_key or "").split()).strip()
-    if normalized_key:
-        candidate_keys.append(normalized_key)
+    stored_key = str(chapter_s3_key or "")
+    if stored_key.strip():
+        # Object-storage keys are exact identifiers. Normalizing their internal
+        # whitespace can turn a valid chapter source into a false missing key.
+        candidate_keys.append(stored_key)
 
     fallback_key = build_chapter_storage_key(book_id, chapter_number)
     if fallback_key not in candidate_keys:
@@ -343,6 +345,48 @@ def build_analysis_chapter_state(
     if isinstance(next_source_integrity, dict):
         payload["source_integrity"] = next_source_integrity
     return payload
+
+
+def record_extraction_coverage_in_analysis_state(
+    existing: dict[str, Any] | None,
+    coverage: dict[str, Any],
+) -> dict[str, Any]:
+    """Keep verified, chapter-specific extraction provenance through later analysis updates."""
+    if not isinstance(coverage, dict) or coverage.get("complete") is not True:
+        raise ValueError("character_extraction_source_coverage_incomplete")
+    current = dict(existing) if isinstance(existing, dict) else {}
+    source_integrity = (
+        dict(current.get("source_integrity"))
+        if isinstance(current.get("source_integrity"), dict)
+        else {}
+    )
+    source_integrity["extraction_coverage"] = coverage
+    source_integrity.pop("extraction_attempt", None)
+    current["source_integrity"] = source_integrity
+    return current
+
+
+def record_incomplete_extraction_attempt_in_analysis_state(
+    existing: dict[str, Any] | None,
+    coverage: dict[str, Any],
+) -> dict[str, Any]:
+    """Retain batch failure metadata without implying that extraction completed."""
+    if (
+        not isinstance(coverage, dict)
+        or coverage.get("complete") is not False
+        or not isinstance(coverage.get("batch_outcomes"), list)
+    ):
+        raise ValueError("invalid_incomplete_extraction_attempt")
+    current = dict(existing) if isinstance(existing, dict) else {}
+    source_integrity = (
+        dict(current.get("source_integrity"))
+        if isinstance(current.get("source_integrity"), dict)
+        else {}
+    )
+    source_integrity["extraction_attempt"] = coverage
+    source_integrity.pop("extraction_coverage", None)
+    current["source_integrity"] = source_integrity
+    return current
 
 
 def build_source_integrity_state(

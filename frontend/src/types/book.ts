@@ -884,6 +884,19 @@ export interface ReprocessMetadata {
   last_manual_chapter_number?: number | null
 }
 
+export interface ManuscriptReprocessPreflight {
+  book_id: string
+  ready: boolean
+  chapters_total: number
+  processed_words_to_reserve: number
+  protected_characters: number
+  replaceable_characters: number
+  missing_source_chapters: number[]
+  blockers: string[]
+  preview_fingerprint: string | null
+  limitation: string
+}
+
 export interface RevisionActionItem {
   id: string
   category: string

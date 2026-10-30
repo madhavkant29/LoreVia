@@ -14,6 +14,7 @@ class CharacterOut(BaseModel):
     class CharacterAnalysisOut(BaseModel):
         persistence_reason: str | None = None
         evidence_count: int | None = None
+        strong_mention_count: int | None = None
         summary_quality: str | None = None
         needs_review: bool = False
         rejected_duplicate_candidates: list[str] = Field(default_factory=list)
@@ -28,6 +29,7 @@ class CharacterOut(BaseModel):
         cluster_mention_count: int = 0
         resolver_status: str | None = None
         review_note: str | None = None
+        first_person_self_identification: dict | None = None
         visibility_state: str | None = None
         approval_state: str | None = None
         approval_source: str | None = None

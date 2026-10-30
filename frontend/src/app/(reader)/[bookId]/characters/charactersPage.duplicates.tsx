@@ -1,6 +1,7 @@
 import type { ConnectedRelationship } from "@/components/reader/CharacterProfileRightRail"
 import type { Character, CharacterRelationshipCandidate } from "@/types/character"
 import type { SearchResult } from "@/types/reader"
+import { characterMentionCountLabel } from "./charactersPage.mentionLabels"
 import { actionButtonClasses, QuickActionTile, SurfaceCard } from "./charactersPage.components"
 import {
   characterInitial,
@@ -216,11 +217,11 @@ export function CharacterDuplicateWorkspace({
           <div className="grid gap-3 md:grid-cols-2">
             <div className={`rounded-sm border px-4 py-3 ${isDark ? "border-[#17202c] bg-black/20" : "border-stone-200 bg-white"}`}>
               <p className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-400" : "text-stone-600"}`}>Primary record</p>
-              <p className={`mt-2 text-sm ${isDark ? "text-slate-300" : "text-stone-600"}`}>{primaryCharacter.name} / {primaryCharacter.mention_count ?? 0} mentions / {relationshipCounts.get(primaryCharacter.id) ?? 0} ties</p>
+              <p className={`mt-2 text-sm ${isDark ? "text-slate-300" : "text-stone-600"}`}>{primaryCharacter.name} / {characterMentionCountLabel(primaryCharacter)} / {relationshipCounts.get(primaryCharacter.id) ?? 0} ties</p>
             </div>
             <div className={`rounded-sm border px-4 py-3 ${isDark ? "border-[#17202c] bg-black/20" : "border-stone-200 bg-white"}`}>
               <p className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-400" : "text-stone-600"}`}>Candidate record</p>
-              <p className={`mt-2 text-sm ${isDark ? "text-slate-300" : "text-stone-600"}`}>{secondaryCharacter.name} / {secondaryCharacter.mention_count ?? 0} mentions / {relationshipCounts.get(secondaryCharacter.id) ?? 0} ties</p>
+              <p className={`mt-2 text-sm ${isDark ? "text-slate-300" : "text-stone-600"}`}>{secondaryCharacter.name} / {characterMentionCountLabel(secondaryCharacter)} / {relationshipCounts.get(secondaryCharacter.id) ?? 0} ties</p>
             </div>
           </div>
 

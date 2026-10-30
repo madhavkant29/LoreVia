@@ -19,6 +19,7 @@ ROUTE_PATCH_MODULES: dict[str, tuple[str, ...]] = {
         "app.api.v1.routes.advisor.suggestions",
         "app.api.v1.routes.advisor.synopsis",
         "app.api.v1.routes.advisor.voice",
+        "app.services.voice_consistency_orchestration_service",
         "app.api.v1.routes.advisor.jobs",
     ),
     "app.api.v1.routes.books": (

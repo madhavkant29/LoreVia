@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 import uuid
 
@@ -9,8 +11,19 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.redis import mark_book_cache_dirty
 from app.models.book import Book, Chapter
+from app.models.character import (
+    Character,
+    CharacterCandidate,
+    CharacterIdentityConstraint,
+    CharacterRelationshipCandidate,
+    VoiceReviewDecision,
+)
 from app.models.operations import TaskExecution
-from app.schemas.books import ManuscriptReprocessBody, ManuscriptReprocessOut
+from app.schemas.books import (
+    ManuscriptReprocessBody,
+    ManuscriptReprocessOut,
+    ManuscriptReprocessPreflightOut,
+)
 from app.services.book_section_service import filter_analysis_eligible_chapters
 from app.services.processing_allowance_service import (
     MANUAL_REPROCESS_USAGE_KIND,
@@ -66,6 +79,232 @@ async def _chapter_extraction_is_active(
     return execution_id is not None
 
 
+async def preview_manual_manuscript_reprocess(
+    *, db: AsyncSession, current_user, book_id: uuid.UUID
+) -> ManuscriptReprocessPreflightOut:
+    """Inspect stored sources and replacement scope without reserving or changing data."""
+    book = await get_owned_book(db, book_id, current_user.id)
+    require_author_access(current_user)
+    await ensure_project_writable(db, book)
+    state = await _load_manual_reprocess_state(db, book)
+    await db.commit()
+    return await _build_manual_reprocess_preflight(book.id, state)
+
+
+async def _load_manual_reprocess_state(db: AsyncSession, book: Book) -> dict:
+    from app.services.editor_project_service import (
+        _resolve_character_anchor_ids,
+        get_rebuild_run_id,
+    )
+
+    chapters = list(
+        (
+            await db.execute(
+                select(Chapter)
+                .where(Chapter.book_id == book.id, Chapter.word_count > 0)
+                .order_by(Chapter.number)
+                .execution_options(populate_existing=True)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    chapters = await filter_analysis_eligible_chapters(db, book.id, chapters)
+    character_ids = set(
+        (await db.execute(select(Character.id).where(Character.book_id == book.id))).scalars().all()
+    )
+    protected_ids = character_ids & await _resolve_character_anchor_ids(db, book.id)
+    protected_characters = (
+        (
+            await db.execute(
+                select(Character)
+                .where(Character.id.in_(protected_ids))
+                .order_by(Character.id)
+                .execution_options(populate_existing=True)
+            )
+        )
+        .scalars()
+        .all()
+        if protected_ids
+        else []
+    )
+    review_decisions = (
+        await db.execute(
+            select(
+                VoiceReviewDecision.user_id,
+                VoiceReviewDecision.finding_key,
+                VoiceReviewDecision.decision,
+                VoiceReviewDecision.note,
+            )
+            .where(VoiceReviewDecision.book_id == book.id)
+            .order_by(VoiceReviewDecision.user_id, VoiceReviewDecision.finding_key)
+        )
+    ).all()
+    candidate_reviews = (
+        await db.execute(
+            select(
+                CharacterCandidate.id,
+                CharacterCandidate.generation_id,
+                CharacterCandidate.status,
+                CharacterCandidate.reason_codes,
+                CharacterCandidate.rejection_reason,
+                CharacterCandidate.matched_character_id,
+                CharacterCandidate.source_batch_key,
+            )
+            .where(CharacterCandidate.book_id == book.id)
+            .order_by(CharacterCandidate.id)
+        )
+    ).all()
+    relationship_candidate_reviews = (
+        await db.execute(
+            select(
+                CharacterRelationshipCandidate.id,
+                CharacterRelationshipCandidate.generation_id,
+                CharacterRelationshipCandidate.status,
+                CharacterRelationshipCandidate.reason_codes,
+                CharacterRelationshipCandidate.matched_character_a_id,
+                CharacterRelationshipCandidate.matched_character_b_id,
+            )
+            .where(CharacterRelationshipCandidate.book_id == book.id)
+            .order_by(CharacterRelationshipCandidate.id)
+        )
+    ).all()
+    manual_identity_constraints = (
+        await db.execute(
+            select(
+                CharacterIdentityConstraint.id,
+                CharacterIdentityConstraint.left_character_id,
+                CharacterIdentityConstraint.right_character_id,
+                CharacterIdentityConstraint.constraint_type,
+                CharacterIdentityConstraint.reason,
+            )
+            .where(
+                CharacterIdentityConstraint.book_id == book.id,
+                CharacterIdentityConstraint.source == "manual",
+            )
+            .order_by(CharacterIdentityConstraint.id)
+        )
+    ).all()
+    return {
+        "book_id": str(book.id),
+        "chapters": [
+            {
+                "chapter_id": str(chapter.id),
+                "chapter_number": chapter.number,
+                "content_version": str(chapter.content_version or ""),
+                "word_count": int(chapter.word_count or 0),
+                "title": str(chapter.title or ""),
+                "s3_key": str(chapter.s3_key or ""),
+            }
+            for chapter in chapters
+        ],
+        "protected_character_ids": sorted(map(str, protected_ids)),
+        "replaceable_character_ids": sorted(map(str, character_ids - protected_ids)),
+        "protected_character_reviews": [
+            {
+                "id": str(character.id),
+                "name": character.name,
+                "aliases": character.aliases,
+                "role": character.role,
+                "trait_state": character.trait_state,
+                "personality_tags": character.personality_tags,
+                "motivations": character.motivations,
+                "fears": character.fears,
+                "goal": character.goal,
+                "arc_summary": character.arc_summary,
+                "analysis_metadata": character.analysis_metadata,
+                "visibility_state": character.visibility_state,
+                "approval_state": character.approval_state,
+                "approval_source": character.approval_source,
+                "approval_reason_codes": character.approval_reason_codes,
+            }
+            for character in protected_characters
+        ],
+        "voice_review_decisions": [
+            [str(user_id), finding_key, decision, note]
+            for user_id, finding_key, decision, note in review_decisions
+        ],
+        "character_candidate_reviews": [
+            [str(value) if isinstance(value, uuid.UUID) else value for value in row]
+            for row in candidate_reviews
+        ],
+        "relationship_candidate_reviews": [
+            [str(value) if isinstance(value, uuid.UUID) else value for value in row]
+            for row in relationship_candidate_reviews
+        ],
+        "manual_identity_constraints": [
+            [str(value) if isinstance(value, uuid.UUID) else value for value in row]
+            for row in manual_identity_constraints
+        ],
+        "rebuild_run_id": str(get_rebuild_run_id(book) or ""),
+        "chapter_extraction_active": await _chapter_extraction_is_active(db, book.id),
+    }
+
+
+async def _build_manual_reprocess_preflight(
+    book_id: uuid.UUID, state: dict
+) -> ManuscriptReprocessPreflightOut:
+    chapters = state["chapters"]
+    source_parts: list[dict[str, str | int]] = []
+    missing_chapters: list[int] = []
+    for chapter in chapters:
+        payload = await load_processing_chapter_payload(
+            book_id,
+            chapter["chapter_number"],
+            chapter_s3_key=chapter["s3_key"],
+            chapter_title=chapter["title"],
+        )
+        if payload is None:
+            missing_chapters.append(chapter["chapter_number"])
+            continue
+        source_parts.append(
+            {
+                **chapter,
+                "source_sha256": hashlib.sha256(
+                    json.dumps(
+                        {"text": payload["text"], "html": payload.get("html")},
+                        sort_keys=True,
+                        default=str,
+                    ).encode()
+                ).hexdigest(),
+            }
+        )
+    blockers: list[str] = []
+    if not chapters:
+        blockers.append("No saved chapters are eligible for reprocessing.")
+    if missing_chapters:
+        blockers.append("Stored source text is unavailable for one or more chapters.")
+    if state["rebuild_run_id"] or state["chapter_extraction_active"]:
+        blockers.append("Chapter processing or a rebuild is already in progress.")
+    fingerprint = None
+    if not blockers:
+        snapshot = {
+            "book_id": state["book_id"],
+            "sources": source_parts,
+            "protected_character_ids": state["protected_character_ids"],
+            "replaceable_character_ids": state["replaceable_character_ids"],
+            "protected_character_reviews": state["protected_character_reviews"],
+            "voice_review_decisions": state["voice_review_decisions"],
+            "character_candidate_reviews": state["character_candidate_reviews"],
+            "relationship_candidate_reviews": state["relationship_candidate_reviews"],
+            "manual_identity_constraints": state["manual_identity_constraints"],
+        }
+        fingerprint = hashlib.sha256(
+            json.dumps(snapshot, sort_keys=True, separators=(",", ":"), default=str).encode()
+        ).hexdigest()
+    return ManuscriptReprocessPreflightOut(
+        book_id=str(book_id),
+        ready=not blockers,
+        chapters_total=len(chapters),
+        processed_words_to_reserve=sum(chapter["word_count"] for chapter in chapters),
+        protected_characters=len(state["protected_character_ids"]),
+        replaceable_characters=len(state["replaceable_character_ids"]),
+        missing_source_chapters=missing_chapters,
+        blockers=blockers,
+        preview_fingerprint=fingerprint,
+    )
+
+
 async def start_manual_manuscript_reprocess(
     *,
     db: AsyncSession,
@@ -85,10 +324,6 @@ async def start_manual_manuscript_reprocess(
             "Confirm that reprocessing will consume processed-word allowance before continuing.",
         )
 
-    await _lock_book_reprocessing(db, resolved_book_id)
-    await db.refresh(book)
-    await ensure_project_writable(db, book)
-
     from app.services.editor_project_service import (
         dispatch_rebuild,
         fail_rebuild_if_active,
@@ -96,10 +331,37 @@ async def start_manual_manuscript_reprocess(
         prepare_rebuild,
     )
 
+    state = await _load_manual_reprocess_state(db, book)
+    state_snapshot = json.dumps(state, sort_keys=True, default=str)
+    await db.commit()
+    preflight = await _build_manual_reprocess_preflight(resolved_book_id, state)
+    if not preflight.chapters_total:
+        raise HTTPException(400, "Save at least one chapter before reprocessing")
+    if not preflight.ready:
+        raise HTTPException(409, "Stored-source preflight is no longer ready. Refresh it.")
+    if not body.preview_fingerprint:
+        raise HTTPException(409, "A reprocess preview is required. Refresh the preflight.")
+    if preflight.preview_fingerprint != body.preview_fingerprint:
+        raise HTTPException(
+            409, "The manuscript or review decisions changed. Refresh the preflight."
+        )
+
+    await _lock_book_reprocessing(db, resolved_book_id)
+    await db.refresh(book)
+    if book.user_id != user_id:
+        raise HTTPException(404, "Book not found")
+    await db.refresh(current_user)
+    require_author_access(current_user)
+    await ensure_project_writable(db, book)
     if get_rebuild_run_id(book) is not None:
         raise HTTPException(409, "A rebuild is already in progress for this project")
     if await _chapter_extraction_is_active(db, book.id):
         raise HTTPException(409, "Chapter processing is already in progress for this project")
+    locked_state = await _load_manual_reprocess_state(db, book)
+    if json.dumps(locked_state, sort_keys=True, default=str) != state_snapshot:
+        raise HTTPException(
+            409, "The manuscript or review decisions changed. Refresh the preflight."
+        )
 
     chapters = (
         (
@@ -208,8 +470,42 @@ async def start_manual_chapter_reprocess(
     require_author_access(current_user)
     await ensure_project_writable(db, book)
 
+    chapter = (
+        await db.execute(
+            select(Chapter)
+            .where(Chapter.book_id == book.id, Chapter.number == chapter_number)
+            .execution_options(populate_existing=True)
+        )
+    ).scalar_one_or_none()
+    if chapter is None:
+        raise HTTPException(404, "Chapter not found")
+    if not chapter.word_count or chapter.word_count <= 0:
+        raise HTTPException(400, "Save chapter content before reprocessing")
+    source_identity = (
+        chapter.id,
+        chapter.content_version,
+        chapter.s3_key,
+        chapter.title,
+        chapter.word_count,
+    )
+    source_key = chapter.s3_key
+    source_title = chapter.title
+    await db.commit()
+    chapter_payload = await load_processing_chapter_payload(
+        book.id,
+        chapter_number,
+        chapter_s3_key=source_key,
+        chapter_title=source_title,
+    )
+    if chapter_payload is None:
+        raise HTTPException(400, "Save chapter content before reprocessing")
+
     await _lock_book_reprocessing(db, book.id)
     await db.refresh(book)
+    if book.user_id != current_user.id:
+        raise HTTPException(404, "Book not found")
+    await db.refresh(current_user)
+    require_author_access(current_user)
     await ensure_project_writable(db, book)
 
     from app.services.editor_project_service import (
@@ -223,21 +519,23 @@ async def start_manual_chapter_reprocess(
         raise HTTPException(409, "Chapter processing is already in progress for this project")
     chapter = (
         await db.execute(
-            select(Chapter).where(Chapter.book_id == book.id, Chapter.number == chapter_number)
+            select(Chapter)
+            .where(Chapter.book_id == book.id, Chapter.number == chapter_number)
+            .execution_options(populate_existing=True)
         )
     ).scalar_one_or_none()
-    if chapter is None:
-        raise HTTPException(404, "Chapter not found")
-    if not chapter.word_count or chapter.word_count <= 0:
-        raise HTTPException(400, "Save chapter content before reprocessing")
-    chapter_payload = await load_processing_chapter_payload(
-        book.id,
-        chapter_number,
-        chapter_s3_key=chapter.s3_key,
-        chapter_title=chapter.title,
-    )
-    if chapter_payload is None:
-        raise HTTPException(400, "Save chapter content before reprocessing")
+    if (
+        chapter is None
+        or (
+            chapter.id,
+            chapter.content_version,
+            chapter.s3_key,
+            chapter.title,
+            chapter.word_count,
+        )
+        != source_identity
+    ):
+        raise HTTPException(409, "The chapter changed while loading its source. Retry.")
 
     estimated_tokens = estimate_manual_reprocess_tokens(str(chapter_payload.get("text") or ""))
     await assert_manual_reprocess_token_capacity(

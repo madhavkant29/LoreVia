@@ -11,6 +11,7 @@ from sqlalchemy import (
     Index,
     Integer,
     String,
+    Text,
     UniqueConstraint,
     func,
     text,
@@ -275,6 +276,32 @@ class CharacterVoiceProfile(GenerationScopedMixin, Base):
     )
 
     character = relationship("Character", back_populates="voice_profile")
+
+
+class VoiceReviewDecision(Base):
+    """A user's durable decision about one source-backed voice finding."""
+
+    __tablename__ = "voice_review_decisions"
+    __table_args__ = (
+        UniqueConstraint(
+            "book_id", "user_id", "finding_key", name="uq_voice_review_decisions_user_finding"
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    book_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("books.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    finding_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    decision: Mapped[str] = mapped_column(String(20), nullable=False)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
 
 
 class CharacterCandidate(GenerationScopedMixin, Base):

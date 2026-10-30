@@ -344,6 +344,10 @@ def repair_processing_books_task(self, *, book_id: str | None = None, limit: int
             key_maintenance_cursor,
         )
         from app.models.book import Book
+        from app.services.book_freeze_service import (
+            book_created_before_cutoff,
+            load_persisted_freeze_cutoff,
+        )
         from app.services.editor_project_service import repair_stale_editor_processing_state
         from app.services.pipeline_state_service import (
             book_processing_has_blocking_failure,
@@ -433,6 +437,8 @@ def repair_processing_books_task(self, *, book_id: str | None = None, limit: int
 
                 repaired = 0
                 requeued = 0
+                legacy_freeze_cutoff = await load_persisted_freeze_cutoff(db)
+                held_for_legacy_freeze = 0
                 for book in books:
                     if book.status != "processing":
                         continue
@@ -455,6 +461,12 @@ def repair_processing_books_task(self, *, book_id: str | None = None, limit: int
                         and book.status == "processing"
                         and book_processing_has_blocking_failure(book)
                     ):
+                        if book_created_before_cutoff(book, legacy_freeze_cutoff):
+                            # The cutoff deliberately holds these books until
+                            # the one-time freeze. Repeating an error on every
+                            # sweep cannot recover or unblock them.
+                            held_for_legacy_freeze += 1
+                            continue
                         # Alertable signal: a book cannot finish on its own and
                         # the repair sweep cannot resolve it. Operators can find
                         # it by book_id without reading manuscript contents.
@@ -468,6 +480,7 @@ def repair_processing_books_task(self, *, book_id: str | None = None, limit: int
                     "checked": len(books),
                     "repaired": repaired,
                     "requeued": requeued,
+                    "held_for_legacy_freeze": held_for_legacy_freeze,
                     "wrapped_cursor": wrapped_cursor,
                     "duration_ms": round((time.perf_counter() - started_at) * 1000, 2),
                 }

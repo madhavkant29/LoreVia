@@ -1,6 +1,6 @@
 "use client"
 
-import { HelpCircle, X } from "lucide-react"
+import { HelpCircle, Info, X } from "lucide-react"
 import { useEffect, useId, useRef, useState } from "react"
 
 import { cn } from "@/lib/utils/text"
@@ -9,10 +9,12 @@ export function HelpBubble({
   label,
   children,
   className,
+  icon = "help",
 }: {
   label: string
   children: React.ReactNode
   className?: string
+  icon?: "help" | "info"
 }) {
   const [open, setOpen] = useState(false)
   const descriptionId = useId()
@@ -41,13 +43,13 @@ export function HelpBubble({
         aria-label={label}
         aria-expanded={open}
         aria-describedby={open ? descriptionId : undefined}
-        onClick={() => setOpen((current) => !current)}
+        onClick={() => setOpen(true)}
         onMouseEnter={() => setOpen(true)}
         onMouseLeave={() => setOpen(false)}
         onFocus={() => setOpen(true)}
-        className="inline-flex h-7 w-7 items-center justify-center rounded-sm text-[rgb(var(--muted-foreground))] transition hover:bg-[rgba(var(--border),0.35)] hover:text-[rgb(var(--foreground))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgb(var(--accent))]"
+        className="inline-flex h-7 w-7 items-center justify-center rounded-sm text-[rgb(var(--foreground))] transition hover:bg-[rgba(var(--border),0.35)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgb(var(--accent))]"
       >
-        <HelpCircle className="h-4 w-4" aria-hidden="true" />
+        {icon === "info" ? <Info className="h-4 w-4" aria-hidden="true" /> : <HelpCircle className="h-4 w-4" aria-hidden="true" />}
       </button>
       {open ? (
         <span
@@ -55,7 +57,7 @@ export function HelpBubble({
           role="tooltip"
           onMouseEnter={() => setOpen(true)}
           onMouseLeave={() => setOpen(false)}
-          className="absolute left-1/2 top-full z-[80] mt-2 w-72 -translate-x-1/2 rounded-none bg-[rgb(var(--surface))] p-3 text-left text-xs leading-5 text-[rgb(var(--foreground))] shadow-[var(--shadow-dropdown)]"
+          className="absolute left-1/2 top-full z-[80] mt-2 w-72 -translate-x-1/2 rounded-none border border-[rgb(var(--border))] bg-[rgb(var(--surface))] p-3 text-left text-xs leading-5 text-[rgb(var(--foreground))] shadow-[var(--shadow-dropdown)]"
         >
           <span className="flex items-start gap-2">
             <span className="min-w-0 flex-1">{children}</span>

@@ -7,6 +7,7 @@ import logging
 import re
 import time
 import uuid
+from typing import Any
 
 from sqlalchemy import select
 
@@ -42,6 +43,12 @@ from app.services.extraction_chapter_record_service import (
     replace_chapter_extraction_records,
     stage_chapter_for_extraction,
 )
+from app.services.extraction_character_mention_count_service import (
+    reconcile_character_mention_counts,
+)
+from app.services.extraction_character_reporting_service import (
+    precompute_chapter_character_embeddings,
+)
 from app.services.extraction_character_resolution_service import (
     resolve_chapter_character_entities,
 )
@@ -56,6 +63,8 @@ from app.utils.ingestion_utils import (
     elapsed_ms,
     is_book_hidden,
     mark_book_processing_cancelled,
+    record_extraction_coverage_in_analysis_state,
+    record_incomplete_extraction_attempt_in_analysis_state,
 )
 
 log = logging.getLogger("lorevia.extraction")
@@ -168,7 +177,6 @@ async def _process_chapter_in_generation(
             chapter_number=chapter_number,
             ch_data=ch_data,
         )
-        chunks = prepared_chunks.texts
 
         existing_characters = (
             (
@@ -200,13 +208,66 @@ async def _process_chapter_in_generation(
                 chapter_number,
             )
             return False
+
+        async def record_incomplete_batch(coverage: dict[str, Any]) -> None:
+            try:
+                chapter.analysis_state = record_incomplete_extraction_attempt_in_analysis_state(
+                    chapter.analysis_state, coverage
+                )
+                await db.commit()
+            except Exception as persistence_error:
+                try:
+                    await db.rollback()
+                except Exception as rollback_error:
+                    log.warning(
+                        "character_extraction_failure_diagnostics_rollback_unavailable book_id=%s chapter=%s error_type=%s",
+                        book.id,
+                        chapter_number,
+                        type(rollback_error).__name__,
+                    )
+                log.warning(
+                    "character_extraction_failure_diagnostics_unavailable book_id=%s chapter=%s error_type=%s",
+                    book.id,
+                    chapter_number,
+                    type(persistence_error).__name__,
+                )
+
         llm_extraction = await collect_chapter_llm_extraction(
             db,
             book=book,
             chapter_number=chapter_number,
-            chunks=chunks,
+            # Embedding chunks may normalize whitespace; extraction provenance
+            # must cover the stored chapter source itself, character for character.
+            chunks=[str(ch_data.get("text") or "")],
             existing_characters=existing_characters,
+            on_incomplete_batch=record_incomplete_batch,
         )
+        frozen_before_character_embedding = await book_is_frozen(db, book.id)
+        await db.commit()
+        if frozen_before_character_embedding:
+            log.info(
+                "Aborting frozen chapter extraction before character embeddings book_id=%s chapter=%s",
+                book.id,
+                chapter_number,
+            )
+            return False
+        # Embedding can wait on the provider. Prepare every proposed identity
+        # before replacing source records so no chapter transaction stays open
+        # across that wait. Resolution still decides which identities to save.
+        precomputed_character_embeddings = await precompute_chapter_character_embeddings(
+            llm_extraction.aggregated_character_entities,
+            user_id=book.user_id,
+            book_id=book.id,
+        )
+        frozen_after_character_embedding = await book_is_frozen(db, book.id)
+        await db.commit()
+        if frozen_after_character_embedding:
+            log.info(
+                "Aborting frozen chapter extraction after character embeddings book_id=%s chapter=%s",
+                book.id,
+                chapter_number,
+            )
+            return False
         pending_relationships = llm_extraction.pending_relationships
         reconciled_first_name_alias_count = 0
         chapter_media_count = len(ch_data.get("images") or [])
@@ -223,7 +284,7 @@ async def _process_chapter_in_generation(
             prepared_chunks,
             chapter_id=chapter.id,
         )
-        await replace_chapter_extraction_records(
+        previous_mention_character_ids = await replace_chapter_extraction_records(
             db,
             book_id=book.id,
             chapter_number=chapter_number,
@@ -232,6 +293,7 @@ async def _process_chapter_in_generation(
 
         raw_character_entities = llm_extraction.raw_character_entities
         if await book_is_frozen(db, book.id):
+            await db.rollback()
             log.info(
                 "Aborting frozen chapter extraction before resolution book_id=%s chapter=%s",
                 book.id,
@@ -245,6 +307,8 @@ async def _process_chapter_in_generation(
             existing_characters=existing_characters,
             character_key_cache=character_key_cache,
             raw_character_entities=raw_character_entities,
+            aggregated_entities=llm_extraction.aggregated_character_entities,
+            precomputed_embeddings=precomputed_character_embeddings,
         )
         aggregated_entities = character_resolution.aggregated_entities
         pending_first_chapter_candidates = character_resolution.pending_first_chapter_candidates
@@ -253,6 +317,14 @@ async def _process_chapter_in_generation(
         quarantined_candidate_count = character_resolution.quarantined_candidate_count
         ambiguous_entity_count = character_resolution.ambiguous_entity_count
         strict_hold_count = character_resolution.strict_hold_count
+
+        await reconcile_character_mention_counts(
+            db,
+            book_id=book.id,
+            chapter_number=chapter_number,
+            previous_character_ids=previous_mention_character_ids,
+            characters=existing_characters,
+        )
 
         reconciled_first_name_alias_count = await reconcile_pending_first_name_alias_candidates(
             db,
@@ -301,6 +373,9 @@ async def _process_chapter_in_generation(
         # extraction and its database writes have succeeded. The staging
         # transaction deliberately leaves this false so another chapter
         # cannot finalize the book while this task is still running.
+        chapter.analysis_state = record_extraction_coverage_in_analysis_state(
+            chapter.analysis_state, llm_extraction.source_coverage
+        )
         chapter.processed = True
         commit_started = time.perf_counter()
         await db.commit()

@@ -20,6 +20,7 @@ async def build_chapter_character_extraction_diagnostics(
     *,
     chapter_number: int,
     extraction_batch_texts: Sequence[str],
+    source_coverage: dict[str, Any],
     extraction_failed_batches: int,
     extraction_fallback_batches: int,
     extraction_fallback_character_count: int,
@@ -65,6 +66,7 @@ async def build_chapter_character_extraction_diagnostics(
     )
     chapter_character_diagnostics = {
         "total_batches": len(extraction_batch_texts),
+        "source_coverage": source_coverage,
         "failed_batches": extraction_failed_batches,
         "fallback_batches": extraction_fallback_batches,
         "fallback_character_count": extraction_fallback_character_count,

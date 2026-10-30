@@ -50,6 +50,8 @@ from app.utils.characters.serialization import is_protected_character
 class CharacterIdentityRepairResult:
     book_id: str
     dry_run: bool
+    allow_merge_safe_pairs: bool = True
+    allow_demote_obvious_noise: bool = True
     auto_merged: int = 0
     auto_aliases: int = 0
     auto_suppressed: int = 0
@@ -66,8 +68,6 @@ class CharacterIdentityRepairResult:
 
     def to_payload(self) -> dict:
         payload = asdict(self)
-        payload.setdefault("allow_merge_safe_pairs", True)
-        payload.setdefault("allow_demote_obvious_noise", True)
         payload.setdefault("planned_demotions", list(self.planned_suppressions))
         payload.setdefault("skipped_protected_merge_pairs", [])
         payload.setdefault("skipped_protected_demotions", [])
@@ -88,11 +88,19 @@ class CharacterIdentityRepairResult:
 
 class CharacterIdentityRepairJob:
     def __init__(
-        self, db: AsyncSession, *, book_id: uuid.UUID, repair_run_id: str | None = None
+        self,
+        db: AsyncSession,
+        *,
+        book_id: uuid.UUID,
+        repair_run_id: str | None = None,
+        allow_merge_safe_pairs: bool = True,
+        allow_demote_obvious_noise: bool = True,
     ) -> None:
         self.db = db
         self.book_id = book_id
         self.repair_run_id = repair_run_id or f"character-identity-repair:{book_id}"
+        self.allow_merge_safe_pairs = allow_merge_safe_pairs
+        self.allow_demote_obvious_noise = allow_demote_obvious_noise
 
     async def preview(self) -> CharacterIdentityRepairResult:
         return await self._run(dry_run=True)
@@ -114,7 +122,12 @@ class CharacterIdentityRepairJob:
         )
 
     async def _run(self, *, dry_run: bool) -> CharacterIdentityRepairResult:
-        result = CharacterIdentityRepairResult(book_id=str(self.book_id), dry_run=dry_run)
+        result = CharacterIdentityRepairResult(
+            book_id=str(self.book_id),
+            dry_run=dry_run,
+            allow_merge_safe_pairs=self.allow_merge_safe_pairs,
+            allow_demote_obvious_noise=self.allow_demote_obvious_noise,
+        )
         characters = await self._load_characters()
         result.character_labels = {str(character.id): character.name for character in characters}
         active = [
@@ -125,7 +138,8 @@ class CharacterIdentityRepairJob:
             and character.visibility_state != CHARACTER_VISIBILITY_NOISE
         ]
 
-        await self._handle_exact_duplicates(active, result, dry_run=dry_run)
+        if self.allow_merge_safe_pairs:
+            await self._handle_exact_duplicates(active, result, dry_run=dry_run)
         characters = await self._load_characters()
         active = [
             character
@@ -134,13 +148,16 @@ class CharacterIdentityRepairJob:
             and character.approval_state != CHARACTER_APPROVAL_REJECTED
             and character.visibility_state != CHARACTER_VISIBILITY_NOISE
         ]
-        if not dry_run:
+        if not dry_run and self.allow_merge_safe_pairs:
             assign_unique_active_normalized_names(active)
-        await self._handle_first_name_aliases(active, result, dry_run=dry_run)
-        await self._handle_suppressions(active, result, dry_run=dry_run)
-        await self._handle_duplicate_suggestions(result, dry_run=dry_run)
+        if self.allow_merge_safe_pairs:
+            await self._handle_first_name_aliases(active, result, dry_run=dry_run)
+        if self.allow_demote_obvious_noise:
+            await self._handle_suppressions(active, result, dry_run=dry_run)
+        if self.allow_merge_safe_pairs:
+            await self._handle_duplicate_suggestions(result, dry_run=dry_run)
 
-        if not dry_run:
+        if not dry_run and self.allow_merge_safe_pairs:
             suggestions = await refresh_character_duplicate_suggestions(
                 self.db, book_id=self.book_id
             )
@@ -192,7 +209,7 @@ class CharacterIdentityRepairJob:
             )
             primary = ordered[0]
             for secondary in ordered[1:]:
-                if is_protected_character(secondary):
+                if is_protected_character(primary) or is_protected_character(secondary):
                     continue
                 if await has_blocking_identity_constraint(
                     self.db,
@@ -229,6 +246,8 @@ class CharacterIdentityRepairJob:
             if not matches or is_protected_character(alias_character):
                 continue
             target = sorted(matches, key=lambda item: int(item.mention_count or 0), reverse=True)[0]
+            if is_protected_character(target):
+                continue
             if int(target.mention_count or 0) < int(alias_character.mention_count or 0):
                 continue
             if await has_blocking_identity_constraint(

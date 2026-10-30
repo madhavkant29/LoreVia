@@ -42,6 +42,10 @@ function AdvisorWorkspace({ bookId, userId, paid, isDark }: { bookId: string; us
   const greeting = useQuery({ queryKey: ["advisor-greeting", userId, bookId], queryFn: () => intelligenceApi.advisorGreeting(bookId), enabled: !!book.data, retry: false, refetchOnWindowFocus: false, refetchOnReconnect: false })
 
   useEffect(() => {
+    if (paid && new URLSearchParams(window.location.search).get("tab") === "scan") setTab("scan")
+  }, [paid])
+
+  useEffect(() => {
     mounted.current = true
     capture("author_advisor_opened", { book_id: bookId })
     const unload = (event: BeforeUnloadEvent) => { if (guard.current.dirty || guard.current.busy) { event.preventDefault(); event.returnValue = "" } }

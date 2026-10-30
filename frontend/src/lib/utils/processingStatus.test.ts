@@ -1,6 +1,56 @@
 import { describe, expect, it } from "vitest"
 
-import { normalizeProcessingStatus } from "./processingStatus"
+import type { Book } from "@/types/book"
+
+import {
+  getProcessingSummary,
+  normalizeProcessingStatus,
+  storyUnitName,
+  storyUnitPrefix,
+  storyUnitTitle,
+} from "./processingStatus"
+
+describe("overview processing summary", () => {
+  it("returns no summary without processing data", () => {
+    expect(getProcessingSummary(null)).toBeNull()
+    expect(getProcessingSummary({ status: "ready" } as Book)).toBeNull()
+  })
+
+  it("does not show 100% when only one of three chapters is complete", () => {
+    const summary = getProcessingSummary({
+      status: "processing",
+      total_chapters: 3,
+      processing: {
+        status: "processing",
+        stage: "extraction",
+        chapters_completed: 1,
+        chapters_total: 3,
+        progress_pct: 100,
+        eta_seconds: 65,
+        last_chapter_number: 1,
+        last_chapter_title: "Opening",
+      },
+    } as Book)
+
+    expect(summary).toContain("1/3 chapters")
+    expect(summary).toContain("33%")
+    expect(summary).toContain("1 min left")
+    expect(summary).toContain("Ch. 1 - Opening")
+    expect(summary).not.toContain("100%")
+  })
+
+  it("uses scene labels for screenplays and handles zero ETA", () => {
+    expect(storyUnitName("screenplay", true)).toBe("scenes")
+    expect(storyUnitTitle("screenplay")).toBe("Scene")
+    expect(storyUnitPrefix("screenplay")).toBe("Sc.")
+    expect(storyUnitName("novel")).toBe("chapter")
+    expect(getProcessingSummary({
+      work_type: "screenplay",
+      status: "processing",
+      processing: { status: "processing", stage: "analysis", eta_seconds: 0 },
+    } as Book)).toContain("almost done")
+  })
+})
 
 describe("normalizeProcessingStatus", () => {
   it("maps backend processing stages to user-facing state", () => {

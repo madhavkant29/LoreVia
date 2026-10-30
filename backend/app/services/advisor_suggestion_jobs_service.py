@@ -21,6 +21,9 @@ ADVISOR_SUGGESTION_STATUS_QUEUED = "queued"
 ADVISOR_SUGGESTION_STATUS_RUNNING = "running"
 ADVISOR_SUGGESTION_STATUS_COMPLETE = "complete"
 ADVISOR_SUGGESTION_STATUS_FAILED = "failed"
+ADVISOR_SUGGESTION_HARD_LIMIT = timedelta(minutes=20)
+ADVISOR_SUGGESTION_STALE_GRACE = timedelta(minutes=2)
+ADVISOR_SUGGESTION_STARTED_AT_KEY = "_started_at"
 
 
 def _job_expiry() -> datetime:
@@ -29,10 +32,18 @@ def _job_expiry() -> datetime:
 
 
 def serialize_advisor_suggestion_job(job: AdvisorSuggestionJob) -> dict[str, Any]:
+    progress = (
+        job.result_json.get("_progress")
+        if job.status == ADVISOR_SUGGESTION_STATUS_RUNNING and isinstance(job.result_json, dict)
+        else None
+    )
     return {
         "job_id": str(job.id),
         "status": job.status,
-        "result": public_advisor_job_result(job.result_json),
+        "result": public_advisor_job_result(job.result_json)
+        if job.status == ADVISOR_SUGGESTION_STATUS_COMPLETE
+        else None,
+        "progress": progress if isinstance(progress, dict) else None,
         "error": job.error_detail or job.error_code,
     }
 
@@ -89,15 +100,84 @@ async def mark_advisor_suggestion_job_running(
         now=current,
     ):
         return None
-    job.status = ADVISOR_SUGGESTION_STATUS_RUNNING
-    job.result_json = (
-        {ADVISOR_EXECUTION_ID_KEY: normalized_execution_id} if normalized_execution_id else None
+    previous_status = job.status
+    previous_state = job.result_json if isinstance(job.result_json, dict) else {}
+    started_at = (
+        previous_state.get(ADVISOR_SUGGESTION_STARTED_AT_KEY)
+        if previous_status == ADVISOR_SUGGESTION_STATUS_RUNNING
+        and previous_state.get(ADVISOR_EXECUTION_ID_KEY) == normalized_execution_id
+        else None
     )
+    job.status = ADVISOR_SUGGESTION_STATUS_RUNNING
+    job.result_json = {
+        ADVISOR_EXECUTION_ID_KEY: normalized_execution_id,
+        ADVISOR_SUGGESTION_STARTED_AT_KEY: started_at or current.isoformat(),
+    }
     job.error_code = None
     job.error_detail = None
     job.updated_at = current
     await db.commit()
     await db.refresh(job)
+    return job
+
+
+async def mark_advisor_suggestion_job_progress(
+    db: AsyncSession,
+    *,
+    job_id: uuid.UUID,
+    completed: int,
+    total: int,
+    execution_id: str | None = None,
+) -> bool:
+    """Report bounded scan progress and refresh the running job's lease."""
+    if total < 0 or not 0 <= completed <= total:
+        raise ValueError("invalid_advisor_scan_progress")
+    job = await db.get(AdvisorSuggestionJob, job_id, with_for_update=True)
+    if (
+        job is None
+        or job.status != ADVISOR_SUGGESTION_STATUS_RUNNING
+        or not advisor_job_execution_matches(job, execution_id)
+    ):
+        return False
+    job.result_json = {
+        **(job.result_json if isinstance(job.result_json, dict) else {}),
+        "_progress": {"completed": completed, "total": total},
+    }
+    job.updated_at = datetime.now(UTC)
+    await db.commit()
+    return True
+
+
+async def fail_stale_advisor_suggestion_job(
+    db: AsyncSession,
+    *,
+    job_id: uuid.UUID,
+    now: datetime | None = None,
+) -> AdvisorSuggestionJob | None:
+    """Make a hard-killed scan recoverable after its maximum runtime plus grace."""
+    job = await db.get(AdvisorSuggestionJob, job_id, with_for_update=True)
+    if job is None or job.status != ADVISOR_SUGGESTION_STATUS_RUNNING:
+        return job
+    state = job.result_json if isinstance(job.result_json, dict) else {}
+    started_raw = state.get(ADVISOR_SUGGESTION_STARTED_AT_KEY)
+    try:
+        started_at = datetime.fromisoformat(started_raw) if isinstance(started_raw, str) else None
+    except ValueError:
+        started_at = None
+    started_at = started_at or job.updated_at
+    if started_at is None:
+        return job
+    if started_at.tzinfo is None:
+        started_at = started_at.replace(tzinfo=UTC)
+    current = now or datetime.now(UTC)
+    if current - started_at < ADVISOR_SUGGESTION_HARD_LIMIT + ADVISOR_SUGGESTION_STALE_GRACE:
+        return job
+    job.status = ADVISOR_SUGGESTION_STATUS_FAILED
+    job.error_code = "advisor_suggestions_timed_out"
+    job.error_detail = "The scan stopped before it finished. Refresh checks to try again."
+    job.result_json = None
+    job.updated_at = current
+    await db.commit()
     return job
 
 

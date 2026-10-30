@@ -52,6 +52,7 @@ class AdvisorSuggestionOut(BaseModel):
     severity: str
     title: str
     description: str
+    evidence_excerpt: str | None = None
     chapter_ref: int | None = None
     action_label: str
     ask_prompt: str
@@ -71,6 +72,9 @@ class AdvisorScanMeta(BaseModel):
     scan_basis: list[str] = Field(default_factory=list)
     data_gaps: list[str] = Field(default_factory=list)
     audit_summary: str | None = None
+    audit_failure_category: str | None = None
+    audit_groups_total: int = 0
+    audit_groups_completed: int = 0
 
 
 class AdvisorSuggestionsResponse(BaseModel):
@@ -87,10 +91,16 @@ class AdvisorSuggestionScanResponse(BaseModel):
     cached: bool = False
 
 
+class AdvisorSuggestionScanProgress(BaseModel):
+    completed: int = Field(ge=0)
+    total: int = Field(ge=0)
+
+
 class AdvisorSuggestionJobStatusResponse(BaseModel):
     job_id: str
     status: Literal["queued", "running", "complete", "failed"]
     result: AdvisorSuggestionsResponse | None = None
+    progress: AdvisorSuggestionScanProgress | None = None
     error: str | None = None
 
 
@@ -103,6 +113,19 @@ class VoiceConsistencyRequest(BaseModel):
     text: str = Field(..., min_length=1, max_length=MAX_PASSAGE_CHARS)
     chapter_num: int | None = Field(default=None, ge=1)
     character_id: uuid.UUID | None = None
+    scene_context: str | None = Field(default=None, max_length=500)
+    voice_mode: Literal["dialogue", "first_person_narration"] = "dialogue"
+
+
+class VoiceReviewDecisionRequest(BaseModel):
+    decision: Literal["intentional", "incorrect", "resolved"]
+    note: str | None = Field(default=None, max_length=500)
+
+
+class VoiceReviewDecisionResponse(BaseModel):
+    finding_key: str
+    decision: Literal["intentional", "incorrect", "resolved"]
+    note: str | None = None
 
 
 BetaReaderScope = Literal["passage", "chapter", "chapter_range", "full_book"]

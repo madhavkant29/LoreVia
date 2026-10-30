@@ -116,6 +116,7 @@ books = RouteFacade(
 advisor = RouteFacade(
     "app.api.v1.routes.advisor",
     support_modules=(
+        "app.services.voice_consistency_orchestration_service",
         "app.core.config",
         "app.core.redis",
         "app.core.storage",

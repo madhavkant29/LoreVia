@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { advisorFailure, advisorHistory, advisorQuestionError, parseAdvisorChoices, type AdvisorEntry } from "./advisorPage.helpers"
+import { advisorAuditStatus, advisorFailure, advisorHistory, advisorQuestionError, parseAdvisorChoices, type AdvisorEntry } from "./advisorPage.helpers"
 
 describe("advisor state helpers", () => {
   it("validates empty and oversized questions without losing text", () => {
@@ -31,5 +31,14 @@ describe("advisor state helpers", () => {
     expect(advisorFailure(error, false, false)).toMatch(/week/)
     expect(advisorFailure(new Error("HTTP 429 — Your free Story Advisor turn refreshes next week. Upgrade for more capacity."), false, false)).toMatch(/next week/)
     expect(advisorFailure(null, false, true)).toMatch(/partial/)
+  })
+  it("distinguishes monthly AI budget from temporary scan capacity and malformed evidence", () => {
+    expect(advisorAuditStatus("budget_exhausted")).toMatch(/monthly reset/)
+    expect(advisorAuditStatus("capacity_busy")).toMatch(/slots are temporarily busy/)
+    expect(advisorAuditStatus("invalid_ai_response")).toMatch(/unverified evidence/)
+    expect(advisorAuditStatus("not_configured")).toMatch(/not configured/)
+    expect(advisorAuditStatus("database_unavailable")).toMatch(/could not be read/)
+    expect(advisorAuditStatus("ai_unavailable")).toMatch(/temporarily unavailable/)
+    expect(advisorAuditStatus(null)).toMatch(/temporarily unavailable/)
   })
 })

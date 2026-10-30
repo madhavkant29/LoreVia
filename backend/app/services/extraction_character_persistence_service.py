@@ -4,13 +4,15 @@ import uuid
 from copy import deepcopy
 from typing import Any
 
+from sqlalchemy import select
+
 from app.engine.character.deduplicator import (
     character_name_keys,
     is_valid_alias,
     names_equivalent,
 )
 from app.engine.character.profile_builder import build_character_profile, update_profile
-from app.models.character import Character, CharacterState
+from app.models.character import Character, CharacterCandidate, CharacterMention, CharacterState
 from app.services.extraction_character_cache_service import (
     _character_keys_for_cache,
     _find_character_by_id,
@@ -31,11 +33,13 @@ from app.utils.characters.extraction import (
     build_character_mention_cluster_key,
     record_character_mention,
 )
+from app.utils.characters.governance import is_author_curated_character
 from app.utils.characters.identity import (
     filter_character_identity_aliases,
     normalize_character_name,
 )
 from app.utils.characters.review import record_character_candidate
+from app.utils.characters.text import unique_source_mention_spans
 
 
 async def _accept_existing_character_match(
@@ -80,7 +84,7 @@ async def _accept_existing_character_match(
         updated.get("aliases") or char.aliases or [],
     )
     pending_first_chapter_updates[existing_id] = char
-    if changed:
+    if changed and not is_author_curated_character(char):
         growth_event = entity.get("growth_event")
         if isinstance(growth_event, dict):
             growth_event = {**growth_event, "chapter": chapter_number}
@@ -111,7 +115,8 @@ async def _accept_existing_character_match(
         evidence=_candidate_record_evidence(entity),
         source_batch_key=source_batch_key,
     )
-    _merge_alias_in_memory(char, entity["name"] if char else None)
+    if not is_author_curated_character(char):
+        _merge_alias_in_memory(char, entity["name"] if char else None)
     return True
 
 
@@ -146,6 +151,16 @@ async def _promote_new_character_from_entity(
     ]
     entity["dossier_summary"] = dossier_summary
     profile = build_character_profile(entity, book_id, chapter_number)
+    cross_chapter_ids = _entity_evidence(entity).get("cross_chapter_candidate_ids")
+    if isinstance(cross_chapter_ids, list) and cross_chapter_ids:
+        chapter_numbers = [
+            number
+            for number in (_entity_evidence(entity).get("shared_chapters") or [])
+            if isinstance(number, int) and number > 0
+        ]
+        if chapter_numbers:
+            profile["first_chapter"] = min(chapter_numbers)
+            profile["last_seen_chapter"] = max(chapter_numbers)
     profile["normalized_name"] = normalize_character_name(str(profile.get("name") or "")) or None
     char = Character(**profile, embedding=embedding)
     db.add(char)
@@ -154,7 +169,7 @@ async def _promote_new_character_from_entity(
     db.add(
         CharacterState(
             character_id=char.id,
-            at_chapter=chapter_number,
+            at_chapter=profile["last_seen_chapter"],
             trait_snapshot=baseline_snapshot,
             observed_trait_keys=sorted(baseline_snapshot),
             motivations_snapshot=list(profile.get("motivations") or []),
@@ -194,6 +209,97 @@ async def _promote_new_character_from_entity(
     return char
 
 
+async def reconcile_cross_chapter_candidates(
+    db,
+    *,
+    book_id: uuid.UUID,
+    chapter_number: int,
+    entity: dict[str, Any],
+    character_id: uuid.UUID,
+) -> int:
+    """Attach verified mentions from other chapters that justified promotion."""
+    evidence = _entity_evidence(entity)
+    raw_ids = evidence.get("cross_chapter_candidate_ids")
+    if not isinstance(raw_ids, list) or not raw_ids:
+        return 0
+    candidate_ids: list[uuid.UUID] = []
+    for raw_id in raw_ids:
+        try:
+            candidate_ids.append(uuid.UUID(str(raw_id)))
+        except (TypeError, ValueError):
+            continue
+    if not candidate_ids:
+        return 0
+    candidates = (
+        (
+            await db.execute(
+                select(CharacterCandidate).where(
+                    CharacterCandidate.id.in_(candidate_ids),
+                    CharacterCandidate.book_id == book_id,
+                    CharacterCandidate.status == "pending",
+                    CharacterCandidate.matched_character_id.is_(None),
+                    CharacterCandidate.chapter_number != chapter_number,
+                    CharacterCandidate.normalized_name
+                    == normalize_character_name(str(entity.get("name") or "")),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    candidates = [
+        candidate
+        for candidate in candidates
+        if isinstance(candidate.evidence, dict)
+        and candidate.evidence.get("source_mention_count_verified") is True
+        and isinstance(candidate.evidence.get("mention_count"), int)
+        and not isinstance(candidate.evidence.get("mention_count"), bool)
+        and candidate.evidence["mention_count"] > 0
+        and candidate.evidence.get("profile_enrichment_status") != "unanchored_reference"
+        and not candidate.evidence.get("anti_merge_names")
+        and candidate.evidence.get("resolver_status") not in {"ambiguous", "matched_needs_review"}
+        and isinstance(candidate.evidence.get("verifier"), dict)
+        and isinstance(candidate.evidence["verifier"].get("final"), dict)
+        and candidate.evidence["verifier"]["final"].get("confidence_band") == "accept"
+        and candidate.rejection_reason is None
+        and candidate.entity_type in (None, "person", "alias_candidate")
+        and not str(candidate.source_batch_key or "").startswith("manual-demote:")
+        and not any(
+            str(reason).startswith("author_") or "conflict" in str(reason)
+            for reason in candidate.reason_codes or []
+        )
+    ]
+    for candidate in candidates:
+        candidate.status = "accepted"
+        candidate.matched_character_id = character_id
+        candidate.reason_codes = [
+            *list(candidate.reason_codes or []),
+            "cross_chapter_evidence_reconciled",
+        ]
+        if not candidate.source_batch_key:
+            continue
+        mentions = (
+            (
+                await db.execute(
+                    select(CharacterMention).where(
+                        CharacterMention.book_id == book_id,
+                        CharacterMention.chapter_number == candidate.chapter_number,
+                        CharacterMention.normalized_name == candidate.normalized_name,
+                        CharacterMention.source_batch_key == candidate.source_batch_key,
+                        CharacterMention.matched_character_id.is_(None),
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        for mention in mentions:
+            mention.matched_character_id = character_id
+            mention.resolver_status = "matched_existing"
+            mention.resolver_reasons = ["cross_chapter_evidence_reconciled"]
+    return len(candidates)
+
+
 async def _record_entity_cluster_mentions(
     db,
     *,
@@ -222,11 +328,45 @@ async def _record_entity_cluster_mentions(
             }
         ]
 
+    source_spans = [
+        span
+        for member in members
+        for span in member.get("source_mentions") or []
+        if isinstance(span, dict)
+        and all(isinstance(span.get(key), int) for key in ("chunk_index", "start", "end"))
+    ]
+    unique_positions = {
+        (span["chunk_index"], span["start"], span["end"])
+        for span in unique_source_mention_spans(source_spans)
+    }
+    seen_source_mentions: set[tuple[int, int, int]] = set()
     for member in members:
         raw_name = " ".join(str(member.get("name") or "").split()).strip()
         normalized_name = normalize_character_name(raw_name)
         if not raw_name or not normalized_name:
             continue
+        spans = {
+            (span["chunk_index"], span["start"], span["end"])
+            for span in member.get("source_mentions") or []
+            if isinstance(span, dict)
+            and all(isinstance(span.get(key), int) for key in ("chunk_index", "start", "end"))
+        }
+        new_spans = spans & unique_positions - seen_source_mentions
+        if spans and not new_spans:
+            continue
+        seen_source_mentions.update(new_spans)
+        member_evidence = (
+            dict(member["evidence"]) if isinstance(member.get("evidence"), dict) else {}
+        )
+        if spans:
+            member_evidence["mention_count"] = len(new_spans)
+            member_evidence["strong_mention_count"] = min(
+                int(member_evidence.get("strong_mention_count") or 0), len(new_spans)
+            )
+            member_evidence["source_mentions"] = [
+                {"chunk_index": chunk_index, "start": start, "end": end}
+                for chunk_index, start, end in sorted(new_spans)
+            ]
         await record_character_mention(
             db,
             book_id=book_id,
@@ -239,7 +379,7 @@ async def _record_entity_cluster_mentions(
             matched_character_id=matched_character_id,
             resolver_status=resolver_status,
             resolver_reasons=resolver_reasons,
-            evidence=member.get("evidence") if isinstance(member.get("evidence"), dict) else {},
+            evidence=member_evidence,
         )
 
 

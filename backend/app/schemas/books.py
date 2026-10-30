@@ -634,9 +634,26 @@ class ManuscriptReprocessOut(BaseModel):
     processed_words_remaining: int | None = None
 
 
+class ManuscriptReprocessPreflightOut(BaseModel):
+    book_id: str
+    ready: bool
+    chapters_total: int
+    processed_words_to_reserve: int
+    protected_characters: int
+    replaceable_characters: int
+    missing_source_chapters: list[int] = Field(default_factory=list)
+    blockers: list[str] = Field(default_factory=list)
+    preview_fingerprint: str | None = None
+    limitation: str = (
+        "This preflight shows which existing records may be replaced, not the new cast or "
+        "findings. Those can be reviewed only after extraction runs."
+    )
+
+
 class ManuscriptReprocessBody(BaseModel):
     confirm_upload_charge: bool = False
     confirm_processing_words: bool = False
+    preview_fingerprint: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
 
 
 class ReprocessMetadataOut(BaseModel):

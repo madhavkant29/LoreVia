@@ -62,7 +62,7 @@ type ManuscriptOverlayStackProps = {
   onIncludeSceneMetadataOnExportChange: (checked: boolean) => void
   onIncludeTableOfContentsOnExportChange: (checked: boolean) => void
   onReprocessCancel: () => void
-  onReprocessConfirm: () => void
+  onReprocessConfirm: (previewFingerprint: string) => void
   onRestoreSceneSnapshot: (versionId: string) => void
   onSave: () => void
   onSaveScene: () => void
@@ -145,6 +145,7 @@ export function ManuscriptOverlayStack({
 
       {showReprocessConfirm ? (
         <ManuscriptReprocessDialog
+          bookId={bookId}
           isDark={isDark}
           reprocessing={reprocessing}
           onCancel={onReprocessCancel}

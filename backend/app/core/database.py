@@ -202,6 +202,7 @@ def _assign_or_preserve_book_generation(session, _flush_context, _instances) -> 
     from app.models.generation import GenerationScopedMixin
     from app.models.intelligence import CharacterRelationship, PlotThread, WorldElement
     from app.services.data_generation_service import current_generation_id
+    from app.utils.characters.governance import is_author_curated_character
 
     scoped_generation_id = current_generation_id()
     for row in session.new:
@@ -212,13 +213,7 @@ def _assign_or_preserve_book_generation(session, _flush_context, _instances) -> 
         if not isinstance(row, GenerationScopedMixin):
             continue
         if isinstance(row, Character):
-            metadata = row.analysis_metadata if isinstance(row.analysis_metadata, dict) else {}
-            is_curated = bool(
-                row.is_manual
-                or metadata.get("user_curated")
-                or metadata.get("protected_from_repair")
-                or row.approval_source == "manual_review"
-            )
+            is_curated = is_author_curated_character(row)
             if is_curated:
                 row.generation_id = None
                 state = sa_inspect(row)

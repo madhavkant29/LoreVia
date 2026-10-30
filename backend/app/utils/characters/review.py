@@ -23,6 +23,7 @@ from app.models.character import (
     CharacterMention,
     CharacterRelationshipCandidate,
 )
+from app.models.operations import AiQualityEvent
 from app.utils.characters.constants import (
     CHARACTER_ADJUDICATION_MERGED_ALIAS,
     CHARACTER_ADJUDICATION_PLACE,
@@ -39,7 +40,10 @@ from app.utils.characters.constants import (
     CHARACTER_CANDIDATE_PROMOTED,
     CHARACTER_CANDIDATE_REJECTED,
     CHARACTER_CANDIDATE_SUPPRESSED,
+    CHARACTER_RELATIONSHIP_CANDIDATE_ACCEPTED,
     CHARACTER_RELATIONSHIP_CANDIDATE_PENDING,
+    CHARACTER_RELATIONSHIP_CANDIDATE_REJECTED,
+    CHARACTER_RELATIONSHIP_CANDIDATE_RESOLVED,
     CHARACTER_TRUST_TIER_REPAIRED_NOISE,
     CHARACTER_TRUST_TIER_REVIEW_ONLY,
     CHARACTER_TRUST_TIER_VISIBLE,
@@ -90,9 +94,50 @@ async def record_character_candidate(
         CharacterCandidate.book_id == book_id,
         CharacterCandidate.chapter_number == chapter_number,
         CharacterCandidate.normalized_name == normalized_name,
-        CharacterCandidate.source_batch_key == source_batch_key,
     )
-    existing = (await db.execute(stmt)).scalar_one_or_none()
+    same_name = (await db.execute(stmt)).scalars().all()
+    existing = next(
+        (candidate for candidate in same_name if candidate.source_batch_key == source_batch_key),
+        None,
+    )
+    reviewed_ids = [
+        str(candidate.id)
+        for candidate in same_name
+        if candidate.status
+        in {
+            CHARACTER_CANDIDATE_ACCEPTED,
+            CHARACTER_CANDIDATE_PROMOTED,
+            CHARACTER_CANDIDATE_REJECTED,
+        }
+    ]
+    historical_reviewed_ids = (
+        set(
+            (
+                await db.scalars(
+                    select(AiQualityEvent.entity_id).where(
+                        AiQualityEvent.book_id == book_id,
+                        AiQualityEvent.entity_type == "character_candidate",
+                        AiQualityEvent.entity_id.in_(reviewed_ids),
+                        AiQualityEvent.actor_user_id.is_not(None),
+                        AiQualityEvent.outcome.in_(("accepted", "promoted", "rejected")),
+                    )
+                )
+            ).all()
+        )
+        if reviewed_ids
+        else set()
+    )
+    for candidate in same_name:
+        reasons = set(candidate.reason_codes or [])
+        if (
+            candidate.rejection_reason == "author_marked_place"
+            or str(candidate.source_batch_key or "").startswith("manual-demote:")
+            or reasons.intersection({"author_reviewed_candidate", "author_rejected_candidate"})
+            or str(candidate.id) in historical_reviewed_ids
+        ):
+            return candidate
+    if existing is not None and existing.status == CHARACTER_CANDIDATE_MERGED:
+        return existing
     candidate = existing or CharacterCandidate(
         book_id=book_id,
         chapter_number=chapter_number,
@@ -184,9 +229,19 @@ async def record_relationship_candidate(
         CharacterRelationshipCandidate.chapter_number == chapter_number,
         CharacterRelationshipCandidate.raw_character_a == raw_character_a,
         CharacterRelationshipCandidate.raw_character_b == raw_character_b,
-        CharacterRelationshipCandidate.source_batch_key == source_batch_key,
     )
-    existing = (await db.execute(stmt)).scalar_one_or_none()
+    same_pair = (await db.execute(stmt)).scalars().all()
+    existing = next(
+        (candidate for candidate in same_pair if candidate.source_batch_key == source_batch_key),
+        None,
+    )
+    for candidate in same_pair:
+        if candidate.status in {
+            CHARACTER_RELATIONSHIP_CANDIDATE_ACCEPTED,
+            CHARACTER_RELATIONSHIP_CANDIDATE_REJECTED,
+            CHARACTER_RELATIONSHIP_CANDIDATE_RESOLVED,
+        } or "author_attached_endpoint" in (candidate.reason_codes or []):
+            return candidate
     candidate = existing or CharacterRelationshipCandidate(
         book_id=book_id,
         chapter_number=chapter_number,
@@ -476,6 +531,9 @@ async def promote_character_candidate(
     candidate: CharacterCandidate,
 ) -> Character:
     candidate.generation_id = None
+    candidate.reason_codes = _clean_reason_codes(
+        [*(candidate.reason_codes or []), "author_reviewed_candidate"]
+    )
     entity = _candidate_entity_payload(candidate)
     if candidate.matched_character_id is not None:
         existing = await db.get(Character, candidate.matched_character_id)
@@ -529,6 +587,9 @@ async def attach_character_candidate(
     character: Character,
 ) -> Character:
     candidate.generation_id = None
+    candidate.reason_codes = _clean_reason_codes(
+        [*(candidate.reason_codes or []), "author_reviewed_candidate"]
+    )
     updated = merge_profile_fields(
         character,
         {

@@ -1,15 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
-const { getMock, invalidateQueryKeysMock, postMock } = vi.hoisted(() => ({
+const { getMock, invalidateQueryKeysMock, postMock, putMock } = vi.hoisted(() => ({
   getMock: vi.fn(),
   invalidateQueryKeysMock: vi.fn(),
   postMock: vi.fn(),
+  putMock: vi.fn(),
 }))
 
 vi.mock("./client", () => ({
   apiClient: {
     get: getMock,
     post: postMock,
+    put: putMock,
   },
 }))
 
@@ -25,8 +27,10 @@ describe("intelligence api", () => {
     getMock.mockReset()
     invalidateQueryKeysMock.mockReset()
     postMock.mockReset()
+    putMock.mockReset()
     getMock.mockResolvedValue({ data: { ok: true } })
     postMock.mockResolvedValue({ data: { ok: true } })
+    putMock.mockResolvedValue({ data: { finding_key: "a".repeat(64), decision: "intentional", note: null } })
   })
 
   it("loads advisor suggestions with normalized book ids", async () => {
@@ -55,13 +59,13 @@ describe("intelligence api", () => {
     })
   })
 
-  it("truncates long advisor passages before posting voice consistency checks", async () => {
+  it("does not silently truncate a long voice passage", async () => {
     const longText = "b".repeat(12_345)
 
     await intelligenceApi.voiceConsistencyReview("book-1", longText)
 
     expect(postMock).toHaveBeenCalledWith("/intelligence/book-1/advisor/voice-consistency", {
-      text: "b".repeat(12_000),
+      text: longText,
       chapter_num: null,
     })
   })
@@ -70,13 +74,52 @@ describe("intelligence api", () => {
     await intelligenceApi.voiceConsistencyReview("book-1", "Passage text", {
       chapterNum: 4,
       characterId: "char-1",
+      sceneContext: "She is frightened and hiding it.",
+      voiceMode: "first_person_narration",
     })
 
     expect(postMock).toHaveBeenCalledWith("/intelligence/book-1/advisor/voice-consistency", {
       text: "Passage text",
       chapter_num: 4,
       character_id: "char-1",
+      scene_context: "She is frightened and hiding it.",
+      voice_mode: "first_person_narration",
     })
+  })
+
+  it("streams the full voice passage with progress and a validated final result", async () => {
+    const passage = "V".repeat(12_000)
+    const encoder = new TextEncoder()
+    const stream = new ReadableStream({
+      start(controller) {
+        controller.enqueue(encoder.encode('event: stage\ndata: {"message":"Still reviewing the full passage..."}\n\n'))
+        controller.enqueue(encoder.encode('event: done\ndata: {"review":{"status":"complete","issues":[],"overall_verdict":"No supported shift."},"characters_reviewed":[],"warnings":[],"retrieved_passages":[]}\n\n'))
+        controller.close()
+      },
+    })
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, body: stream })
+    vi.stubGlobal("fetch", fetchMock)
+    const stages: string[] = []
+
+    const result = await intelligenceApi.voiceConsistencyReviewStream("book-1", passage, {
+      chapterNum: 3, characterId: "char-1", sceneContext: "Fear",
+    }, { onStage: (message) => stages.push(message) })
+
+    expect(fetchMock).toHaveBeenCalledWith("/api/v1/intelligence/book-1/advisor/voice-consistency-stream", expect.objectContaining({
+      body: JSON.stringify({ text: passage, chapter_num: 3, character_id: "char-1", scene_context: "Fear" }),
+    }))
+    expect(stages).toEqual(["Still reviewing the full passage..."])
+    expect(result.review.status).toBe("complete")
+  })
+
+  it("saves a voice finding decision for the selected book and finding", async () => {
+    const key = "a".repeat(64)
+    await intelligenceApi.saveVoiceReviewDecision("book-1", key, "intentional")
+
+    expect(putMock).toHaveBeenCalledWith(
+      `/intelligence/book-1/advisor/voice-decisions/${key}`,
+      { decision: "intentional" },
+    )
   })
 
   it("serializes AI beta reader requests, status, reports, and revision tasks", async () => {

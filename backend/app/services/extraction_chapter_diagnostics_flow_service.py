@@ -81,6 +81,7 @@ async def build_post_llm_chapter_diagnostics(
         book,
         chapter_number=chapter_number,
         extraction_batch_texts=llm_extraction.extraction_batch_texts,
+        source_coverage=llm_extraction.source_coverage,
         extraction_failed_batches=llm_extraction.extraction_failed_batches,
         extraction_fallback_batches=llm_extraction.extraction_fallback_batches,
         extraction_fallback_character_count=llm_extraction.extraction_fallback_character_count,

@@ -29,6 +29,7 @@ import {
   characterLabelForId,
   chapterAppearanceLabel,
   chapterSpanCount,
+  currentProfileClaims,
   flagClasses,
   filterCharacters,
   filterMergeSuggestions,
@@ -41,6 +42,7 @@ import {
   groupAliasRecordsByKind,
   growthChapter,
   growthTitle,
+  hasImplicitRepairProtection,
   isCuratedCharacter,
   isFlaggedCharacter,
   isProtectedCharacter,
@@ -62,6 +64,25 @@ import {
 import { character } from "./charactersPage.testData"
 
 describe("characters page helpers", () => {
+  it("shows only sourced claims that still match the current profile", () => {
+    const source = {
+      ...character({}),
+      goal: "protect the crew",
+      analysis_metadata: {
+        ...character({}).analysis_metadata,
+        profile_claims: [
+          { field: "goal", value: "protect the crew", quote: "I will keep the crew safe.", chapter_number: 2 },
+          { field: "goal", value: "win the race", quote: "I will win the race.", chapter_number: 1 },
+          { field: "goal", value: "protect the crew", quote: "", chapter_number: 2 },
+        ],
+      },
+    } satisfies Character
+    expect(currentProfileClaims(source)).toEqual([
+      { field: "goal", value: "protect the crew", quote: "I will keep the crew safe.", chapter_number: 2 },
+    ])
+    expect(currentProfileClaims({ ...source, analysis_metadata: undefined })).toEqual([])
+  })
+
   it("builds top dashboard stats with safe percentages", () => {
     expect(buildTopStats({
       characterCount: 10,
@@ -129,6 +150,7 @@ describe("characters page helpers", () => {
       aliases: ["Captain"],
       role: "mc",
       approval_state: "approved",
+      approval_source: "manual_review",
       description: "Lead scout",
       motivations: ["protect the crew"],
       trait_state: { hair: { value: "black", confidence: 0.9, type: "objective" } },
@@ -166,7 +188,7 @@ describe("characters page helpers", () => {
     expect(buildDashboardStats([mira, jon], flagsByCharacter, 1, 3)).toEqual([
       { label: "Total characters", value: "2", tone: "default", icon: "characters" },
       { label: "Reviewed", value: "1", detail: "50%", tone: "teal", icon: "review" },
-      { label: "Flagged", value: "2", detail: "100%", tone: "amber", icon: "chapter" },
+      { label: "Flagged", value: "1", detail: "50%", tone: "amber", icon: "chapter" },
       { label: "Potential duplicates", value: "1", detail: "50%", tone: "violet", icon: "merge" },
       { label: "Unresolved items", value: "3", detail: "View", tone: "rose", icon: "review" },
     ])
@@ -454,22 +476,27 @@ describe("characters page helpers", () => {
     expect(missingTraitLabels(mira)).toEqual(["age", "distinguishing details"])
     expect(qualityFlags(mira, mergeIds, connections)).toEqual([
       "Needs merge",
-      "Missing traits",
       "Needs evidence",
-      "Arc stale",
     ])
     expect(buildCharacterHealth(mira, mergeIds, connections)).toMatchObject({
       score: 13,
       tone: "attention",
-      issues: expect.arrayContaining(["Age is not grounded", "Duplicate candidate found"]),
+      issues: ["Duplicate candidate found", "Relationship evidence incomplete"],
     })
     expect(flagClasses(false, "Needs merge")).toContain("amber")
     expect(buildSelectedCharacterSummary(mira, connections)).toContain("Ally connection with Jon")
     expect(isCuratedCharacter(character({ analysis_metadata: { user_curated: true } }))).toBe(true)
     expect(isProtectedCharacter(character({ is_manual: true }))).toBe(true)
-    expect(isReviewedCharacter(character({ approval_state: "approved" }))).toBe(true)
-    expect(isFlaggedCharacter(mira, [])).toBe(true)
-    expect(reviewStatusLabel(mira, [])).toBe("Flagged")
+    expect(hasImplicitRepairProtection(character({ analysis_metadata: { user_reviewed: true } }))).toBe(true)
+    expect(isProtectedCharacter(character({ analysis_metadata: { user_reviewed: true } }))).toBe(true)
+    expect(isProtectedCharacter(character({ approval_source: "manual_review" }))).toBe(true)
+    expect(hasImplicitRepairProtection(character({ approval_state: "protected" }))).toBe(true)
+    expect(hasImplicitRepairProtection(character({ analysis_metadata: { protected_from_repair: true } }))).toBe(false)
+    expect(isReviewedCharacter(character({ approval_state: "approved", approval_source: "deterministic_auto" }))).toBe(false)
+    expect(isReviewedCharacter(character({ approval_state: "approved", approval_source: "manual_review" }))).toBe(true)
+    expect(isReviewedCharacter(character({ analysis_metadata: { user_reviewed: true } }))).toBe(true)
+    expect(isFlaggedCharacter(mira, qualityFlags(mira, mergeIds, connections))).toBe(true)
+    expect(reviewStatusLabel(mira, qualityFlags(mira, mergeIds, connections))).toBe("Flagged")
     expect(chapterSpanCount(mira)).toBe(5)
     expect(bookCoverageLabel(mira, 10)).toBe("50% of book")
     expect(knownFacts(character({ trait_state: { eyes: { value: "gray", confidence: 0.9, type: "objective" } }, goal: "Open the gate" }), [])).toContain("eyes: gray")
@@ -478,5 +505,29 @@ describe("characters page helpers", () => {
       "Which scene proves the motivation?",
       "Which relationship should be linked first?",
     ])
+  })
+
+  it("does not repeat a motivation already included in the profile summary", () => {
+    const profile = character({
+      description: "Wants: to help the protagonist.",
+      motivations: ["to help the protagonist"],
+    })
+
+    expect(buildSelectedCharacterSummary(profile, [])).toBe("Wants: to help the protagonist.")
+    expect(isFlaggedCharacter(character({ analysis_metadata: { needs_review: true, quality_flags: ["no_dialogue_or_action"] } }), [])).toBe(false)
+  })
+
+  it("treats an unelaborated character as unknown rather than a continuity alert", () => {
+    const health = buildCharacterHealth(character({
+      description: null,
+      motivations: [],
+      trait_state: {},
+      goal: null,
+      arc_summary: null,
+      growth_events: [],
+    }), new Set(), [])
+
+    expect(health.issues).toEqual([])
+    expect(health.summary).toContain("Unknown traits are not continuity errors")
   })
 })

@@ -24,7 +24,9 @@ async def test_reader_feedback_synthesis_reuses_shared_openai_client(monkeypatch
         assert client.closed is False
         calls.append(kwargs)
         return SimpleNamespace(
-            choices=[SimpleNamespace(message=SimpleNamespace(content='{"overall_impression":"Clear"}'))]
+            choices=[
+                SimpleNamespace(message=SimpleNamespace(content='{"overall_impression":"Clear"}'))
+            ]
         )
 
     monkeypatch.setattr(beta_reader_analysis_service, "get_openai_client", lambda: client)

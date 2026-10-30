@@ -6,9 +6,11 @@ import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar, Token
+from copy import deepcopy
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import String, cast, delete, func, or_, select, update
+from sqlalchemy.dialects.postgresql import ARRAY, array
 from sqlalchemy.ext.asyncio import AsyncSession
 
 _CURRENT_GENERATION_ID: ContextVar[uuid.UUID | None] = ContextVar(
@@ -48,6 +50,99 @@ def _all_generations(statement):
     return statement.execution_options(include_all_generations=True)
 
 
+async def preserve_author_candidate_reviews(db: AsyncSession, *, book_id: uuid.UUID) -> None:
+    """Detach author decisions from generations that a rebuild can retire."""
+    from app.models.character import (
+        CharacterCandidate,
+        CharacterDecisionEvent,
+        CharacterRelationshipCandidate,
+    )
+    from app.models.operations import AiQualityEvent
+
+    reviewed_character_ids = select(AiQualityEvent.entity_id).where(
+        AiQualityEvent.book_id == book_id,
+        AiQualityEvent.entity_type == "character_candidate",
+        AiQualityEvent.actor_user_id.is_not(None),
+        AiQualityEvent.outcome.in_(("accepted", "promoted", "rejected")),
+    )
+    await db.execute(
+        _all_generations(
+            update(CharacterCandidate)
+            .where(
+                CharacterCandidate.book_id == book_id,
+                CharacterCandidate.generation_id.is_not(None),
+                or_(
+                    CharacterCandidate.source_batch_key.like("manual-demote:%"),
+                    CharacterCandidate.rejection_reason == "author_marked_place",
+                    func.array_position(
+                        CharacterCandidate.reason_codes, "author_reviewed_candidate"
+                    ).is_not(None),
+                    func.array_position(
+                        CharacterCandidate.reason_codes, "author_rejected_candidate"
+                    ).is_not(None),
+                    cast(CharacterCandidate.id, String).in_(reviewed_character_ids),
+                ),
+            )
+            .values(generation_id=None)
+        )
+    )
+
+    reviewed_relationship_ids = select(AiQualityEvent.entity_id).where(
+        AiQualityEvent.book_id == book_id,
+        AiQualityEvent.entity_type == "relationship_candidate",
+        AiQualityEvent.actor_user_id.is_not(None),
+        AiQualityEvent.outcome.in_(("accepted", "resolved", "rejected")),
+    )
+    attached_relationship_ids = select(
+        CharacterDecisionEvent.evidence["relationship_candidate_id"].as_string()
+    ).where(
+        CharacterDecisionEvent.book_id == book_id,
+        CharacterDecisionEvent.action.in_(
+            ("relationship_candidate_attached_a", "relationship_candidate_attached_b")
+        ),
+    )
+    await db.execute(
+        _all_generations(
+            update(CharacterRelationshipCandidate)
+            .where(
+                CharacterRelationshipCandidate.book_id == book_id,
+                cast(CharacterRelationshipCandidate.id, String).in_(attached_relationship_ids),
+                func.array_position(
+                    CharacterRelationshipCandidate.reason_codes, "author_attached_endpoint"
+                ).is_(None),
+            )
+            .values(
+                reason_codes=func.array_append(
+                    func.coalesce(
+                        CharacterRelationshipCandidate.reason_codes,
+                        cast(array([]), ARRAY(String)),
+                    ),
+                    "author_attached_endpoint",
+                ),
+                generation_id=None,
+            )
+        )
+    )
+    await db.execute(
+        _all_generations(
+            update(CharacterRelationshipCandidate)
+            .where(
+                CharacterRelationshipCandidate.book_id == book_id,
+                CharacterRelationshipCandidate.generation_id.is_not(None),
+                or_(
+                    CharacterRelationshipCandidate.status.in_(("accepted", "resolved", "rejected")),
+                    func.array_position(
+                        CharacterRelationshipCandidate.reason_codes, "author_attached_endpoint"
+                    ).is_not(None),
+                    cast(CharacterRelationshipCandidate.id, String).in_(reviewed_relationship_ids),
+                    cast(CharacterRelationshipCandidate.id, String).in_(attached_relationship_ids),
+                ),
+            )
+            .values(generation_id=None)
+        )
+    )
+
+
 async def ensure_active_generation(db: AsyncSession, *, book_id: uuid.UUID) -> uuid.UUID:
     """Adopt an unversioned generated baseline before the first staged rebuild."""
     from app.models.book import Chapter
@@ -74,6 +169,7 @@ async def ensure_active_generation(db: AsyncSession, *, book_id: uuid.UUID) -> u
     )
     from app.services.editor_project_service import _resolve_character_anchor_ids
 
+    await preserve_author_candidate_reviews(db, book_id=book_id)
     active_id = await db.scalar(
         select(BookDataGeneration.id).where(
             BookDataGeneration.book_id == book_id,
@@ -205,6 +301,7 @@ async def ensure_active_generation(db: AsyncSession, *, book_id: uuid.UUID) -> u
             .values(generation_id=generation.id)
         )
     )
+    await preserve_author_candidate_reviews(db, book_id=book_id)
     await db.flush()
     return generation.id
 
@@ -284,6 +381,7 @@ async def promote_staging_generation(
     # and are therefore still observed atomically by other sessions.
     await db.flush()
     staging.status = ACTIVE_GENERATION
+    staging.chapter_state_snapshot = None
     staging.promoted_at = now
     staging.updated_at = now
     await db.flush()
@@ -296,17 +394,51 @@ async def fail_staging_generation(
     book_id: uuid.UUID,
     rebuild_run_id: str,
 ) -> bool:
+    from app.models.book import Chapter
     from app.models.generation import BookDataGeneration
 
-    generation = await db.get(BookDataGeneration, generation_id_for_rebuild(rebuild_run_id))
+    generation = await db.get(
+        BookDataGeneration, generation_id_for_rebuild(rebuild_run_id), with_for_update=True
+    )
     if (
         generation is None
         or generation.book_id != book_id
         or generation.status != STAGING_GENERATION
     ):
         return False
+    snapshot = generation.chapter_state_snapshot
+    if (
+        isinstance(snapshot, dict)
+        and snapshot.get("rebuild_run_id") == rebuild_run_id
+        and isinstance(snapshot.get("chapters"), dict)
+    ):
+        chapters = (
+            (await db.execute(select(Chapter).where(Chapter.book_id == book_id).with_for_update()))
+            .scalars()
+            .all()
+        )
+        for chapter in chapters:
+            prior = snapshot["chapters"].get(str(chapter.id))
+            if not isinstance(prior, dict) or type(prior.get("processed")) is not bool:
+                continue
+            if (
+                prior.get("content_version") != chapter.content_version
+                or prior.get("structure_version") != chapter.structure_version
+                or prior.get("number") != chapter.number
+                or prior.get("title") != chapter.title
+                or prior.get("s3_key") != chapter.s3_key
+                or prior.get("word_count") != chapter.word_count
+            ):
+                # A manuscript edit invalidates only that chapter's old result.
+                continue
+            prior_analysis = prior.get("analysis_state")
+            if prior_analysis is not None and not isinstance(prior_analysis, dict):
+                continue
+            chapter.processed = prior["processed"]
+            chapter.analysis_state = deepcopy(prior_analysis)
     now = datetime.now(UTC)
     generation.status = FAILED_GENERATION
+    generation.chapter_state_snapshot = None
     generation.failed_at = now
     generation.updated_at = now
     await db.flush()

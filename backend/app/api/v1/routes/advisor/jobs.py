@@ -348,46 +348,51 @@ async def series_continuity_check(
     )
 
     client = get_openai_client()
-    response = await create_tracked_chat_completion(
-        client=client,
-        feature="series_continuity_check",
-        model=settings.OPENAI_INTEL_MODEL,
-        db=db,
-        user_id=current_user.id,
-        book_id=current_book.id,
-        temperature=0.2,
-        max_tokens=1200,
-        response_format={"type": "json_object"},
-        messages=[
-            {"role": "system", "content": system_msg},
-            {"role": "user", "content": user_msg},
-        ],
-    )
-    raw = response.choices[0].message.content or "{}"
-    result = normalize_series_continuity_result(raw)
+    try:
+        response = await create_tracked_chat_completion(
+            client=client,
+            feature="series_continuity_check",
+            model=settings.OPENAI_INTEL_MODEL,
+            db=db,
+            user_id=current_user.id,
+            book_id=current_book.id,
+            temperature=0.2,
+            max_tokens=1200,
+            response_format={"type": "json_object"},
+            messages=[
+                {"role": "system", "content": system_msg},
+                {"role": "user", "content": user_msg},
+            ],
+        )
+        raw = response.choices[0].message.content or "{}"
+        result = normalize_series_continuity_result(raw)
 
-    response_payload = {
-        "review": result,
-        "retrieved_passages": [
-            {
-                "book_title": h["book_title"],
-                "chapter_num": h["chapter_num"],
-                "chapter_title": h.get("chapter_title"),
-                "excerpt": h["text"][:220],
-                "relevance": h["relevance"],
-            }
-            for h in hits[:5]
-        ],
-        "cached": False,
-    }
-    await set_series_continuity_cache(
-        str(series.id),
-        str(current_book.id),
-        series_cache_key,
-        response_payload,
-        expected_version=cache_version,
-    )
-    return response_payload
+        response_payload = {
+            "review": result,
+            "retrieved_passages": [
+                {
+                    "book_title": h["book_title"],
+                    "chapter_num": h["chapter_num"],
+                    "chapter_title": h.get("chapter_title"),
+                    "excerpt": h["text"][:220],
+                    "relevance": h["relevance"],
+                }
+                for h in hits[:5]
+            ],
+            "cached": False,
+        }
+        await set_series_continuity_cache(
+            str(series.id),
+            str(current_book.id),
+            series_cache_key,
+            response_payload,
+            expected_version=cache_version,
+        )
+        return response_payload
+    finally:
+        # The client is owned by the process/loop registry and is closed only
+        # during application or worker shutdown.
+        pass
 
 
 @router.post("/series/{series_id}/continuity-check-stream")

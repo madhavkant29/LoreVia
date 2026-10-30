@@ -97,18 +97,25 @@ ROLE_WORDS = {
     "clerk",
     "cook",
     "doctor",
+    "doorkeeper",
     "employee",
     "guard",
     "inspector",
+    "keeper",
+    "lawyer",
     "lodger",
     "maid",
+    "magistrate",
     "manager",
     "nurse",
     "officer",
+    "porter",
     "servant",
     "teacher",
     "waiter",
+    "warden",
 }
+ROLE_MODIFIERS = {"chief", "examining", "prison", "village"}
 TITLE_PREFIXES = {
     "mr",
     "mrs",
@@ -163,6 +170,9 @@ def classify_candidate_kind(
             return CandidateKind.OBJECT_OR_PLACE
         if noun in ROLE_WORDS:
             return CandidateKind.ROLE_DESCRIPTOR
+
+    if len(raw_tokens) == 2 and raw_tokens[0] in ROLE_MODIFIERS and raw_tokens[1] in ROLE_WORDS:
+        return CandidateKind.ROLE_DESCRIPTOR
 
     if len(tokens) >= 2:
         return CandidateKind.CANONICAL_NAME

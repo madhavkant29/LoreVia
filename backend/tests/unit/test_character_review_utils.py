@@ -13,6 +13,7 @@ from app.models.character import (
     CharacterMention,
     CharacterRelationshipCandidate,
 )
+from app.models.operations import AiQualityEvent
 from app.models.user import User
 from app.utils.characters.candidates import (
     can_auto_persist_character_candidate,
@@ -80,6 +81,27 @@ def test_disposition_gate_allows_llm_confirmed_person_into_review():
     assert disposition.visible_review_allowed is True
 
 
+def test_disposition_suppresses_unanchored_reference_despite_model_confidence():
+    disposition = decide_character_candidate_disposition(
+        name="Imaginary Person",
+        confidence=0.99,
+        reason_codes=["unanchored_character_reference"],
+        evidence={
+            "mention_count": 3,
+            "strong_mention_count": 2,
+            "has_dialogue_or_action": True,
+            "verifier": {
+                "llm": {"is_person_like": True},
+                "final": {"confidence_band": "accept", "is_person_like": True},
+            },
+        },
+    )
+
+    assert disposition.status == CHARACTER_CANDIDATE_SUPPRESSED
+    assert disposition.action == "suppress"
+    assert "unanchored_character_reference" in disposition.reason_codes
+
+
 def test_auto_persist_gate_allows_grounded_first_pass_full_name():
     assert (
         can_auto_persist_character_candidate(
@@ -104,6 +126,26 @@ def test_auto_persist_gate_allows_grounded_first_pass_full_name():
             },
         )
         is True
+    )
+
+
+def test_auto_persist_gate_keeps_unnamed_role_in_review_despite_strong_evidence():
+    assert (
+        can_auto_persist_character_candidate(
+            name="examining magistrate",
+            evidence={
+                "mention_count": 5,
+                "strong_mention_count": 4,
+                "source_mention_count_verified": True,
+                "has_attributed_speech": True,
+                "has_physical_description": True,
+                "verifier": {
+                    "local": {"person_ner_mentions": 1, "mid_sentence_mentions": 3},
+                    "final": {"confidence_band": "accept", "is_person_like": True},
+                },
+            },
+        )
+        is False
     )
 
 
@@ -397,6 +439,221 @@ async def test_record_character_candidate_upserts_by_source_key(db):
     assert rows[0].reason_codes == ["ambiguous_roster_match", "single_token_needs_stronger_support"]
     assert rows[0].evidence["mention_count"] == 1
     assert rows[0].evidence["strong_mention_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_extraction_candidate_upserts_preserve_decided_character_and_relationship_rows(db):
+    user = User(
+        email="decided-candidate@lorevia.app", username="decided-candidate", password_hash="hash"
+    )
+    db.add(user)
+    await db.flush()
+    book = Book(
+        user_id=user.id,
+        title="Preserve decisions",
+        format="pdf",
+        s3_key="books/preserve-decisions.pdf",
+        status="ready",
+    )
+    db.add(book)
+    await db.flush()
+
+    names = ("Mara Vale", "Mara Voss", "Mara Reed")
+    for index, (name, status) in enumerate(
+        zip(names, ("accepted", "promoted", "rejected"), strict=True), start=1
+    ):
+        candidate = CharacterCandidate(
+            book_id=book.id,
+            chapter_number=2,
+            raw_name=name,
+            proposed_name=name,
+            normalized_name=name.casefold(),
+            status=status,
+            confidence=91,
+            evidence={"review_note": "Keep this decision."},
+            source_batch_key=f"book:2:{index}",
+        )
+        db.add(candidate)
+        await db.flush()
+        db.add(
+            AiQualityEvent(
+                book_id=book.id,
+                user_id=user.id,
+                actor_user_id=user.id,
+                entity_type="character_candidate",
+                entity_id=str(candidate.id),
+                outcome=status,
+            )
+        )
+    for index, status in enumerate(("accepted", "resolved", "rejected"), start=1):
+        db.add(
+            CharacterRelationshipCandidate(
+                book_id=book.id,
+                chapter_number=2,
+                raw_character_a="Mara",
+                raw_character_b=f"Sol {index}",
+                status=status,
+                evidence={"review_note": "Keep this relationship decision."},
+                source_batch_key=f"book:2:{index}",
+            )
+        )
+    await db.flush()
+
+    for index, name in enumerate(names, start=1):
+        await record_character_candidate(
+            db,
+            book_id=book.id,
+            chapter_number=2,
+            raw_name=name,
+            proposed_name=name,
+            status="pending",
+            confidence=0.1,
+            evidence={"review_note": "Overwrite attempt"},
+            source_batch_key=f"book:2:{index}",
+        )
+        await record_relationship_candidate(
+            db,
+            book_id=book.id,
+            chapter_number=2,
+            raw_character_a="Mara",
+            raw_character_b=f"Sol {index}",
+            status="pending",
+            evidence={"review_note": "Overwrite attempt"},
+            source_batch_key=f"book:2:{index}",
+        )
+    await db.flush()
+
+    characters = (
+        (await db.execute(select(CharacterCandidate).where(CharacterCandidate.book_id == book.id)))
+        .scalars()
+        .all()
+    )
+    relationships = (
+        (
+            await db.execute(
+                select(CharacterRelationshipCandidate).where(
+                    CharacterRelationshipCandidate.book_id == book.id
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert {row.status for row in characters} == {"accepted", "promoted", "rejected"}
+    assert {row.status for row in relationships} == {"accepted", "resolved", "rejected"}
+    assert all(row.evidence["review_note"] == "Keep this decision." for row in characters)
+    assert all(
+        row.evidence["review_note"] == "Keep this relationship decision." for row in relationships
+    )
+    old_relationship = next(row for row in relationships if row.raw_character_b == "Sol 1")
+    new_pair_batch = await record_relationship_candidate(
+        db,
+        book_id=book.id,
+        chapter_number=2,
+        raw_character_a="Mara",
+        raw_character_b="Sol 1",
+        status="pending",
+        source_batch_key="book:2:new-pair-batch",
+    )
+    assert new_pair_batch.id == old_relationship.id
+
+    old_reviewed = next(row for row in characters if row.proposed_name == "Mara Vale")
+    new_batch_result = await record_character_candidate(
+        db,
+        book_id=book.id,
+        chapter_number=2,
+        raw_name="Mara Vale",
+        proposed_name="Mara Vale",
+        status="pending",
+        confidence=0.1,
+        source_batch_key="book:2:new-batch",
+    )
+    assert new_batch_result.id == old_reviewed.id
+    assert (
+        await db.scalar(
+            select(CharacterCandidate).where(
+                CharacterCandidate.book_id == book.id,
+                CharacterCandidate.normalized_name == "mara vale",
+            )
+        )
+    ) is old_reviewed
+
+    auto_candidate = CharacterCandidate(
+        book_id=book.id,
+        chapter_number=2,
+        raw_name="Iris Bell",
+        proposed_name="Iris Bell",
+        normalized_name="iris bell",
+        status="accepted",
+        confidence=91,
+        evidence={"review_note": "Old automatic evidence"},
+        source_batch_key="book:2:auto",
+    )
+    db.add(auto_candidate)
+    await db.flush()
+    updated = await record_character_candidate(
+        db,
+        book_id=book.id,
+        chapter_number=2,
+        raw_name="Iris Bell",
+        proposed_name="Iris Bell",
+        status="pending",
+        confidence=0.6,
+        evidence={"review_note": "New automatic evidence"},
+        source_batch_key="book:2:auto",
+    )
+    assert updated.id == auto_candidate.id
+    assert updated.status == "pending"
+    assert updated.evidence["review_note"] == "New automatic evidence"
+
+    attached_endpoint = CharacterRelationshipCandidate(
+        book_id=book.id,
+        chapter_number=2,
+        raw_character_a="Iris",
+        raw_character_b="Sol",
+        status="pending",
+        reason_codes=["author_attached_endpoint"],
+        evidence={"review_note": "Endpoint selected by author"},
+        source_batch_key="book:2:attached",
+    )
+    db.add(attached_endpoint)
+    await db.flush()
+    refreshed = await record_relationship_candidate(
+        db,
+        book_id=book.id,
+        chapter_number=2,
+        raw_character_a="Iris",
+        raw_character_b="Sol",
+        status="pending",
+        evidence={"review_note": "Overwrite attempt"},
+        source_batch_key="book:2:attached",
+    )
+    assert refreshed.id == attached_endpoint.id
+    assert refreshed.evidence["review_note"] == "Endpoint selected by author"
+
+    author_demoted = CharacterCandidate(
+        book_id=book.id,
+        chapter_number=2,
+        raw_name="Nila",
+        proposed_name="Nila",
+        normalized_name="nila",
+        status="pending",
+        source_batch_key=f"manual-demote:{book.id}:{uuid.uuid4()}",
+        reason_codes=["manual_demoted_for_review"],
+    )
+    db.add(author_demoted)
+    await db.flush()
+    rediscovered = await record_character_candidate(
+        db,
+        book_id=book.id,
+        chapter_number=2,
+        raw_name="Nila",
+        proposed_name="Nila",
+        status="promoted",
+        source_batch_key="book:2:new-batch",
+    )
+    assert rediscovered.id == author_demoted.id
+    assert rediscovered.status == "pending"
 
 
 @pytest.mark.asyncio

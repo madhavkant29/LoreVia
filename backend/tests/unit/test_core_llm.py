@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import uuid
 from types import SimpleNamespace
 
@@ -7,6 +8,7 @@ import pytest
 from google.genai.errors import APIError as GeminiAPIError
 
 from app.core import llm
+from app.utils.llm_usage_utils import LLMIncompleteResponseError
 
 
 class _FakeOpenAIClient:
@@ -15,6 +17,9 @@ class _FakeOpenAIClient:
 
     async def close(self):
         self.closed = True
+
+    def is_closed(self):
+        return self.closed
 
 
 @pytest.mark.asyncio
@@ -78,6 +83,34 @@ async def test_complete_with_fallback_forwards_usage_db(monkeypatch):
 
     assert result == "Tracked with current session."
     assert captured["db"] is usage_db
+
+
+@pytest.mark.asyncio
+async def test_structured_completion_rejects_provider_truncation_even_with_valid_json(monkeypatch):
+    async def fake_completion(**_kwargs):
+        return SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    finish_reason="length",
+                    message=SimpleNamespace(content='{"characters":[],"relationships":[]}'),
+                )
+            ]
+        )
+
+    monkeypatch.setattr(llm.settings, "OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr(llm.settings, "GEMINI_API_KEY", None)
+    monkeypatch.setattr(llm, "create_tracked_chat_completion", fake_completion)
+
+    with pytest.raises(LLMIncompleteResponseError, match="llm_response_incomplete"):
+        await llm.complete_with_fallback(
+            system="Extract people.",
+            user="Mara spoke to Ilya.",
+            openai_model="gpt-test",
+            openai_client=_FakeOpenAIClient(),
+            response_format={"type": "json_object"},
+            require_complete_output=True,
+            usage_user_id=uuid.uuid4(),
+        )
 
 
 @pytest.mark.asyncio
@@ -252,6 +285,43 @@ async def test_openai_registry_is_loop_aware_and_closes_owned_clients(monkeypatc
     assert llm.get_openai_client() is second
 
     await llm.close_openai_clients()
+    assert first.closed is second.closed is True
+
+
+@pytest.mark.asyncio
+async def test_get_openai_client_recreates_closed_cached_client(monkeypatch):
+    first = _FakeOpenAIClient()
+    second = _FakeOpenAIClient()
+    clients = iter([first, second])
+    monkeypatch.setattr(llm, "_openai_clients", {})
+    monkeypatch.setattr(llm, "AsyncOpenAI", lambda **_kwargs: next(clients))
+
+    assert llm.get_openai_client() is first
+    await first.close()
+    assert llm.get_openai_client() is second
+    assert llm.get_openai_client() is second
+    await llm.close_openai_clients()
+    assert second.closed is True
+
+
+def test_get_openai_client_does_not_reuse_a_client_from_a_previous_event_loop(monkeypatch):
+    first = _FakeOpenAIClient()
+    second = _FakeOpenAIClient()
+    clients = iter([first, second])
+    monkeypatch.setattr(llm, "_openai_clients", {})
+    monkeypatch.setattr(llm, "AsyncOpenAI", lambda **_kwargs: next(clients))
+
+    async def resolve():
+        return llm.get_openai_client(), asyncio.get_running_loop()
+
+    first_client, first_loop = asyncio.run(resolve())
+    second_client, second_loop = asyncio.run(resolve())
+
+    assert first_client is first
+    assert second_client is second
+    assert first_loop is not second_loop
+    assert {key[1] for key in llm._openai_clients} == {first_loop, second_loop}
+    asyncio.run(llm.close_openai_clients())
     assert first.closed is second.closed is True
 
 

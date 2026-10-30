@@ -90,7 +90,21 @@ ALIAS_SUFFIX_BLOCKLIST = (
     " Towers",
 )
 HONORIFIC_SUFFIXES = ("san", "kun", "chan", "sama", "sensei", "senpai", "dono", "tan", "nee", "nii")
-HONORIFIC_PREFIXES = ("mr", "mrs", "ms", "miss", "dr", "sir", "lady", "lord")
+HONORIFIC_PREFIXES = (
+    "mr",
+    "mrs",
+    "ms",
+    "miss",
+    "dr",
+    "sir",
+    "lady",
+    "lord",
+    "madame",
+    "mme",
+    "mademoiselle",
+    "mlle",
+    "monsieur",
+)
 
 
 async def embed_for_dedup(
@@ -148,7 +162,7 @@ def is_valid_alias(alias: str | None) -> bool:
 
 
 def _meaningful_tokens(name: str | None) -> list[str]:
-    stopwords = {"mr", "mrs", "ms", "miss", "dr", "sir", "lady", "lord", "the"}
+    stopwords = {*HONORIFIC_PREFIXES, "the"}
     return [
         token
         for token in _strip_honorific_suffixes(name).split()

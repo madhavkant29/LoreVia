@@ -546,8 +546,21 @@ export function isCuratedCharacter(character: Character | null | undefined) {
   return Boolean(character?.analysis_metadata?.user_curated)
 }
 
+export function hasImplicitRepairProtection(character: Character | null | undefined) {
+  return Boolean(
+    character?.is_manual ||
+    character?.analysis_metadata?.user_curated ||
+    character?.analysis_metadata?.user_reviewed ||
+    character?.approval_source === "manual_review" ||
+    character?.approval_state === "protected",
+  )
+}
+
 export function isProtectedCharacter(character: Character | null | undefined) {
-  return Boolean(character?.is_manual || character?.analysis_metadata?.protected_from_repair)
+  return Boolean(
+    hasImplicitRepairProtection(character) ||
+    character?.analysis_metadata?.protected_from_repair,
+  )
 }
 
 export function buildDraft(character: Character | null): EditDraft {
@@ -672,17 +685,11 @@ export function growthChapter(event: NonNullable<Character["growth_events"]>[num
 
 export function qualityFlags(character: Character, mergeSuggestionIds: Set<string>, connections: ConnectedRelationship[]) {
   const flags: string[] = []
-  const missingTraits = missingTraitLabels(character)
-  const lastSeenChapter = character.last_seen_chapter ?? character.first_chapter ?? null
 
   if (mergeSuggestionIds.has(character.id)) flags.push("Needs merge")
-  if (missingTraits.length > 0) flags.push("Missing traits")
-  if (!character.description && visibleTraitEntries(character).length < 2) flags.push("Low confidence")
+  if ((character.analysis_metadata?.canonical_confidence ?? 1) < 0.55 && (character.analysis_metadata?.evidence_count ?? 0) <= 1) flags.push("Low confidence")
   if (connections.some((connection) => !connection.description || typeof connection.from_chapter !== "number")) {
     flags.push("Needs evidence")
-  }
-  if (typeof lastSeenChapter === "number" && lastSeenChapter > character.first_chapter && (character.growth_events?.length ?? 0) === 0) {
-    flags.push("Arc stale")
   }
 
   return Array.from(new Set(flags))
@@ -696,38 +703,11 @@ export function healthTone(score: number): CharacterHealth["tone"] {
 
 export function buildCharacterHealth(character: Character, mergeSuggestionIds: Set<string>, connections: ConnectedRelationship[]): CharacterHealth {
   const issues: string[] = []
-  const missingTraits = missingTraitLabels(character)
-  const lastSeenChapter = character.last_seen_chapter ?? character.first_chapter ?? null
-
-  if (missingTraits.includes("physical description")) {
-    issues.push("Missing physical description")
-  }
-  if (missingTraits.includes("age")) {
-    issues.push("Age is not grounded")
-  }
-  if (!character.description) {
-    issues.push("Profile summary is still thin")
-  }
-  if (character.motivations.length === 0) {
-    issues.push("Motivation evidence is missing")
-  }
   if (mergeSuggestionIds.has(character.id)) {
     issues.push("Duplicate candidate found")
   }
   if (connections.some((connection) => !connection.description || typeof connection.from_chapter !== "number")) {
     issues.push("Relationship evidence incomplete")
-  }
-  if (typeof lastSeenChapter === "number" && lastSeenChapter > character.first_chapter && (character.growth_events?.length ?? 0) === 0) {
-    issues.push(`Arc has no update after chapter ${lastSeenChapter}`)
-  }
-  for (const diagnostic of character.arc_tracker?.diagnostics ?? []) {
-    issues.push(diagnostic)
-  }
-  if (!(character.arc_tracker?.voice_markers?.length ?? 0)) {
-    issues.push("Voice markers are not grounded yet")
-  }
-  if (!(character.goal ?? character.arc_tracker?.goal)) {
-    issues.push("Goal is missing")
   }
 
   const completenessChecks = [
@@ -744,11 +724,9 @@ export function buildCharacterHealth(character: Character, mergeSuggestionIds: S
     (completenessChecks.filter(Boolean).length / completenessChecks.length) * 100,
   )
   const tone = healthTone(normalizedScore)
-  const summary = tone === "strong"
-    ? "Well-grounded across traits, continuity, and relationships."
-    : tone === "moderate"
-      ? "Some continuity gaps and missing data need attention."
-      : "Important profile gaps are weakening this character record."
+  const summary = issues.length > 0
+    ? "Review the flagged identity or relationship evidence. Unknown profile details are not continuity errors."
+    : "Profile coverage reflects recorded details and review signals, not character accuracy. Unknown traits are not continuity errors."
 
   return {
     score: normalizedScore,
@@ -786,7 +764,7 @@ export function buildSelectedCharacterSummary(character: Character | null, conne
     age ? `${character.name} appears to be ${age}.` : null,
     distinguishing ? `Notable for ${distinguishing}.` : null,
     disposition ? `Disposition: ${disposition}.` : null,
-    wants ? `Wants: ${wants}.` : null,
+    wants && !character.description?.toLowerCase().includes(`wants: ${wants.toLowerCase()}`) ? `Wants: ${wants}.` : null,
     relationshipNotes || null,
   ]
     .filter(Boolean)
@@ -795,9 +773,10 @@ export function buildSelectedCharacterSummary(character: Character | null, conne
 
 export function isReviewedCharacter(character: Character) {
   return Boolean(
-    character.approval_state === "approved"
+    character.approval_source === "manual_review"
     || character.approval_state === "protected"
     || character.analysis_metadata?.user_curated
+    || character.analysis_metadata?.user_reviewed
     || character.is_manual,
   )
 }
@@ -806,8 +785,6 @@ export function isFlaggedCharacter(character: Character, flags: string[]) {
   return Boolean(
     flags.length > 0
     || character.approval_state === "pending_review"
-    || character.analysis_metadata?.needs_review
-    || (character.analysis_metadata?.quality_flags?.length ?? 0) > 0,
   )
 }
 
@@ -844,6 +821,28 @@ export function knownFacts(character: Character, connections: ConnectedRelations
   if (character.arc_type) facts.push(`Arc: ${character.arc_type}`)
   if (connections.length > 0) facts.push(`${connections.length} relationship ${connections.length === 1 ? "link" : "links"} tracked`)
   return facts.slice(0, 5)
+}
+
+export function currentProfileClaims(character: Character) {
+  const claims = character.analysis_metadata?.profile_claims ?? []
+  const currentValue = (field: string): string | string[] | null | undefined => {
+    if (field.startsWith("trait:")) return character.trait_state?.[field.slice(6)]?.value
+    if (field === "growth_event") return undefined
+    if (field === "first_appearance_context") return undefined
+    if (field === "goal" || field === "arc_type" || field === "arc_summary"
+      || field === "lie_they_believe" || field === "backstory_wound" || field === "archetype") {
+      return character[field]
+    }
+    if (field === "personality_tags" || field === "motivations" || field === "fears") {
+      return character[field]
+    }
+    return undefined
+  }
+  return claims.filter((claim) => {
+    if (!claim.quote?.trim() || !claim.value?.trim()) return false
+    const value = currentValue(claim.field)
+    return Array.isArray(value) ? value.includes(claim.value) : value === claim.value
+  })
 }
 
 export function openQuestionsForCharacter(character: Character, connections: ConnectedRelationship[]) {

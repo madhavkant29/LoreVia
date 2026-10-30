@@ -1,7 +1,7 @@
 """Runtime coverage for persisted advisor suggestion jobs."""
 
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
@@ -81,6 +81,7 @@ async def test_create_get_and_serialize_advisor_suggestion_job():
         "job_id": str(created.id),
         "status": "queued",
         "result": None,
+        "progress": None,
         "error": None,
     }
 
@@ -176,6 +177,94 @@ async def test_suggestion_job_claim_rejects_duplicate_and_stale_completion():
     assert stale_completion is None
     assert completed is job
     assert jobs.serialize_advisor_suggestion_job(job)["result"] == {"suggestions": ["current"]}
+
+
+@pytest.mark.asyncio
+async def test_scan_progress_refreshes_running_lease_without_exposing_partial_result():
+    job = build_job()
+    db = FakeDB(job)
+    await jobs.mark_advisor_suggestion_job_running(db, job_id=job.id, execution_id="scan-one")
+    previous_update = job.updated_at
+
+    assert await jobs.mark_advisor_suggestion_job_progress(
+        db, job_id=job.id, completed=2, total=21, execution_id="scan-one"
+    )
+    assert job.updated_at >= previous_update
+    assert jobs.serialize_advisor_suggestion_job(job) == {
+        "job_id": str(job.id),
+        "status": "running",
+        "result": None,
+        "progress": {"completed": 2, "total": 21},
+        "error": None,
+    }
+    assert not await jobs.mark_advisor_suggestion_job_progress(
+        db, job_id=job.id, completed=3, total=21, execution_id="stale-scan"
+    )
+    assert job.result_json["_progress"]["completed"] == 2
+
+    await jobs.mark_advisor_suggestion_job_complete(
+        db, job_id=job.id, result_payload={"suggestions": []}, execution_id="scan-one"
+    )
+    assert jobs.serialize_advisor_suggestion_job(job)["progress"] is None
+    assert not await jobs.mark_advisor_suggestion_job_progress(
+        db, job_id=job.id, completed=21, total=21, execution_id="scan-one"
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("completed,total", [(-1, 1), (2, 1), (0, -1)])
+async def test_scan_progress_rejects_invalid_counts(completed, total):
+    db = FakeDB(build_job())
+    with pytest.raises(ValueError, match="invalid_advisor_scan_progress"):
+        await jobs.mark_advisor_suggestion_job_progress(
+            db, job_id=db.stored.id, completed=completed, total=total
+        )
+    assert db.commits == 0
+
+
+@pytest.mark.asyncio
+async def test_hard_killed_scan_becomes_retryable_only_after_runtime_plus_grace():
+    job = build_job()
+    db = FakeDB(job)
+    started = datetime(2026, 1, 1, tzinfo=UTC)
+    await jobs.mark_advisor_suggestion_job_running(
+        db, job_id=job.id, execution_id="scan-one", now=started
+    )
+    assert job.result_json[jobs.ADVISOR_SUGGESTION_STARTED_AT_KEY] == started.isoformat()
+
+    before_deadline = await jobs.fail_stale_advisor_suggestion_job(
+        db, job_id=job.id, now=started + timedelta(minutes=21)
+    )
+    assert before_deadline is job
+    assert job.status == "running"
+
+    after_deadline = await jobs.fail_stale_advisor_suggestion_job(
+        db, job_id=job.id, now=started + timedelta(minutes=22)
+    )
+    assert after_deadline is job
+    assert job.status == "failed"
+    assert job.error_code == "advisor_suggestions_timed_out"
+    assert job.result_json is None
+    assert "Refresh checks" in job.error_detail
+    assert db.commits == 2
+
+
+@pytest.mark.asyncio
+async def test_scan_progress_does_not_extend_the_hard_runtime_deadline():
+    job = build_job()
+    db = FakeDB(job)
+    started = datetime(2026, 1, 1, tzinfo=UTC)
+    await jobs.mark_advisor_suggestion_job_running(
+        db, job_id=job.id, execution_id="scan-one", now=started
+    )
+    await jobs.mark_advisor_suggestion_job_progress(
+        db, job_id=job.id, completed=20, total=21, execution_id="scan-one"
+    )
+    assert job.result_json[jobs.ADVISOR_SUGGESTION_STARTED_AT_KEY] == started.isoformat()
+    await jobs.fail_stale_advisor_suggestion_job(
+        db, job_id=job.id, now=started + timedelta(minutes=22)
+    )
+    assert job.status == "failed"
 
 
 @pytest.mark.asyncio

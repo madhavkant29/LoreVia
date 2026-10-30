@@ -270,6 +270,51 @@ def build_character_dossier_summary(
         else raw_non_person_signal_count
     )
     deterministic_fallback = bool(evidence_map.get("deterministic_fallback"))
+    ambiguous_full_name_fragment = evidence_map.get("ambiguous_full_name_fragment") is True
+    explicit_speech_single_name_eligible = bool(
+        single_token
+        and not common_single_token
+        and not role_only_single_token
+        and not deterministic_fallback
+        and final_band == "accept"
+        and mention_count >= 2
+        and strong_mention_count >= 2
+        and mid_sentence_mentions >= 1
+        and evidence_map.get("has_attributed_speech") is True
+        and non_person_signal_count <= 0
+        and resolver_ambiguity_count <= 0
+        and conflict_signal_count <= 0
+    )
+    direct_communication_single_name_eligible = bool(
+        single_token
+        and not common_single_token
+        and not role_only_single_token
+        and not deterministic_fallback
+        and final_band == "accept"
+        and mention_count >= 3
+        and strong_mention_count >= 2
+        and mid_sentence_mentions >= 1
+        and int(local.get("person_context_mentions") or 0) >= 2
+        and evidence_map.get("has_direct_communication") is True
+        and non_person_signal_count <= 0
+        and resolver_ambiguity_count <= 0
+        and conflict_signal_count <= 0
+    )
+    human_self_action_single_name_eligible = bool(
+        single_token
+        and not common_single_token
+        and not role_only_single_token
+        and not deterministic_fallback
+        and final_band == "accept"
+        and mention_count >= 3
+        and strong_mention_count >= 2
+        and mid_sentence_mentions >= 1
+        and int(local.get("person_context_mentions") or 0) >= 2
+        and evidence_map.get("has_human_self_action") is True
+        and non_person_signal_count <= 0
+        and resolver_ambiguity_count <= 0
+        and conflict_signal_count <= 0
+    )
     strong_fallback_support = bool(
         deterministic_fallback
         and final_band == "accept"
@@ -295,6 +340,19 @@ def build_character_dossier_summary(
             or bool(evidence_map.get("has_physical_description"))
         )
     )
+    narrator_identification = evidence_map.get("narrator_self_identification")
+    explicit_narrator_full_name_eligible = bool(
+        not single_token
+        and not deterministic_fallback
+        and final_band == "accept"
+        and strong_mention_count >= 1
+        and isinstance(narrator_identification, str)
+        and narrator_identification.strip().casefold().endswith(clean_name.casefold())
+        and non_person_signal_count <= 0
+        and resolver_ambiguity_count <= 0
+        and conflict_signal_count <= 0
+        and not ambiguous_full_name_fragment
+    )
 
     strict_auto_reason_codes: list[str] = []
     if role_only_single_token:
@@ -305,15 +363,38 @@ def build_character_dossier_summary(
         strict_auto_reason_codes.append("non_person_ner_signal")
     if resolver_ambiguity_count > 0:
         strict_auto_reason_codes.append("conflicts_with_existing_character")
-    if single_token and person_ner_support <= 0 and not strong_fallback_support:
+    if ambiguous_full_name_fragment:
+        strict_auto_reason_codes.append("ambiguous_full_name_fragment")
+    if (
+        single_token
+        and person_ner_support <= 0
+        and not strong_fallback_support
+        and not explicit_speech_single_name_eligible
+        and not direct_communication_single_name_eligible
+        and not human_self_action_single_name_eligible
+    ):
         strict_auto_reason_codes.append("single_token_ambiguous")
-    if len(chapter_numbers) < 2 and mention_count < 3:
+    if (
+        len(chapter_numbers) < 2
+        and mention_count < 3
+        and not explicit_speech_single_name_eligible
+        and not direct_communication_single_name_eligible
+        and not human_self_action_single_name_eligible
+        and not explicit_narrator_full_name_eligible
+    ):
         strict_auto_reason_codes.append("insufficient_cross_chapter_support")
     strict_auto_reason_codes = dedupe_preserve_order(strict_auto_reason_codes)
 
     strict_auto_eligible = False
     if clean_name:
-        if strong_fallback_support or first_pass_full_name_eligible:
+        if (
+            strong_fallback_support
+            or first_pass_full_name_eligible
+            or explicit_narrator_full_name_eligible
+            or explicit_speech_single_name_eligible
+            or direct_communication_single_name_eligible
+            or human_self_action_single_name_eligible
+        ):
             strict_auto_eligible = True
         elif not strict_auto_reason_codes:
             if single_token:
@@ -338,14 +419,17 @@ def build_character_dossier_summary(
                         )
                     )
                 )
-        if not strict_auto_eligible:
-            strict_auto_reason_codes.append("insufficient_cross_chapter_support")
+        if not strict_auto_eligible and not strict_auto_reason_codes:
+            strict_auto_reason_codes.append("insufficient_auto_save_grounding")
+    if ambiguous_full_name_fragment:
+        strict_auto_eligible = False
 
     return {
         "normalized_name": normalize_character_name(clean_name),
         "single_token": single_token,
         "common_single_token": common_single_token,
         "role_only_single_token": role_only_single_token,
+        "ambiguous_full_name_fragment": ambiguous_full_name_fragment,
         "mention_count": mention_count,
         "distinct_chapter_count": len(chapter_numbers),
         "chapter_numbers": chapter_numbers,
@@ -360,6 +444,10 @@ def build_character_dossier_summary(
         "raw_non_person_signal_count": raw_non_person_signal_count,
         "non_person_signal_count": non_person_signal_count,
         "first_pass_full_name_eligible": first_pass_full_name_eligible,
+        "explicit_narrator_full_name_eligible": explicit_narrator_full_name_eligible,
+        "explicit_speech_single_name_eligible": explicit_speech_single_name_eligible,
+        "direct_communication_single_name_eligible": direct_communication_single_name_eligible,
+        "human_self_action_single_name_eligible": human_self_action_single_name_eligible,
         "strict_auto_eligible": strict_auto_eligible,
         "strict_auto_reason_codes": dedupe_preserve_order(strict_auto_reason_codes),
         "summary_reason_codes": dedupe_preserve_order(

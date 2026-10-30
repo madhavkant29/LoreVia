@@ -18,6 +18,7 @@ from app.models.character import (
     Character,
     CharacterCandidate,
 )
+from app.services.character_identity.classification import CandidateKind, classify_candidate_kind
 from app.utils.characters.constants import (
     CHARACTER_ADJUDICATION_OBJECT,
     CHARACTER_ADJUDICATION_ORGANIZATION,
@@ -96,6 +97,25 @@ def _candidate_llm_confirmed_person(evidence: Mapping[str, Any] | None) -> bool:
     )
 
 
+def recurring_role_review_supported(name: str | None, evidence: Mapping[str, Any] | None) -> bool:
+    """Retain a repeated, source-backed unnamed person for author review."""
+    if classify_candidate_kind(name) != CandidateKind.ROLE_DESCRIPTOR:
+        return False
+    details = evidence if isinstance(evidence, Mapping) else {}
+    final = _verifier_final_from_evidence(details)
+    return bool(
+        details.get("source_mention_count_verified") is True
+        and str(final.get("confidence_band") or "").casefold() == "accept"
+        and int(details.get("mention_count") or 0) >= 3
+        and int(details.get("strong_mention_count") or 0) >= 2
+        and (
+            details.get("has_attributed_speech") is True
+            or details.get("has_human_self_action") is True
+            or details.get("has_direct_communication") is True
+        )
+    )
+
+
 def _candidate_strongly_grounded(summary: Mapping[str, Any], evidence: Mapping[str, Any]) -> bool:
     if bool(summary.get("common_single_token")) or bool(summary.get("role_only_single_token")):
         return False
@@ -148,6 +168,8 @@ def can_auto_persist_character_candidate(
     aliases: Sequence[object] | None = None,
     evidence: Mapping[str, Any] | None = None,
 ) -> bool:
+    if classify_candidate_kind(name) == CandidateKind.ROLE_DESCRIPTOR:
+        return False
     evidence_map = dict(evidence or {})
     cluster_names = clean_string_list(
         evidence_map.get("cluster_names")
@@ -185,6 +207,12 @@ def can_auto_persist_character_candidate(
     )
 
     if single_token:
+        if bool(summary.get("explicit_speech_single_name_eligible")):
+            return True
+        if bool(summary.get("direct_communication_single_name_eligible")):
+            return True
+        if bool(summary.get("human_self_action_single_name_eligible")):
+            return True
         if deterministic_fallback and full_name_alias_support:
             return bool(
                 mention_count >= 3
@@ -201,7 +229,9 @@ def can_auto_persist_character_candidate(
             and shared_identity_support
         )
 
-    if bool(summary.get("first_pass_full_name_eligible")):
+    if bool(summary.get("first_pass_full_name_eligible")) or bool(
+        summary.get("explicit_narrator_full_name_eligible")
+    ):
         return True
 
     if llm_confirmed:
@@ -283,9 +313,12 @@ def decide_character_candidate_disposition(
     normalized_reasons = {reason.casefold() for reason in all_reasons}
     llm_confirmed = _candidate_llm_confirmed_person(evidence_map)
     strongly_grounded = _candidate_strongly_grounded(summary, evidence_map)
-    visible_review_allowed = bool(llm_confirmed or strongly_grounded)
+    recurring_role_review = recurring_role_review_supported(name, evidence_map)
+    visible_review_allowed = bool(llm_confirmed or strongly_grounded or recurring_role_review)
 
     suppress_reasons: list[str] = []
+    if "unanchored_character_reference" in normalized_reasons:
+        suppress_reasons.append("unanchored_character_reference")
     if final_band == "review" or "mention_verifier_review" in normalized_reasons:
         suppress_reasons.append("mention_verifier_review_suppressed")
     if adjudication.adjudication_status in {
@@ -334,7 +367,9 @@ def decide_character_candidate_disposition(
             else CHARACTER_CANDIDATE_REJECTED
         )
         disposition_reasons = dedupe_preserve_order(["mention_verifier_rejected", *all_reasons])
-    elif suppress_reasons and not visible_review_allowed:
+    elif "unanchored_character_reference" in normalized_reasons or (
+        suppress_reasons and not visible_review_allowed
+    ):
         action = CHARACTER_DISPOSITION_SUPPRESS
         status = CHARACTER_CANDIDATE_SUPPRESSED
         disposition_reasons = dedupe_preserve_order([*suppress_reasons, *all_reasons])
@@ -536,6 +571,11 @@ def build_character_analysis_payload(char: Character) -> dict[str, Any]:
         "cluster_mention_count": int(metadata.get("cluster_mention_count") or 0),
         "resolver_status": str(metadata.get("resolver_status") or "").strip() or None,
         "review_note": str(metadata.get("review_note") or "").strip() or None,
+        "first_person_self_identification": (
+            metadata.get("first_person_self_identification")
+            if isinstance(metadata.get("first_person_self_identification"), dict)
+            else None
+        ),
         "visibility_state": visibility_state,
         "approval_state": approval_state,
         "approval_source": approval_source,

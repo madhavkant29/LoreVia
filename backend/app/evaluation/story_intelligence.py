@@ -1,18 +1,26 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
 ROLLOUT_THRESHOLDS = {
+    "prediction_coverage": 1.0,
     "major_character_precision": 0.98,
     "major_character_recall": 0.95,
     "character_precision": 0.95,
     "character_recall": 0.90,
     "identity_merge_precision": 0.99,
+    "relationship_precision": 0.90,
+    "relationship_recall": 0.80,
+    "relationship_citation_coverage": 1.0,
+    "extraction_source_coverage": 1.0,
     "high_confidence_continuity_precision": 0.90,
+    "high_confidence_continuity_recall": 0.80,
     "citation_coverage": 1.0,
+    "profile_claim_source_coverage": 1.0,
     "production_dismissal_rate": 0.15,
 }
 
@@ -69,20 +77,34 @@ def evaluate_predictions(
     cases: list[dict[str, Any]],
     predictions: list[dict[str, Any]],
 ) -> dict[str, Any]:
-    prediction_by_id = {
-        str(prediction.get("case_id") or ""): prediction for prediction in predictions
-    }
+    case_ids = {str(case["id"]) for case in cases}
+    prediction_by_id: dict[str, dict[str, Any]] = {}
+    for prediction in predictions:
+        if not isinstance(prediction, dict):
+            raise ValueError("Predictions must be objects with case IDs.")
+        case_id = str(prediction.get("case_id") or "").strip()
+        if not case_id or case_id in prediction_by_id:
+            raise ValueError("Prediction case IDs must be non-empty and unique.")
+        if case_id not in case_ids:
+            raise ValueError(f"Unknown prediction case ID: {case_id}")
+        prediction_by_id[case_id] = prediction
     gold_characters: set[str] = set()
     predicted_characters: set[str] = set()
     gold_major_characters: set[str] = set()
     predicted_major_characters: set[str] = set()
     gold_links: set[str] = set()
     predicted_links: set[str] = set()
+    gold_relationships: set[str] = set()
+    predicted_relationships: set[str] = set()
+    relationship_support_by_key: dict[str, bool] = {}
     gold_findings: set[str] = set()
     predicted_findings: set[str] = set()
     gold_high_confidence_findings: set[str] = set()
     predicted_high_confidence_findings: set[str] = set()
-    cited_findings: set[str] = set()
+    citation_support_by_key: dict[str, bool] = {}
+    profile_claim_count = 0
+    sourced_profile_claim_count = 0
+    fully_covered_sources = 0
     latency_by_version: dict[str, list[float]] = defaultdict(list)
     cost_by_version: dict[str, list[float]] = defaultdict(list)
     words_by_version: dict[str, int] = defaultdict(int)
@@ -90,7 +112,11 @@ def evaluate_predictions(
     for case in cases:
         case_id = str(case["id"])
         labels = case["labels"]
+        source_text = str(case.get("text") or "")
         prediction = prediction_by_id.get(case_id, {})
+        fully_covered_sources += int(
+            _prediction_covers_source(source_text, prediction.get("source_coverage"))
+        )
         for character in labels.get("characters", []):
             key = _metric_key(case_id, character.get("canonical_name") or character.get("name"))
             gold_characters.add(key)
@@ -101,12 +127,39 @@ def evaluate_predictions(
             predicted_characters.add(key)
             if _is_major_character(character):
                 predicted_major_characters.add(key)
+            metadata = character.get("analysis_metadata")
+            claims = (
+                metadata.get("profile_claims")
+                if isinstance(metadata, dict)
+                else character.get("profile_claims")
+            )
+            for claim in claims if isinstance(claims, list) else []:
+                if not isinstance(claim, dict) or not claim.get("field") or not claim.get("value"):
+                    continue
+                profile_claim_count += 1
+                quote = str(claim.get("quote") or "")
+                if quote and quote in source_text:
+                    sourced_profile_claim_count += 1
         for mention, canonical in (labels.get("identity_links") or {}).items():
             if _metric_key(mention) != _metric_key(canonical):
                 gold_links.add(_metric_key(case_id, mention, canonical))
         for mention, canonical in (prediction.get("identity_links") or {}).items():
             if _metric_key(mention) != _metric_key(canonical):
                 predicted_links.add(_metric_key(case_id, mention, canonical))
+        for relationship in labels.get("relationships", []):
+            if isinstance(relationship, dict):
+                gold_relationships.add(_metric_key(case_id, _relationship_key(relationship)))
+        for relationship in prediction.get("relationships", []):
+            if isinstance(relationship, dict):
+                key = _metric_key(case_id, _relationship_key(relationship))
+                predicted_relationships.add(key)
+                evidence = relationship.get("label_evidence") or relationship.get("evidence")
+                quote = str(evidence.get("quote") or "") if isinstance(evidence, dict) else ""
+                relationship_support_by_key[key] = (
+                    relationship_support_by_key.get(key, True)
+                    and bool(quote.strip())
+                    and quote in source_text
+                )
         for finding in labels.get("findings", []):
             key = _metric_key(case_id, _finding_key(finding))
             gold_findings.add(key)
@@ -118,12 +171,19 @@ def evaluate_predictions(
             if _is_high_confidence_finding(finding):
                 predicted_high_confidence_findings.add(key)
             evidence = finding.get("evidence")
-            if (
+            citation_supported = (
                 isinstance(evidence, list)
                 and len(evidence) >= 2
-                and all(str(anchor.get("excerpt") or "").strip() for anchor in evidence)
-            ):
-                cited_findings.add(key)
+                and all(
+                    isinstance(anchor, dict)
+                    and str(anchor.get("excerpt") or "").strip()
+                    and str(anchor["excerpt"]) in source_text
+                    for anchor in evidence
+                )
+            )
+            citation_support_by_key[key] = (
+                citation_support_by_key.get(key, True) and citation_supported
+            )
 
         version = str(prediction.get("extractor_version") or "unknown")
         latency_by_version[version].append(float(prediction.get("latency_ms") or 0))
@@ -136,6 +196,7 @@ def evaluate_predictions(
         predicted_major_characters or predicted_characters,
     )
     merge_metrics = _precision_recall(gold_links, predicted_links)
+    relationship_metrics = _precision_recall(gold_relationships, predicted_relationships)
     continuity_metrics = _precision_recall(gold_findings, predicted_findings)
     high_confidence_continuity_metrics = _precision_recall(
         gold_high_confidence_findings,
@@ -144,12 +205,26 @@ def evaluate_predictions(
     return {
         "case_count": len(cases),
         "prediction_count": len(prediction_by_id),
+        "missing_prediction_ids": sorted(case_ids - set(prediction_by_id)),
+        "prediction_coverage": (
+            round(len(prediction_by_id) / len(case_ids), 4) if case_ids else None
+        ),
         "major_character_precision": major_character_metrics["precision"],
         "major_character_recall": major_character_metrics["recall"],
         "character_precision": character_metrics["precision"],
         "character_recall": character_metrics["recall"],
         "identity_merge_precision": merge_metrics["precision"],
         "identity_merge_recall": merge_metrics["recall"],
+        "relationship_precision": relationship_metrics["precision"],
+        "relationship_recall": relationship_metrics["recall"],
+        "relationship_citation_coverage": (
+            round(sum(relationship_support_by_key.values()) / len(predicted_relationships), 4)
+            if predicted_relationships
+            else None
+        ),
+        "extraction_source_coverage": (
+            round(fully_covered_sources / len(cases), 4) if cases else None
+        ),
         "identity_merge_accuracy": (
             round(
                 len(gold_links & predicted_links) / len(gold_links | predicted_links),
@@ -163,7 +238,14 @@ def evaluate_predictions(
         "high_confidence_continuity_precision": high_confidence_continuity_metrics["precision"],
         "high_confidence_continuity_recall": high_confidence_continuity_metrics["recall"],
         "citation_coverage": (
-            round(len(cited_findings) / len(predicted_findings), 4) if predicted_findings else 1.0
+            round(sum(citation_support_by_key.values()) / len(predicted_findings), 4)
+            if predicted_findings
+            else 1.0
+        ),
+        "profile_claim_source_coverage": (
+            round(sourced_profile_claim_count / profile_claim_count, 4)
+            if profile_claim_count
+            else None
         ),
         "by_extractor_version": {
             version: {
@@ -247,6 +329,86 @@ def _precision_recall(gold: set[str], predicted: set[str]) -> dict[str, float]:
 
 def _metric_key(*parts: object) -> str:
     return "|".join(" ".join(str(part or "").split()).strip().casefold() for part in parts)
+
+
+def _relationship_key(relationship: dict[str, Any]) -> str:
+    return _metric_key(
+        relationship.get("a") or relationship.get("character_a"),
+        relationship.get("b") or relationship.get("character_b"),
+        relationship.get("type") or relationship.get("rel_type"),
+        relationship.get("from") or relationship.get("from_chapter"),
+        relationship.get("to") or relationship.get("to_chapter"),
+    )
+
+
+def _prediction_covers_source(source_text: str, coverage: object) -> bool:
+    """Verify one synthetic case supplied as one source chunk, including all batch outcomes."""
+    if not isinstance(coverage, dict) or coverage.get("complete") is not True:
+        return False
+    if coverage.get("failure_stage"):
+        return False
+    if coverage.get("source_characters") != len(source_text):
+        return False
+    chunks = coverage.get("chunks")
+    if not isinstance(chunks, list) or len(chunks) != 1:
+        return False
+    chunk = chunks[0]
+    if not isinstance(chunk, dict) or chunk.get("chunk_index") != 0:
+        return False
+    if (
+        chunk.get("length") != len(source_text)
+        or chunk.get("sha256") != hashlib.sha256(source_text.encode("utf-8")).hexdigest()
+    ):
+        return False
+    ranges = coverage.get("ranges")
+    if (
+        not isinstance(ranges, list)
+        or not ranges
+        or any(
+            not isinstance(item, dict)
+            or not isinstance(item.get("start"), int)
+            or isinstance(item.get("start"), bool)
+            or not isinstance(item.get("batch_index"), int)
+            or isinstance(item.get("batch_index"), bool)
+            for item in ranges
+        )
+    ):
+        return False
+    outcomes = coverage.get("batch_outcomes")
+    if (
+        not isinstance(outcomes, list)
+        or not outcomes
+        or any(
+            not isinstance(outcome, dict)
+            or outcome.get("status") != "succeeded"
+            or not isinstance(outcome.get("batch_index"), int)
+            or isinstance(outcome.get("batch_index"), bool)
+            for outcome in outcomes
+        )
+        or {outcome["batch_index"] for outcome in outcomes}
+        != {item.get("batch_index") for item in ranges}
+        or len({outcome["batch_index"] for outcome in outcomes}) != len(outcomes)
+    ):
+        return False
+    end = 0
+    for item in sorted(ranges, key=lambda part: part["start"]):
+        if item.get("chunk_index") != 0:
+            return False
+        start = item.get("start")
+        stop = item.get("end")
+        if (
+            isinstance(start, bool)
+            or isinstance(stop, bool)
+            or not isinstance(start, int)
+            or not isinstance(stop, int)
+            or start < 0
+            or start > end
+            or stop <= start
+            or stop > len(source_text)
+        ):
+            return False
+        end = max(end, stop)
+    return end == len(source_text)
 
 
 def _finding_key(finding: dict[str, Any]) -> str:

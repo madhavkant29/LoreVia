@@ -22,7 +22,11 @@ from app.utils.characters.extraction import (
     cluster_character_entities,
     resolve_character_reference_from_roster,
 )
-from app.utils.characters.identity import filter_character_identity_aliases
+from app.utils.characters.identity import (
+    filter_character_identity_aliases,
+    has_conflicting_title_identity,
+    partition_identity_key,
+)
 from app.utils.characters.manual import apply_manual_character_description
 from app.utils.characters.merging import merge_characters
 from app.utils.characters.partitioning import partition_character
@@ -30,6 +34,7 @@ from app.utils.characters.presentation import (
     build_character_dossier_summary,
     compose_character_description,
 )
+from app.utils.characters.profile_evidence import ground_character_profile_claims
 from app.utils.characters.similarity import (
     description_similarity,
     name_similarity,
@@ -54,6 +59,45 @@ def test_family_role_relationship_evidence_accepts_straight_and_curly_apostrophe
 
 def test_name_similarity_does_not_collapse_conflicting_honorifics():
     assert name_similarity("Mr. Samsa", "Mrs. Samsa") < 0.5
+
+
+def test_french_honorifics_keep_shared_surnames_as_distinct_identities():
+    from app.engine.character.deduplicator import names_equivalent
+
+    for left, right in (
+        ("Madame Meursault", "Monsieur Meursault"),
+        ("Mme Masson", "Monsieur Masson"),
+    ):
+        assert has_conflicting_title_identity(left, right)
+        assert partition_identity_key(left) != partition_identity_key(right)
+        assert name_similarity(left, right) < 0.5
+        assert not names_equivalent(left, [], right, [])
+        assert not names_equivalent(left, [], left.split()[-1], [])
+
+
+def test_french_titled_people_stay_separate_in_batch_clustering_and_roster_matching():
+    from app.engine.character.deduplicator import resolve_character_match_ids
+
+    names = ["Madame Meursault", "Monsieur Meursault"]
+    entities = [
+        {
+            "name": name,
+            "aliases": [],
+            "confidence": 0.92,
+            "evidence": {"mention_count": 2, "strong_mention_count": 2},
+        }
+        for name in names
+    ]
+    clustered = cluster_character_entities(entities)
+    assert {item["name"] for item in clustered} == set(names)
+
+    madame_id, monsieur_id = uuid.uuid4(), uuid.uuid4()
+    roster = [
+        (madame_id, "Madame Meursault", []),
+        (monsieur_id, "Monsieur Meursault", []),
+    ]
+    assert resolve_character_match_ids("Madame Meursault", [], roster) == [madame_id]
+    assert resolve_character_match_ids("Monsieur Meursault", [], roster) == [monsieur_id]
 
 
 def test_names_equivalent_matches_honorific_short_name_to_full_name():
@@ -179,6 +223,85 @@ async def test_partition_payload_enrichment_only_swallows_expected_extractor_fai
             aliases=[],
             evidence=evidence,
         )
+
+
+@pytest.mark.asyncio
+async def test_partition_enrichment_reviews_source_tail_without_silent_truncation(monkeypatch):
+    marker = "FINAL_SOURCE_MARKER"
+    source_text = "Gregor waited in the room. " * 12 + marker
+    seen: list[str] = []
+
+    async def capture_extraction(passage: str, **_kwargs):
+        seen.append(passage)
+        return {"characters": []}
+
+    monkeypatch.setattr(
+        character_partitioning, "extract_characters_and_relationships", capture_extraction
+    )
+    monkeypatch.setattr(character_partitioning, "count_tokens", len)
+    monkeypatch.setattr(character_partitioning.settings, "EXTRACTION_BATCH_MAX_TOKENS", 60)
+
+    await character_partitioning._build_partition_payload(
+        source=SimpleNamespace(first_chapter=1, last_seen_chapter=1, role="supporting"),
+        book_id=uuid.uuid4(),
+        user_id=uuid.uuid4(),
+        name="Gregor",
+        aliases=[],
+        evidence={
+            "snippets": [source_text],
+            "first_chapter": 1,
+            "last_seen_chapter": 1,
+            "mention_count": 12,
+        },
+    )
+
+    assert len(seen) > 1
+    assert all(len(passage) <= 60 for passage in seen)
+    assert seen[-1].endswith(marker)
+
+
+@pytest.mark.asyncio
+async def test_partition_profile_keeps_only_cited_claims_with_source_chapter(monkeypatch):
+    source_text = "Mara guarded the ledger."
+
+    async def extract_with_one_unsupported_claim(passage: str, **_kwargs):
+        raw = {
+            "name": "Mara",
+            "goal": "guard the ledger",
+            "motivations": ["seek fame"],
+            "claim_evidence": {"goal": source_text},
+        }
+        grounded, citations = ground_character_profile_claims(raw, passage)
+        return {
+            "characters": [{"name": "Mara", **grounded, "evidence": {"profile_claims": citations}}],
+            "relationships": [],
+        }
+
+    monkeypatch.setattr(
+        character_partitioning,
+        "extract_characters_and_relationships",
+        extract_with_one_unsupported_claim,
+    )
+    payload = await character_partitioning._build_partition_payload(
+        source=SimpleNamespace(first_chapter=4, last_seen_chapter=4, role="supporting"),
+        book_id=uuid.uuid4(),
+        user_id=uuid.uuid4(),
+        name="Mara",
+        aliases=[],
+        evidence={
+            "snippets": [source_text],
+            "snippet_chapters": [4],
+            "first_chapter": 4,
+            "last_seen_chapter": 4,
+            "mention_count": 1,
+        },
+    )
+
+    assert payload["goal"] == "guard the ledger"
+    assert payload["motivations"] == []
+    assert payload["analysis_metadata"]["profile_claims"] == [
+        {"field": "goal", "value": "guard the ledger", "quote": source_text, "chapter_number": 4}
+    ]
 
 
 def test_visibility_score_penalizes_phrase_like_noise():
@@ -318,6 +441,34 @@ def test_cluster_character_entities_prefers_full_name_over_repeated_given_name()
 
     assert clustered[0]["name"] == "Gregor Samsa"
     assert "Gregor" in clustered[0]["aliases"]
+
+
+def test_character_cluster_keeps_narrator_identity_evidence_from_nonprimary_batch():
+    entities = [
+        {
+            "name": "Arun Vale",
+            "confidence": 0.7,
+            "evidence": {
+                "mention_count": 1,
+                "strong_mention_count": 1,
+                "narrator_self_identification": "I told her I was Arun Vale",
+                "narrator_addressed_as": "you here, Arun Vale",
+            },
+        },
+        {
+            "name": "Arun Vale",
+            "confidence": 0.95,
+            "evidence": {"mention_count": 3, "strong_mention_count": 2},
+        },
+    ]
+
+    clustered = cluster_character_entities(entities)
+
+    assert len(clustered) == 1
+    assert clustered[0]["evidence"]["narrator_self_identification"] == (
+        "I told her I was Arun Vale"
+    )
+    assert clustered[0]["evidence"]["narrator_addressed_as"] == "you here, Arun Vale"
 
 
 def test_cluster_character_entities_keeps_title_surname_separate_from_canonical_full_name():

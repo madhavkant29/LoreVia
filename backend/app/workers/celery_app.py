@@ -170,6 +170,14 @@ celery_app.conf.update(
             "soft_time_limit": 5 * 60,
             "time_limit": 10 * 60,
         },
+        # A full Recommended Checks audit scans bounded evidence groups across
+        # the book. On a manuscript with many threads it cannot finish inside
+        # the one-minute limit used by interactive intelligence tasks.
+        "intelligence_tasks.generate_advisor_suggestions": {
+            "rate_limit": "60/m",
+            "soft_time_limit": 15 * 60,
+            "time_limit": 20 * 60,
+        },
         "intelligence_tasks.*": {
             "rate_limit": "60/m",
             "soft_time_limit": 60,

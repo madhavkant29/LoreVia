@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import uuid
 from types import SimpleNamespace
 
@@ -96,11 +97,13 @@ class _FakeDB:
         self._execute_values = list(execute_values or [])
         self.added = []
         self.commits = 0
+        self.statements = []
 
     async def get(self, *_args, **_kwargs):
         return self._get_values.pop(0)
 
     async def execute(self, *_args, **_kwargs):
+        self.statements.append(_args[0])
         return self._execute_values.pop(0)
 
     def add(self, value):
@@ -123,7 +126,11 @@ class _FakeClient:
     async def _create(self, **kwargs):
         self.calls.append(kwargs)
         content = self._contents.pop(0) if self._contents else "{}"
-        return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=content))])
+        return SimpleNamespace(
+            choices=[
+                SimpleNamespace(finish_reason="stop", message=SimpleNamespace(content=content))
+            ]
+        )
 
     async def close(self):
         self.closed = True
@@ -619,6 +626,7 @@ async def test_advisor_suggestions_collects_sorted_categories():
             _Result(scalars=[dropped]),
             _Result(scalars=[underused]),
             _Result(all_rows=recent_summaries),
+            _Result(all_rows=[]),
         ],
     )
 
@@ -646,7 +654,7 @@ async def test_advisor_suggestions_collects_sorted_categories():
 
 
 @pytest.mark.asyncio
-async def test_advisor_suggestions_uses_fallback_cards_when_heuristics_are_empty():
+async def test_advisor_suggestions_does_not_invent_findings_when_evidence_is_empty():
     book_id = uuid.uuid4()
     user_id = uuid.uuid4()
     book = SimpleNamespace(id=book_id, user_id=user_id, title="Atlas", total_chapters=5)
@@ -663,6 +671,7 @@ async def test_advisor_suggestions_uses_fallback_cards_when_heuristics_are_empty
             _Result(scalars=[]),
             _Result(scalars=[]),
             _Result(all_rows=[]),
+            _Result(all_rows=[]),
         ],
     )
 
@@ -670,22 +679,550 @@ async def test_advisor_suggestions_uses_fallback_cards_when_heuristics_are_empty
         book_id, db=db, current_user=SimpleNamespace(id=user_id)
     )
 
-    assert payload["total"] == 3
-    assert {item["source"] for item in payload["suggestions"]} == {"fallback"}
-    assert payload["meta"]["fallback_applied"] is True
+    assert payload["total"] == 0
+    assert payload["suggestions"] == []
+    assert payload["meta"]["fallback_applied"] is False
     assert payload["meta"]["proactive_audit_applied"] is False
     assert "characters" in payload["meta"]["data_gaps"]
     assert "plot threads" in payload["meta"]["data_gaps"]
 
 
 @pytest.mark.asyncio
-async def test_advisor_suggestions_adds_sparse_proactive_audit(monkeypatch):
+async def test_advisor_suggestions_show_every_stored_contradicted_thread_without_an_ai_audit():
+    book_id = uuid.uuid4()
+    user_id = uuid.uuid4()
+    book = SimpleNamespace(id=book_id, user_id=user_id, title="Atlas", total_chapters=5)
+    threads = [
+        SimpleNamespace(
+            id=uuid.uuid4(),
+            title=f"Promise {index}",
+            status="contradicted",
+            introduced_at=1,
+            last_mentioned_at=3,
+            resolved_at=None,
+            description=f"Promise {index} was contradicted.",
+            importance=8,
+        )
+        for index in range(3)
+    ]
+    db = _FakeDB(
+        execute_values=[
+            _Result(scalars=[]),
+            _Result(scalars=threads),
+            _Result(scalars=[]),
+            _Result(scalars=[]),
+            _Result(all_rows=[]),
+            _Result(scalars=[]),
+            _Result(scalars=[]),
+            _Result(scalars=[]),
+            _Result(scalars=[]),
+            _Result(all_rows=[]),
+        ]
+    )
+
+    payload = await advisor_scan_utils_module.build_advisor_suggestions_payload(
+        db=db, book=book, user_id=user_id, skip_llm=True
+    )
+
+    assert {item["id"] for item in payload["suggestions"]} == {
+        f"contradicted-{thread.id}" for thread in threads
+    }
+    assert payload["meta"]["heuristic_count"] == 3
+    assert payload["meta"]["proactive_audit_applied"] is False
+
+
+@pytest.mark.asyncio
+async def test_advisor_suggestions_count_detailed_clues_beyond_first_ten_chapters():
+    book_id = uuid.uuid4()
+    user_id = uuid.uuid4()
+    book = SimpleNamespace(id=book_id, user_id=user_id, title="Atlas", total_chapters=12)
+    db = _FakeDB(
+        execute_values=[
+            _Result(scalars=[]),
+            _Result(scalars=[]),
+            _Result(scalars=[]),
+            _Result(scalars=[]),
+            _Result(all_rows=[]),
+            _Result(scalars=[]),
+            _Result(scalars=[]),
+            _Result(scalars=[]),
+            _Result(scalars=[]),
+            _Result(
+                all_rows=[
+                    (
+                        [{"clue": f"Clue {number}", "why_it_matters": "Watch this detail"}],
+                        number,
+                        f"Chapter {number}",
+                    )
+                    for number in range(1, 13)
+                ]
+            ),
+        ]
+    )
+
+    payload = await advisor_scan_utils_module.build_advisor_suggestions_payload(
+        db=db, book=book, user_id=user_id, skip_llm=True
+    )
+
+    clue_statement = next(
+        statement for statement in db.statements if "chapter_summaries.clues" in str(statement)
+    )
+    assert "detailed" in clue_statement.compile().params.values()
+    assert payload["meta"]["clue_count"] == 12
+    assert "chapter summaries" in payload["meta"]["scan_basis"]
+    assert len(payload["suggestions"]) == 3
+    assert all("{'clue':" not in item["description"] for item in payload["suggestions"])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cached", [True, False])
+async def test_recommended_checks_page_load_uses_cached_audit_without_new_model_calls(
+    monkeypatch, cached
+):
+    book_id = uuid.uuid4()
+    user_id = uuid.uuid4()
+    book = SimpleNamespace(id=book_id, user_id=user_id, title="Atlas", total_chapters=2)
+    cache = _AsyncCache()
+    if cached:
+        cache.data[(str(book_id), "scan-cache")] = {
+            "findings": [
+                {
+                    "severity": "warning",
+                    "type": "event_conflict",
+                    "title": "Gate timing",
+                    "description": "The gate closes early.",
+                    "evidence_excerpt": "The gate closes.",
+                    "chapter_ref": 2,
+                    "action_label": "Check timing",
+                    "ask_prompt": "When did it close?",
+                }
+            ],
+            "overall_note": "One supported check.",
+        }
+
+    async def cache_version(*_args, **_kwargs):
+        return 0
+
+    def forbidden_model_call():
+        raise AssertionError("A page load must not start a paid AI audit")
+
+    _patch_route_caches(monkeypatch, cache)
+    monkeypatch.setattr(advisor_scan_utils_module, "get_book_cache_version", cache_version)
+    monkeypatch.setattr(advisor_scan_utils_module, "get_openai_client", forbidden_model_call)
+    monkeypatch.setattr(advisor.settings, "OPENAI_API_KEY", "test-key", raising=False)
+    monkeypatch.setattr(advisor.settings, "OPENAI_INTEL_MODEL", "gpt-test", raising=False)
+    monkeypatch.setattr(
+        advisor_scan_utils_module, "make_editorial_cache_key", lambda *_args: "scan-cache"
+    )
+    db = _FakeDB(
+        get_values=[book],
+        execute_values=[
+            _Result(scalars=[]),
+            _Result(scalars=[]),
+            _Result(scalars=[]),
+            _Result(scalars=[]),
+            _Result(all_rows=[]),
+            _Result(scalars=[]),
+            _Result(scalars=[]),
+            _Result(scalars=[]),
+            _Result(scalars=[]),
+            _Result(all_rows=[([], 2, "Ending")]),
+            _Result(all_rows=[(2, "Ending", "The gate closes.", [])]),
+        ],
+    )
+
+    payload = await advisor.advisor_suggestions(
+        book_id, db=db, current_user=SimpleNamespace(id=user_id)
+    )
+
+    assert payload["total"] == (1 if cached else 0)
+    assert payload["meta"]["proactive_audit_applied"] is cached
+    assert payload["meta"]["audit_groups_total"] == 1
+    assert payload["meta"]["audit_groups_completed"] == int(cached)
+    if not cached:
+        assert "Refresh checks" in payload["meta"]["audit_summary"]
+    assert db.commits == 0
+
+
+@pytest.mark.asyncio
+async def test_unconfigured_advisor_refresh_keeps_later_cached_groups(monkeypatch):
+    book_id = uuid.uuid4()
+    user_id = uuid.uuid4()
+    book = SimpleNamespace(id=book_id, user_id=user_id, title="Atlas", total_chapters=2)
+    cache = _AsyncCache(
+        {
+            (str(book_id), "scan-cached"): {
+                "findings": [],
+                "overall_note": "Cached group reviewed.",
+            }
+        }
+    )
+    _patch_route_caches(monkeypatch, cache)
+    monkeypatch.setattr(advisor.settings, "OPENAI_API_KEY", "", raising=False)
+    monkeypatch.setattr(advisor.settings, "OPENAI_INTEL_MODEL", "", raising=False)
+    monkeypatch.setattr(
+        advisor_scan_utils_module,
+        "partition_advisor_scan_evidence",
+        lambda **_kwargs: [
+            {
+                "summaries": ["Uncached evidence"],
+                "threads": [],
+                "relationships": [],
+                "world_elements": [],
+            },
+            {
+                "summaries": ["Cached evidence"],
+                "threads": [],
+                "relationships": [],
+                "world_elements": [],
+            },
+        ],
+    )
+    monkeypatch.setattr(
+        advisor_scan_utils_module,
+        "make_editorial_cache_key",
+        lambda _scope, evidence, _count: (
+            "scan-cached" if "Cached evidence" in evidence else "scan-uncached"
+        ),
+    )
+    db = _FakeDB(
+        execute_values=[
+            _Result(scalars=[]),
+            _Result(scalars=[]),
+            _Result(scalars=[]),
+            _Result(scalars=[]),
+            _Result(all_rows=[]),
+            _Result(scalars=[]),
+            _Result(scalars=[]),
+            _Result(scalars=[]),
+            _Result(scalars=[]),
+            _Result(all_rows=[]),
+            _Result(all_rows=[]),
+        ]
+    )
+
+    payload = await advisor_scan_utils_module.build_advisor_suggestions_payload(
+        db=db, book=book, user_id=user_id, force_audit=True
+    )
+
+    assert payload["meta"]["audit_groups_total"] == 2
+    assert payload["meta"]["audit_groups_completed"] == 1
+    assert payload["meta"]["proactive_audit_applied"] is True
+    assert payload["meta"]["audit_failure_category"] == "not_configured"
+    assert "1 of 2" in payload["meta"]["audit_summary"]
+    assert db.commits == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "invalid_cache_kind",
+    ["partial", "fabricated_evidence", "wrong_chapter", "malformed_shape"],
+)
+async def test_recommended_checks_rejects_invalid_cached_audit_without_paid_scan(
+    monkeypatch, invalid_cache_kind
+):
+    book_id = uuid.uuid4()
+    user_id = uuid.uuid4()
+    book = SimpleNamespace(id=book_id, user_id=user_id, title="Atlas", total_chapters=2)
+    finding = {
+        "severity": "warning",
+        "type": "event_conflict",
+        "title": "Gate timing",
+        "description": "The gate closes early.",
+        "evidence_excerpt": "The gate closes.",
+        "chapter_ref": 2,
+        "action_label": "Check timing",
+        "ask_prompt": "When did it close?",
+    }
+    cached_result = {"findings": [finding], "overall_note": "One supported check."}
+    if invalid_cache_kind == "partial":
+        cached_result["partial"] = True
+    elif invalid_cache_kind == "fabricated_evidence":
+        finding["evidence_excerpt"] = "The gate was made of crystal."
+    elif invalid_cache_kind == "wrong_chapter":
+        finding["chapter_ref"] = 999
+    else:
+        cached_result["findings"] = "not a list"
+    cache = _AsyncCache({(str(book_id), "scan-cache"): cached_result})
+
+    def forbidden_model_call():
+        raise AssertionError("A page load must not start a paid AI audit")
+
+    _patch_route_caches(monkeypatch, cache)
+    monkeypatch.setattr(advisor_scan_utils_module, "get_openai_client", forbidden_model_call)
+    monkeypatch.setattr(
+        advisor_scan_utils_module, "make_editorial_cache_key", lambda *_args: "scan-cache"
+    )
+    db = _FakeDB(
+        get_values=[book],
+        execute_values=[
+            _Result(scalars=[]),
+            _Result(scalars=[]),
+            _Result(scalars=[]),
+            _Result(scalars=[]),
+            _Result(all_rows=[]),
+            _Result(scalars=[]),
+            _Result(scalars=[]),
+            _Result(scalars=[]),
+            _Result(scalars=[]),
+            _Result(all_rows=[([], 2, "Ending")]),
+            _Result(all_rows=[(2, "Ending", "The gate closes.", [])]),
+        ],
+    )
+
+    payload = await advisor.advisor_suggestions(
+        book_id, db=db, current_user=SimpleNamespace(id=user_id)
+    )
+
+    assert payload["total"] == 0
+    assert payload["meta"]["audit_groups_total"] == 1
+    assert payload["meta"]["audit_groups_completed"] == 0
+    assert payload["meta"]["proactive_audit_applied"] is False
+    assert payload["meta"]["audit_failure_category"] == "invalid_ai_response"
+    assert cache.set_calls == []
+    assert db.commits == 0
+
+
+@pytest.mark.asyncio
+async def test_refresh_replaces_invalid_cached_audit_with_verified_result(monkeypatch):
+    book_id = uuid.uuid4()
+    user_id = uuid.uuid4()
+    book = SimpleNamespace(id=book_id, user_id=user_id, title="Atlas", total_chapters=2)
+    cache = _AsyncCache(
+        {
+            (str(book_id), "scan-cache"): {
+                "findings": [{"title": "Unsupported finding"}],
+                "overall_note": "Unverified check.",
+            }
+        }
+    )
+    scan_calls = []
+
+    async def fake_story_context(*_args, **_kwargs):
+        return "Story context"
+
+    async def fake_scan(**kwargs):
+        scan_calls.append(kwargs["source_blocks"])
+        return {
+            "findings": [
+                {
+                    "severity": "warning",
+                    "type": "event_conflict",
+                    "title": "Gate timing",
+                    "description": "The gate closes early.",
+                    "evidence_excerpt": "The gate closes.",
+                    "chapter_ref": 2,
+                    "action_label": "Check timing",
+                    "ask_prompt": "When did it close?",
+                }
+            ],
+            "overall_note": "One supported check.",
+        }
+
+    _patch_route_caches(monkeypatch, cache)
+    monkeypatch.setattr(advisor_scan_utils_module, "get_openai_client", lambda: object())
+    monkeypatch.setattr(advisor_scan_utils_module, "build_story_context", fake_story_context)
+    monkeypatch.setattr(advisor_scan_utils_module, "request_proactive_scan_result", fake_scan)
+    monkeypatch.setattr(
+        advisor_scan_utils_module, "make_editorial_cache_key", lambda *_args: "scan-cache"
+    )
+    monkeypatch.setattr(advisor.settings, "OPENAI_API_KEY", "test-key", raising=False)
+    monkeypatch.setattr(advisor.settings, "OPENAI_INTEL_MODEL", "gpt-test", raising=False)
+    db = _FakeDB(
+        execute_values=[
+            _Result(scalars=[]),
+            _Result(scalars=[]),
+            _Result(scalars=[]),
+            _Result(scalars=[]),
+            _Result(all_rows=[]),
+            _Result(scalars=[]),
+            _Result(scalars=[]),
+            _Result(scalars=[]),
+            _Result(scalars=[]),
+            _Result(all_rows=[([], 2, "Ending")]),
+            _Result(all_rows=[(2, "Ending", "The gate closes.", [])]),
+        ],
+    )
+
+    payload = await advisor_scan_utils_module.build_advisor_suggestions_payload(
+        db=db, book=book, user_id=user_id, force_audit=True
+    )
+
+    assert len(scan_calls) == 1
+    assert payload["meta"]["audit_groups_completed"] == 1
+    assert payload["meta"]["audit_failure_category"] is None
+    assert [item["title"] for item in payload["suggestions"]] == ["Gate timing"]
+    assert len(cache.set_calls) == 1
+    assert db.commits == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("evidence_kind", ["summary_without_clues", "relationship_only"])
+async def test_recommended_checks_include_groups_without_clues_or_threads(
+    monkeypatch, evidence_kind
+):
+    book_id = uuid.uuid4()
+    user_id = uuid.uuid4()
+    book = SimpleNamespace(id=book_id, user_id=user_id, title="Atlas", total_chapters=2)
+    cache = _AsyncCache()
+    cache.data[(str(book_id), "scan-cache")] = {
+        "findings": [],
+        "overall_note": "No supported checks found.",
+    }
+
+    async def cache_version(*_args, **_kwargs):
+        return 0
+
+    _patch_route_caches(monkeypatch, cache)
+    monkeypatch.setattr(advisor_scan_utils_module, "get_book_cache_version", cache_version)
+    monkeypatch.setattr(
+        advisor_scan_utils_module, "make_editorial_cache_key", lambda *_args: "scan-cache"
+    )
+    relationship = SimpleNamespace(
+        id=uuid.uuid4(),
+        character_a_id=uuid.uuid4(),
+        character_b_id=uuid.uuid4(),
+        rel_type="ally",
+        from_chapter=1,
+        description="The wardens work together.",
+        sentiment=0.5,
+    )
+    db = _FakeDB(
+        get_values=[book],
+        execute_values=[
+            _Result(scalars=[]),
+            _Result(scalars=[]),
+            _Result(scalars=[relationship] if evidence_kind == "relationship_only" else []),
+            _Result(scalars=[]),
+            _Result(all_rows=[]),
+            _Result(scalars=[]),
+            _Result(scalars=[]),
+            _Result(scalars=[]),
+            _Result(scalars=[]),
+            _Result(all_rows=[]),
+            _Result(
+                all_rows=[(2, "Ending", "The final gate closes.", [])]
+                if evidence_kind == "summary_without_clues"
+                else []
+            ),
+        ],
+    )
+
+    payload = await advisor.advisor_suggestions(
+        book_id, db=db, current_user=SimpleNamespace(id=user_id)
+    )
+
+    assert payload["meta"]["audit_groups_total"] == 1
+    assert payload["meta"]["audit_groups_completed"] == 1
+    assert payload["meta"]["proactive_audit_applied"] is True
+    assert payload["meta"]["audit_failure_category"] is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("distinct_evidence", [False, True])
+async def test_proactive_check_dedupes_shared_evidence_but_keeps_distinct_checks(
+    monkeypatch, distinct_evidence
+):
+    book_id = uuid.uuid4()
+    user_id = uuid.uuid4()
+    book = SimpleNamespace(id=book_id, user_id=user_id, title="Atlas", total_chapters=5)
+    cache = _AsyncCache()
+    finding = {
+        "severity": "warning",
+        "type": "event_conflict",
+        "title": "Gate timing",
+        "description": "The gate timing may conflict.",
+        "evidence_excerpt": "The gate closes before the travelers arrive.",
+        "chapter_ref": 2,
+        "action_label": "Check timing",
+        "ask_prompt": "When did the gate close?",
+    }
+    scan_calls = []
+
+    async def fake_story_context(*_args, **_kwargs):
+        return "Story context"
+
+    async def fake_scan(**kwargs):
+        scan_calls.append(kwargs["source_blocks"])
+        if distinct_evidence:
+            chapter = 5 if len(scan_calls) == 1 else 1
+            current = {
+                **finding,
+                "evidence_excerpt": f"Chapter {chapter} event.",
+                "chapter_ref": chapter,
+            }
+        else:
+            current = {**finding, "title": f"Gate check {len(scan_calls)}"}
+        return {
+            "findings": [current],
+            "overall_note": "Review gate timing.",
+        }
+
+    _patch_route_caches(monkeypatch, cache)
+    monkeypatch.setattr(advisor_scan_utils_module, "get_openai_client", lambda: object())
+    monkeypatch.setattr(advisor_scan_utils_module, "build_story_context", fake_story_context)
+    monkeypatch.setattr(advisor_scan_utils_module, "request_proactive_scan_result", fake_scan)
+    monkeypatch.setattr(advisor.settings, "OPENAI_API_KEY", "test-key", raising=False)
+    monkeypatch.setattr(advisor.settings, "OPENAI_INTEL_MODEL", "gpt-test", raising=False)
+    db = _FakeDB(
+        execute_values=[
+            _Result(scalars=[]),
+            _Result(scalars=[]),
+            _Result(scalars=[]),
+            _Result(scalars=[]),
+            _Result(all_rows=[]),
+            _Result(scalars=[]),
+            _Result(scalars=[]),
+            _Result(scalars=[]),
+            _Result(scalars=[]),
+            _Result(all_rows=[]),
+            _Result(
+                all_rows=[
+                    (
+                        chapter,
+                        f"Chapter {chapter}",
+                        finding["evidence_excerpt"]
+                        if chapter == 2
+                        else f"Chapter {chapter} event.",
+                        [],
+                    )
+                    for chapter in range(5, 0, -1)
+                ]
+            ),
+        ],
+    )
+
+    payload = await advisor_scan_utils_module.build_advisor_suggestions_payload(
+        db=db, book=book, user_id=user_id, force_audit=True
+    )
+
+    assert len(scan_calls) == 2
+    if distinct_evidence:
+        assert "Chapter 5 event." in " ".join(scan_calls[0])
+        assert "Chapter 1 event." in " ".join(scan_calls[1])
+    else:
+        assert all(finding["evidence_excerpt"] in " ".join(blocks) for blocks in scan_calls)
+    assert payload["meta"]["audit_groups_completed"] == 2
+    assert len(payload["suggestions"]) == (2 if distinct_evidence else 1)
+    assert all(item["id"].startswith("proactive-") for item in payload["suggestions"])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("second_group_valid", [True, False])
+async def test_advisor_suggestions_runs_proactive_audit_even_with_multiple_heuristics(
+    monkeypatch, second_group_valid
+):
     book_id = uuid.uuid4()
     user_id = uuid.uuid4()
     book = SimpleNamespace(id=book_id, user_id=user_id, title="Atlas", total_chapters=12)
     cache = _AsyncCache()
     client = _FakeClient(
-        '{"findings":[{"severity":"direction","type":"future_direction","title":"Audit thread pressure point","description":"The ferryman bargain needs a clearer payoff path before the finale.","chapter_ref":8,"action_label":"Plan the payoff","ask_prompt":"How should the ferryman bargain resolve?"}],"overall_note":"Sparse heuristics triggered a deeper audit."}'
+        '{"findings":[{"severity":"direction","type":"future_direction","title":"Audit thread pressure point","description":"The ferryman bargain needs a clearer payoff path before the finale.","evidence_excerpt":"The ferryman bargain remains unresolved after the crossing.","chapter_ref":9,"action_label":"Plan the payoff","ask_prompt":"How should the ferryman bargain resolve?"}],"overall_note":"First evidence group reviewed."}',
+        '{"findings":[{"severity":"warning","type":"event_conflict","title":"Gate timing","description":"The gate is locked before the arrival in chapter 5.","evidence_excerpt":"The gate was locked before the travelers arrived.","chapter_ref":5,"action_label":"Check timing","ask_prompt":"When was the gate locked?"}],"overall_note":"Second evidence group reviewed."}'
+        if second_group_valid
+        else "not-json",
+        *([] if second_group_valid else ["not-json"]),
+        '{"findings":[],"overall_note":"Sparse heuristics triggered a deeper audit."}',
     )
 
     async def _fake_story_context(*_args, **_kwargs):
@@ -695,8 +1232,20 @@ async def test_advisor_suggestions_adds_sparse_proactive_audit(monkeypatch):
     patch_route_dependency(monkeypatch, advisor, "AsyncOpenAI", lambda **_kwargs: client)
     monkeypatch.setattr(advisor_scan_utils_module, "get_openai_client", lambda: client)
     monkeypatch.setattr(advisor_scan_utils_module, "build_story_context", _fake_story_context)
+    cache_scopes: list[str] = []
+    progress: list[tuple[int, int]] = []
+
+    async def record_progress(completed: int, total: int) -> None:
+        progress.append((completed, total))
+
+    def record_scan_scope(scope, *_args):
+        cache_scopes.append(scope)
+        return scope
+
     monkeypatch.setattr(
-        advisor_scan_utils_module, "make_editorial_cache_key", lambda *_args: "scan-cache"
+        advisor_scan_utils_module,
+        "make_editorial_cache_key",
+        record_scan_scope,
     )
     monkeypatch.setattr(advisor.settings, "OPENAI_API_KEY", "test-key", raising=False)
     monkeypatch.setattr(advisor.settings, "OPENAI_INTEL_MODEL", "gpt-test", raising=False)
@@ -714,15 +1263,25 @@ async def test_advisor_suggestions_adds_sparse_proactive_audit(monkeypatch):
             _Result(scalars=[]),
             _Result(scalars=[]),
             _Result(scalars=[]),
-            _Result(all_rows=[(["River token"], 8, "The Bargain")]),
+            _Result(
+                all_rows=[
+                    (["River token", "Unmarked seal"], 8, "The Bargain"),
+                    (["Missing map"], 9, "The Crossing"),
+                ]
+            ),
             _Result(
                 all_rows=[
                     (
-                        8,
-                        "The Bargain",
-                        "Nora reaches the ferryman.",
-                        [{"event_title": "Deal struck"}],
+                        chapter,
+                        f"Chapter {chapter}",
+                        "The ferryman bargain remains unresolved after the crossing."
+                        if chapter == 9
+                        else "The gate was locked before the travelers arrived."
+                        if chapter == 5
+                        else f"A significant event occurs in chapter {chapter}.",
+                        [{"event_title": f"Event {chapter}"}],
                     )
+                    for chapter in range(9, 0, -1)
                 ]
             ),
             _Result(scalar=0),
@@ -731,14 +1290,346 @@ async def test_advisor_suggestions_adds_sparse_proactive_audit(monkeypatch):
         ],
     )
 
-    payload = await advisor.advisor_suggestions(book_id, db=db, current_user=user)
+    payload = await advisor_scan_utils_module.build_advisor_suggestions_payload(
+        db=db,
+        book=book,
+        user_id=user_id,
+        force_audit=True,
+        on_audit_progress=record_progress,
+    )
 
+    assert progress == [(0, 3), (1, 3), (2, 3), (3, 3)]
+    assert payload["meta"]["proactive_audit_applied"] is True
+    assert cache_scopes and all(scope.startswith("scan:v4:") for scope in cache_scopes)
+    assert any("River token" in call["messages"][1]["content"] for call in client.calls)
+    assert any("Missing map" in call["messages"][1]["content"] for call in client.calls)
+    assert payload["meta"]["fallback_applied"] is False
+    if second_group_valid:
+        assert "all 3 evidence groups" in payload["meta"]["audit_summary"]
+        assert "2 distinct supported checks" in payload["meta"]["audit_summary"]
+    else:
+        assert "2 of 3 evidence groups" in payload["meta"]["audit_summary"]
+        assert payload["meta"]["audit_failure_category"] == "invalid_ai_response"
+    assert any(item["source"] == "proactive_audit" for item in payload["suggestions"])
+    assert len(
+        [item for item in payload["suggestions"] if item["source"] == "proactive_audit"]
+    ) == (2 if second_group_valid else 1)
+    assert payload["meta"]["audit_groups_total"] == 3
+    assert payload["meta"]["audit_groups_completed"] == (3 if second_group_valid else 2)
+    assert len(cache.set_calls) == (3 if second_group_valid else 2)
+    assert client.closed is False
+
+
+@pytest.mark.asyncio
+async def test_large_advisor_scan_covers_all_thread_groups_with_bounded_parallelism(monkeypatch):
+    book_id = uuid.uuid4()
+    user_id = uuid.uuid4()
+    book = SimpleNamespace(id=book_id, user_id=user_id, title="Atlas", total_chapters=3)
+    threads = [
+        SimpleNamespace(
+            id=uuid.uuid4(),
+            title=f"Thread {index:03d}",
+            description=(
+                "Earlier terms remain in force. " * 8 + "The final promise remains unresolved."
+                if index == 164
+                else f"Evidence for thread {index:03d}."
+            ),
+            status="introduced",
+            importance=1,
+            introduced_at=1,
+            last_mentioned_at=1,
+            resolved_at=None,
+            mention_count=1,
+        )
+        for index in range(165)
+    ]
+    cache = _AsyncCache()
+    progress: list[tuple[int, int]] = []
+    seen_groups: list[str] = []
+    seen_blocks: list[str] = []
+    relationship = SimpleNamespace(
+        id=uuid.uuid4(),
+        character_a_id=uuid.uuid4(),
+        character_b_id=uuid.uuid4(),
+        rel_type="ally",
+        from_chapter=2,
+        description="They traveled together. " * 10 + "Their alliance ended at the gate.",
+        sentiment=0.5,
+    )
+    world_element = SimpleNamespace(
+        id=uuid.uuid4(),
+        name="Copper bridge",
+        element_type="place",
+        usage_count=2,
+        gap_score=None,
+        description="The crossing seemed stable. " * 10 + "The bridge was destroyed at dusk.",
+    )
+    active = 0
+    peak_active = 0
+
+    async def fake_story_context(*_args, **_kwargs):
+        return "Story context"
+
+    async def fake_scan(*, source_blocks, **_kwargs):
+        nonlocal active, peak_active
+        active += 1
+        peak_active = max(peak_active, active)
+        try:
+            await asyncio.sleep(0)
+            seen_blocks.extend(source_blocks)
+            thread_blocks = [block for block in source_blocks if block.startswith("- Thread")]
+            seen_groups.extend(thread_blocks)
+            return {"findings": [], "overall_note": thread_blocks[-1]}
+        finally:
+            active -= 1
+
+    async def record_progress(completed, total):
+        progress.append((completed, total))
+
+    _patch_route_caches(monkeypatch, cache)
+    monkeypatch.setattr(advisor_scan_utils_module, "get_openai_client", lambda: object())
+    monkeypatch.setattr(advisor_scan_utils_module, "build_story_context", fake_story_context)
+    monkeypatch.setattr(advisor_scan_utils_module, "request_proactive_scan_result", fake_scan)
+    monkeypatch.setattr(advisor.settings, "OPENAI_API_KEY", "test-key", raising=False)
+    monkeypatch.setattr(advisor.settings, "OPENAI_INTEL_MODEL", "gpt-test", raising=False)
+    monkeypatch.setattr(advisor.settings, "LLM_MAX_CONCURRENT_CALLS_PER_USER", 4, raising=False)
+    db = _FakeDB(
+        execute_values=[
+            _Result(scalars=[]),
+            _Result(scalars=threads),
+            _Result(scalars=[relationship]),
+            _Result(scalars=[world_element]),
+            _Result(all_rows=[]),
+            _Result(scalars=[]),
+            _Result(scalars=[]),
+            _Result(scalars=[]),
+            _Result(scalars=[]),
+            _Result(all_rows=[]),
+            _Result(all_rows=[]),
+            _Result(scalar=0),
+            _Result(scalar=0),
+            _Result(scalar=0),
+        ]
+    )
+
+    payload = await advisor_scan_utils_module.build_advisor_suggestions_payload(
+        db=db,
+        book=book,
+        user_id=user_id,
+        force_audit=True,
+        on_audit_progress=record_progress,
+    )
+
+    assert peak_active == 2
+    assert active == 0
+    assert progress == [(index, 21) for index in range(22)]
+    assert payload["meta"]["audit_groups_total"] == 21
+    assert payload["meta"]["audit_groups_completed"] == 21
+    assert payload["meta"]["audit_failure_category"] is None
+    assert "all 21 evidence groups" in payload["meta"]["audit_summary"]
+    assert "0 distinct supported checks" in payload["meta"]["audit_summary"]
+    assert len(cache.set_calls) == 21
+    assert {f"- Thread {index:03d}" for index in range(165)} <= {
+        block.split(" [", 1)[0] for block in seen_groups
+    }
+    assert any("The final promise remains unresolved." in block for block in seen_groups)
+    assert any("Their alliance ended at the gate." in block for block in seen_blocks)
+    assert any("The bridge was destroyed at dusk." in block for block in seen_blocks)
+
+
+@pytest.mark.asyncio
+async def test_successful_empty_proactive_audit_returns_no_padded_findings(monkeypatch):
+    book_id = uuid.uuid4()
+    user_id = uuid.uuid4()
+    book = SimpleNamespace(id=book_id, user_id=user_id, title="Atlas", total_chapters=2)
+    cache = _AsyncCache()
+    client = _FakeClient('{"findings":[],"overall_note":"No supported checks found."}')
+    long_summary = (
+        "The travelers waited by the old gate. " * 50
+        + "The final key was lost after the gate closed."
+    )
+    key_events = [{"event_title": f"Event {number} changed the route"} for number in range(5)]
+
+    async def _fake_story_context(*_args, **_kwargs):
+        return "Story context"
+
+    _patch_route_caches(monkeypatch, cache)
+    monkeypatch.setattr(advisor_scan_utils_module, "get_openai_client", lambda: client)
+    monkeypatch.setattr(advisor_scan_utils_module, "build_story_context", _fake_story_context)
+    monkeypatch.setattr(advisor.settings, "OPENAI_API_KEY", "test-key", raising=False)
+    monkeypatch.setattr(advisor.settings, "OPENAI_INTEL_MODEL", "gpt-test", raising=False)
+    db = _FakeDB(
+        execute_values=[
+            _Result(scalars=[]),
+            _Result(scalars=[]),
+            _Result(scalars=[]),
+            _Result(scalars=[]),
+            _Result(all_rows=[]),
+            _Result(scalars=[]),
+            _Result(scalars=[]),
+            _Result(scalars=[]),
+            _Result(scalars=[]),
+            _Result(all_rows=[([], 2, "Ending")]),
+            _Result(all_rows=[(2, "Ending", long_summary, key_events)]),
+        ],
+    )
+
+    payload = await advisor_scan_utils_module.build_advisor_suggestions_payload(
+        db=db, book=book, user_id=user_id, force_audit=True
+    )
+
+    assert payload["suggestions"] == []
+    assert payload["total"] == 0
     assert payload["meta"]["proactive_audit_applied"] is True
     assert payload["meta"]["fallback_applied"] is False
-    assert payload["meta"]["audit_summary"] == "Sparse heuristics triggered a deeper audit."
-    assert any(item["source"] == "proactive_audit" for item in payload["suggestions"])
-    assert cache.set_calls
-    assert client.closed is False
+    assert payload["meta"]["audit_groups_total"] == 1
+    assert payload["meta"]["audit_groups_completed"] == 1
+    assert payload["meta"]["audit_failure_category"] is None
+    assert len(cache.set_calls) == 1
+    assert len(client.calls) == 1
+    audit_prompt = client.calls[0]["messages"][1]["content"]
+    assert "The final key was lost after the gate closed." in audit_prompt
+    assert "Event 4 changed the route" in audit_prompt
+
+
+@pytest.mark.asyncio
+async def test_partial_proactive_audit_shows_verified_finding_without_caching_completion(
+    monkeypatch,
+):
+    book_id = uuid.uuid4()
+    user_id = uuid.uuid4()
+    book = SimpleNamespace(id=book_id, user_id=user_id, title="Atlas", total_chapters=2)
+    cache = _AsyncCache()
+
+    async def _fake_story_context(*_args, **_kwargs):
+        return "Story context"
+
+    async def _partial_scan(**_kwargs):
+        return {
+            "findings": [
+                {
+                    "severity": "warning",
+                    "type": "event_conflict",
+                    "title": "Check gate timing",
+                    "description": "The gate timing needs verification.",
+                    "evidence_excerpt": "The gate closes.",
+                    "chapter_ref": 2,
+                    "action_label": "Trace the gate",
+                    "ask_prompt": "When did the gate close?",
+                }
+            ],
+            "overall_note": "Some checks lacked verifiable evidence and were omitted.",
+            "partial": True,
+        }
+
+    _patch_route_caches(monkeypatch, cache)
+    monkeypatch.setattr(advisor_scan_utils_module, "get_openai_client", lambda: _FakeClient())
+    monkeypatch.setattr(advisor_scan_utils_module, "build_story_context", _fake_story_context)
+    monkeypatch.setattr(advisor_scan_utils_module, "request_proactive_scan_result", _partial_scan)
+    monkeypatch.setattr(advisor.settings, "OPENAI_API_KEY", "test-key", raising=False)
+    monkeypatch.setattr(advisor.settings, "OPENAI_INTEL_MODEL", "gpt-test", raising=False)
+    db = _FakeDB(
+        execute_values=[
+            _Result(scalars=[]),
+            _Result(scalars=[]),
+            _Result(scalars=[]),
+            _Result(scalars=[]),
+            _Result(all_rows=[]),
+            _Result(scalars=[]),
+            _Result(scalars=[]),
+            _Result(scalars=[]),
+            _Result(scalars=[]),
+            _Result(all_rows=[([], 2, "Ending")]),
+            _Result(all_rows=[(2, "Ending", "The gate closes.", [])]),
+        ],
+    )
+
+    payload = await advisor_scan_utils_module.build_advisor_suggestions_payload(
+        db=db, book=book, user_id=user_id, force_audit=True
+    )
+
+    assert [item["title"] for item in payload["suggestions"]] == ["Check gate timing"]
+    assert payload["meta"]["proactive_audit_applied"] is True
+    assert payload["meta"]["audit_groups_total"] == 1
+    assert payload["meta"]["audit_groups_completed"] == 0
+    assert payload["meta"]["audit_failure_category"] == "invalid_ai_response"
+    assert not cache.set_calls
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("failure_kind", "expected_category"),
+    [
+        ("malformed", "invalid_ai_response"),
+        ("provider_capacity", "ai_unavailable"),
+        ("slot_contention", "capacity_busy"),
+        ("monthly_budget", "budget_exhausted"),
+    ],
+)
+async def test_failed_proactive_audit_is_not_cached_as_clean_scan(
+    monkeypatch, failure_kind, expected_category
+):
+    book_id = uuid.uuid4()
+    user_id = uuid.uuid4()
+    book = SimpleNamespace(id=book_id, user_id=user_id, title="Atlas", total_chapters=2)
+    cache = _AsyncCache()
+    client = _FakeClient("not-json")
+
+    async def _fake_story_context(*_args, **_kwargs):
+        return "Story context"
+
+    _patch_route_caches(monkeypatch, cache)
+    monkeypatch.setattr(advisor_scan_utils_module, "get_openai_client", lambda: client)
+    monkeypatch.setattr(advisor_scan_utils_module, "build_story_context", _fake_story_context)
+    monkeypatch.setattr(
+        advisor_scan_utils_module, "make_editorial_cache_key", lambda *_args: "scan-cache"
+    )
+    monkeypatch.setattr(advisor.settings, "OPENAI_API_KEY", "test-key", raising=False)
+    monkeypatch.setattr(advisor.settings, "OPENAI_INTEL_MODEL", "gpt-test", raising=False)
+
+    if failure_kind in {"provider_capacity", "slot_contention", "monthly_budget"}:
+
+        async def unavailable_scan(**_kwargs):
+            if failure_kind == "slot_contention":
+                raise HTTPException(429, "LLM capacity is temporarily busy. Retry shortly.")
+            if failure_kind == "monthly_budget":
+                raise HTTPException(
+                    429, {"kind": "llm_budget", "message": "Monthly AI capacity reached."}
+                )
+            raise HTTPException(503, "LLM provider capacity is temporarily unavailable.")
+
+        monkeypatch.setattr(
+            advisor_scan_utils_module, "request_proactive_scan_result", unavailable_scan
+        )
+
+    db = _FakeDB(
+        get_values=[SimpleNamespace(id=user_id)],
+        execute_values=[
+            _Result(scalars=[]),
+            _Result(scalars=[]),
+            _Result(scalars=[]),
+            _Result(scalars=[]),
+            _Result(all_rows=[]),
+            _Result(scalars=[]),
+            _Result(scalars=[]),
+            _Result(scalars=[]),
+            _Result(scalars=[]),
+            _Result(all_rows=[([], 2, "Ending")]),
+            _Result(all_rows=[(2, "Ending", "The gate closes.", [])]),
+            _Result(scalar=0),
+            _Result(scalar=0),
+            _Result(scalar=0),
+        ],
+    )
+
+    payload = await advisor_scan_utils_module.build_advisor_suggestions_payload(
+        db=db, book=book, user_id=user_id, force_audit=True
+    )
+
+    assert payload["meta"]["audit_failure_category"] == expected_category
+    assert "0 of 1 evidence groups" in payload["meta"]["audit_summary"]
+    assert payload["meta"]["proactive_audit_applied"] is False
+    assert not cache.set_calls
 
 
 @pytest.mark.asyncio
@@ -1027,8 +1918,16 @@ async def test_manuscript_synopsis_caching(monkeypatch):
     assert payload1.synopsis == payload2.synopsis
 
 
+def _patch_fake_voice_cast_loader(monkeypatch) -> None:
+    async def load_from_fake_db(db, *, book_id):
+        return [dict(row) for row in (await db.execute(None)).mappings().all()]
+
+    patch_route_dependency(monkeypatch, advisor, "load_voice_review_characters", load_from_fake_db)
+
+
 @pytest.mark.asyncio
-async def test_voice_consistency_review_builds_character_matches(monkeypatch):
+async def test_voice_consistency_review_does_not_score_without_verified_baseline(monkeypatch):
+    _patch_fake_voice_cast_loader(monkeypatch)
     book_id = uuid.uuid4()
     user_id = uuid.uuid4()
     char_id = uuid.uuid4()
@@ -1094,7 +1993,10 @@ async def test_voice_consistency_review_builds_character_matches(monkeypatch):
     patch_route_dependency(monkeypatch, advisor, "semantic_search", _fake_semantic_search)
     patch_route_dependency(monkeypatch, advisor, "build_story_context", _fake_story_context)
     patch_route_dependency(
-        monkeypatch, advisor, "identify_character_mentions", lambda _text, rows: [rows[0]]
+        monkeypatch,
+        advisor,
+        "identify_character_mentions",
+        lambda _text, rows, **_kwargs: [rows[0]],
     )
     patch_route_dependency(
         monkeypatch, advisor, "extract_dialogue_samples_by_character", lambda *_args: {}
@@ -1127,24 +2029,28 @@ async def test_voice_consistency_review_builds_character_matches(monkeypatch):
         ],
     )
 
+    passage = (
+        "Iris says hello. " + "Quiet conversation followed. " * 180 + "Milo answered at the end."
+    )
     payload = await advisor.voice_consistency_review(
         book_id,
-        body=VoiceConsistencyRequest(text="Iris says hello.", chapter_num=3),
+        body=VoiceConsistencyRequest(text=passage, chapter_num=3),
         db=db,
         current_user=user,
         _=None,
     )
 
-    assert payload["characters_reviewed"] == ["Iris"]
-    assert payload["character_matches"][0]["character_name"] == "Iris"
-    assert payload["character_matches"][0]["closest_other_character"] == "Milo"
-    assert search_calls[0]["limit"] == 8
-    assert search_calls[0]["similarity_threshold"] == 0.28
+    assert payload["review"]["status"] == "insufficient_evidence"
+    assert payload["characters_reviewed"] == []
+    assert payload["character_matches"] == []
+    assert not search_calls
+    assert not client.calls
     assert client.closed is False
 
 
 @pytest.mark.asyncio
 async def test_voice_consistency_review_respects_selected_character(monkeypatch):
+    _patch_fake_voice_cast_loader(monkeypatch)
     book_id = uuid.uuid4()
     user_id = uuid.uuid4()
     char_id = uuid.uuid4()
@@ -1253,14 +2159,15 @@ async def test_voice_consistency_review_respects_selected_character(monkeypatch)
         _=None,
     )
 
-    assert payload["characters_reviewed"] == ["Iris"]
-    assert [item["character_name"] for item in payload["character_matches"]] == ["Iris"]
-    assert payload["warnings"] == []
+    assert payload["review"]["status"] == "insufficient_evidence"
+    assert payload["character_matches"] == []
+    assert any("Iris" in warning for warning in payload["warnings"])
     assert client.closed is False
 
 
 @pytest.mark.asyncio
 async def test_voice_consistency_review_rejects_character_from_another_book(monkeypatch):
+    _patch_fake_voice_cast_loader(monkeypatch)
     book_id = uuid.uuid4()
     user_id = uuid.uuid4()
     selected_id = uuid.uuid4()
@@ -1298,9 +2205,10 @@ async def test_voice_consistency_review_rejects_character_from_another_book(monk
 
 
 @pytest.mark.asyncio
-async def test_voice_consistency_review_warns_when_selected_character_needs_full_passage_fallback(
+async def test_voice_consistency_review_does_not_treat_unattributed_prose_as_dialogue(
     monkeypatch,
 ):
+    _patch_fake_voice_cast_loader(monkeypatch)
     book_id = uuid.uuid4()
     user_id = uuid.uuid4()
     char_id = uuid.uuid4()
@@ -1406,12 +2314,154 @@ async def test_voice_consistency_review_warns_when_selected_character_needs_full
         _=None,
     )
 
-    assert payload["characters_reviewed"] == ["Iris"]
-    assert payload["warnings"] == [
-        "Dialogue could not be confidently attributed to Iris; the review used the full submitted passage instead."
-    ]
-    assert payload["character_matches"][0]["sample_dialogue_count"] == 1
+    assert payload["review"]["status"] == "insufficient_evidence"
+    assert payload["characters_reviewed"] == []
+    assert payload["character_matches"] == []
+    assert not client.calls
     assert client.closed is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("baseline_contextual", [False, True])
+async def test_voice_consistency_review_uses_verified_external_baseline_and_caches_complete_result(
+    monkeypatch,
+    baseline_contextual,
+):
+    _patch_fake_voice_cast_loader(monkeypatch)
+    book_id = uuid.uuid4()
+    user_id = uuid.uuid4()
+    char_id = uuid.uuid4()
+    book = SimpleNamespace(id=book_id, user_id=user_id, title="Atlas", total_chapters=3)
+    user = SimpleNamespace(id=user_id)
+    db = _FakeDB(
+        get_values=[book, user],
+        execute_values=[_Result(mappings=[{"id": char_id, "name": "Iris", "aliases": []}])],
+    )
+    baseline = [
+        {
+            "chapter_number": 1,
+            "excerpt": f"I shall explain the matter carefully in the morning before we meet again at the old house beyond the quiet river every evening number {index}.",
+            **({"attribution_confidence": "contextual"} if baseline_contextual else {}),
+        }
+        for index in range(3)
+    ]
+    client = _FakeClient(
+        '{"issues":[],"overall_verdict":"No supported voice shift in this section."}'
+    )
+    cache = _AsyncCache()
+
+    async def fake_baseline(*_args, **_kwargs):
+        return baseline
+
+    async def fake_context(*_args, **_kwargs):
+        return "Stored story context"
+
+    _patch_route_caches(monkeypatch, cache)
+    patch_route_dependency(monkeypatch, advisor, "load_voice_baseline_samples", fake_baseline)
+    patch_route_dependency(monkeypatch, advisor, "build_story_context", fake_context)
+    patch_route_dependency(monkeypatch, advisor, "AsyncOpenAI", lambda **_kwargs: client)
+
+    submitted = (
+        'Iris said, "I shall explain this matter tomorrow after the council meets by the river." '
+        'Iris replied, "We should wait until every traveler has returned before deciding what happens next."'
+    )
+    payload = await advisor.voice_consistency_review(
+        book_id,
+        body=VoiceConsistencyRequest(
+            text=submitted,
+            chapter_num=2,
+            character_id=char_id,
+        ),
+        db=db,
+        current_user=user,
+        _=None,
+    )
+
+    assert payload["review"]["status"] == (
+        "partial_evidence" if baseline_contextual else "complete"
+    )
+    assert payload["characters_reviewed"] == ["Iris"]
+    assert payload["coverage"]["total_characters"] == len(submitted)
+    assert payload["baseline_evidence"][0]["baseline_attribution_confidence"] == (
+        "contextual" if baseline_contextual else "explicit"
+    )
+    if baseline_contextual:
+        assert payload["character_matches"] == []
+        assert any("no numeric voice match" in warning for warning in payload["warnings"])
+    else:
+        assert payload["character_matches"][0]["baseline_sample_size"] == 3
+    assert db.commits == 1
+    assert len(client.calls) == 1
+    assert bool(cache.set_calls) is not baseline_contextual
+
+
+@pytest.mark.asyncio
+async def test_first_person_voice_review_does_not_guess_unnamed_narrator(monkeypatch):
+    _patch_fake_voice_cast_loader(monkeypatch)
+    book_id = uuid.uuid4()
+    user_id = uuid.uuid4()
+    book = SimpleNamespace(id=book_id, user_id=user_id, title="Atlas", total_chapters=3)
+    user = SimpleNamespace(id=user_id)
+    db = _FakeDB(
+        get_values=[book, user],
+        execute_values=[_Result(mappings=[{"id": uuid.uuid4(), "name": "Iris", "aliases": []}])],
+    )
+
+    async def fake_story_context(*_args, **_kwargs):
+        return "Story context"
+
+    patch_route_dependency(monkeypatch, advisor, "build_story_context", fake_story_context)
+    payload = await advisor.voice_consistency_review(
+        book_id,
+        body=VoiceConsistencyRequest(text="I walked home.", voice_mode="first_person_narration"),
+        db=db,
+        current_user=user,
+        _=None,
+    )
+
+    assert payload["review"]["status"] == "insufficient_evidence"
+    assert payload["characters_detected"] == []
+    assert "no identity was guessed" in " ".join(payload["warnings"]).lower()
+
+
+@pytest.mark.asyncio
+async def test_first_person_voice_review_explains_missing_narration_baseline(monkeypatch):
+    _patch_fake_voice_cast_loader(monkeypatch)
+    book_id = uuid.uuid4()
+    user_id = uuid.uuid4()
+    narrator_id = uuid.uuid4()
+    book = SimpleNamespace(id=book_id, user_id=user_id, title="Atlas", total_chapters=3)
+    user = SimpleNamespace(id=user_id)
+    db = _FakeDB(
+        get_values=[book, user],
+        execute_values=[_Result(mappings=[{"id": narrator_id, "name": "Iris", "aliases": []}])],
+    )
+
+    async def fake_story_context(*_args, **_kwargs):
+        return "Story context"
+
+    async def fake_baseline(*_args, **_kwargs):
+        return []
+
+    patch_route_dependency(monkeypatch, advisor, "build_story_context", fake_story_context)
+    patch_route_dependency(monkeypatch, advisor, "load_voice_baseline_samples", fake_baseline)
+
+    payload = await advisor.voice_consistency_review(
+        book_id,
+        body=VoiceConsistencyRequest(
+            text="I crossed the square and watched the last train leave before dawn.",
+            chapter_num=2,
+            character_id=narrator_id,
+            voice_mode="first_person_narration",
+        ),
+        db=db,
+        current_user=user,
+        _=None,
+    )
+
+    assert payload["review"]["status"] == "insufficient_evidence"
+    assert "established first-person narration" in payload["review"]["overall_verdict"]
+    assert "dialogue" not in payload["review"]["overall_verdict"]
 
 
 def test_make_editorial_cache_key_varies_with_character_selection():

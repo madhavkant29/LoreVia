@@ -3245,9 +3245,11 @@ async def test_character_reprocess_routes_delegate_to_repair_workflow(monkeypatc
     db = _FakeDB()
 
     class _FakeRepairResult:
-        def __init__(self, book_id, dry_run):
+        def __init__(self, book_id, dry_run, allow_merge_safe_pairs, allow_demote_obvious_noise):
             self.book_id = book_id
             self.dry_run = dry_run
+            self.allow_merge_safe_pairs = allow_merge_safe_pairs
+            self.allow_demote_obvious_noise = allow_demote_obvious_noise
 
         def to_payload(self):
             return {
@@ -3255,18 +3257,40 @@ async def test_character_reprocess_routes_delegate_to_repair_workflow(monkeypatc
                 "dry_run": self.dry_run,
                 "planned_merges": [],
                 "planned_demotions": [],
+                "allow_merge_safe_pairs": self.allow_merge_safe_pairs,
+                "allow_demote_obvious_noise": self.allow_demote_obvious_noise,
             }
 
     class _FakeRepairJob:
-        def __init__(self, db, *, book_id, repair_run_id=None):
+        def __init__(
+            self,
+            db,
+            *,
+            book_id,
+            repair_run_id=None,
+            allow_merge_safe_pairs=True,
+            allow_demote_obvious_noise=True,
+        ):
             self.db = db
             self.book_id = book_id
+            self.allow_merge_safe_pairs = allow_merge_safe_pairs
+            self.allow_demote_obvious_noise = allow_demote_obvious_noise
 
         async def preview(self):
-            return _FakeRepairResult(book_id=str(self.book_id), dry_run=True)
+            return _FakeRepairResult(
+                book_id=str(self.book_id),
+                dry_run=True,
+                allow_merge_safe_pairs=self.allow_merge_safe_pairs,
+                allow_demote_obvious_noise=self.allow_demote_obvious_noise,
+            )
 
         async def apply(self):
-            return _FakeRepairResult(book_id=str(self.book_id), dry_run=False)
+            return _FakeRepairResult(
+                book_id=str(self.book_id),
+                dry_run=False,
+                allow_merge_safe_pairs=self.allow_merge_safe_pairs,
+                allow_demote_obvious_noise=self.allow_demote_obvious_noise,
+            )
 
     monkeypatch.setattr(character_reprocess_service, "get_owned_book", _async_value(book))
     monkeypatch.setattr(
@@ -3283,15 +3307,18 @@ async def test_character_reprocess_routes_delegate_to_repair_workflow(monkeypatc
     )
     assert preview["book_id"] == str(book.id)
     assert preview["dry_run"] is True
+    assert preview["allow_merge_safe_pairs"] is True
 
     applied = await books.apply_book_character_reprocess(
         book.id,
-        allow_merge_safe_pairs=True,
-        allow_demote_obvious_noise=True,
+        allow_merge_safe_pairs=False,
+        allow_demote_obvious_noise=False,
         db=db,
         current_user=user,
     )
     assert applied["book_id"] == str(book.id)
+    assert applied["allow_merge_safe_pairs"] is False
+    assert applied["allow_demote_obvious_noise"] is False
 
 
 @pytest.mark.asyncio

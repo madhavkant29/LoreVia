@@ -180,6 +180,25 @@ def test_known_character_prompt_block_formats_roster_and_skips_invalid_rows():
     assert character_extractor._known_character_prompt_block([]) == ""
 
 
+def test_known_character_prompt_prefers_late_roster_name_and_alias_in_source():
+    roster = [{"name": f"Filler {index}"} for index in range(30)]
+    roster.extend(
+        [
+            {"name": "Mara Vale", "aliases": ["Mara"]},
+            {"name": "Lina Moss", "aliases": []},
+        ]
+    )
+
+    prompt = character_extractor._known_character_prompt_block(
+        roster, chunk_text="Mara entered the hall. Lina Moss waited by the gate."
+    )
+
+    assert "Mara Vale [known character]" in prompt
+    assert "Lina Moss [known character]" in prompt
+    assert "Filler 23 [known character]" not in prompt
+    assert prompt.count("[known character]") == 24
+
+
 def test_contextual_entity_label_scores_exact_prefix_and_overlap(monkeypatch):
     entities = [
         SimpleNamespace(text="Mara", label_="PERSON"),

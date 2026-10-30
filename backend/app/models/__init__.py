@@ -37,6 +37,7 @@ from app.models.character import (
     CharacterRelationshipCandidate,
     CharacterState,
     CharacterSuppression,
+    VoiceReviewDecision,
 )
 from app.models.generation import BookDataGeneration
 from app.models.intelligence import (

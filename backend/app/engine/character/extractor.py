@@ -1,14 +1,19 @@
 """
-LLM character + relationship extraction with confidence-weighted traits.
-Single LLM pass extracts both — cheaper and gives shared context.
+LLM character discovery and evidence-grounded profile extraction.
 """
 
+import asyncio
 import json
 import logging
 import re
 import uuid
 from collections import Counter
+from collections.abc import Sequence
 from typing import cast
+
+import httpx
+from fastapi import HTTPException
+from openai import OpenAIError
 
 from app.core.config import settings
 from app.core.llm import complete_with_fallback
@@ -19,8 +24,29 @@ from app.engine.character.entity_filters import (
     looks_like_person_entity_name,
     person_name_shape_score,
 )
+from app.utils.characters.dialogue import (
+    follows_human_self_action,
+    has_direct_communication_attribution,
+    has_explicit_speech_attribution,
+    has_named_human_self_action,
+)
+from app.utils.characters.narrator import (
+    first_person_addressed_name,
+    first_person_self_identification,
+)
+from app.utils.characters.profile_evidence import ground_character_profile_claims
+from app.utils.llm_usage_utils import (
+    LLMIncompleteResponseError,
+    is_transient_llm_provider_error,
+    short_llm_coordination_retry_delay,
+)
 
 log = logging.getLogger("lorevia.character.extractor")
+
+
+class CharacterExtractionFormatError(ValueError):
+    """The model did not return a usable character extraction response."""
+
 
 CHARACTER_SYSTEM = """You are a careful literary extraction engine.
 
@@ -34,8 +60,10 @@ STRICT REJECTION RULES:
 - Reject names with leading sentence words that are not part of the actual name, such as "Since Hime-nee" or "With Onii-chan".
 - Reject common one-word discourse markers or random nouns like "Well", "Right", "Even", "Yeah", or "Stairs".
 - Reject title-only references unless they clearly point to a recurring individual in this passage.
-- Treat honorific variants as the same person whenever the base name matches.
+- Treat honorific variants as the same person only when the passage identifies the same individual. A shared surname alone does not prove identity: "Madame Meursault" and "Monsieur Meursault" must remain distinct when they refer to different people.
 - Never return a cleaned or canonical name unless it is directly supported by the passage text.
+- Leave physical traits, motives, fears, goals and arc fields empty when the passage does not establish them. A missing description is not an error.
+- Every nonempty profile claim requires a short verbatim quote in claim_evidence. If no such quote exists, omit the claim. Do not use a name mention alone to justify a personality or motivation.
 
 CHARACTER TYPE SUGGESTION:
 For each character, suggest their main type based on this passage:
@@ -96,6 +124,20 @@ Return ONLY valid JSON, no markdown, no commentary:
         "event": "specific event that shaped the character here",
         "impact": "how it changes or deepens them",
         "tone": "wounded|defiant|hopeful|corrupting|clarifying|etc"
+      },
+      "claim_evidence": {
+        "traits": {"hair": "exact quote supporting the hair value"},
+        "personality_tags": {"tag exactly as listed": "exact quote"},
+        "goal": "exact quote supporting the goal",
+        "motivations": {"motivation exactly as listed": "exact quote"},
+        "fears": {"fear exactly as listed": "exact quote"},
+        "lie_they_believe": "exact quote supporting the belief",
+        "backstory_wound": "exact quote supporting the backstory",
+        "arc_type": "exact quote supporting the arc type",
+        "arc_summary": "exact quote supporting the arc interpretation",
+        "archetype": "exact quote supporting the archetype",
+        "first_appearance_context": "exact quote supporting the appearance",
+        "growth_event": "exact quote supporting the event"
       }
     }
   ],
@@ -118,6 +160,33 @@ Return ONLY valid JSON, no markdown, no commentary:
 If nothing found, return {"characters": [], "relationships": []}.
 Omit null trait fields entirely.
 Return raw JSON only."""
+
+CHARACTER_DISCOVERY_SYSTEM = """You identify people and their explicit relationships in a literary passage.
+This is a discovery pass: do not write traits, goals, motivations, fears, arcs, or profile summaries.
+Include a named person even if little is known about them. Also include a recurring unnamed
+individual identified by a stable source role, such as "the warden" or "the porter", when that
+individual repeatedly acts or speaks in this passage. Keep the exact source label; do not invent a
+name, combine several people who share a role, or include a one-off generic role mention.
+Exclude places, organizations, objects, concepts, sentence starters, and fragments. Remove leading discourse words: "So Raymond" is
+"Raymond" if the text supports Raymond as a person. Do not merge people because they share a
+surname: Madame Meursault and Monsieur Meursault can be different people.
+If a first-person narrator identifies themself by name, use that name and do not add "I" as another
+character. A narrator-attributed line such as I said, "My name is Lena Moss" can establish that
+identity; another speaker's quoted "I" cannot. Do not infer identity from a shared surname or
+another person's title. Being addressed by name followed by first-person narration is only a
+tentative clue, not proof of narrator identity.
+Resolve aliases only when the passage supports the same individual. Every relationship needs a
+short exact source quote; otherwise leave it out. Use the known roster only to resolve supported
+mentions, never to invent a person absent from this passage.
+
+Return valid JSON only:
+{"characters":[{"name":"source-supported name","canonical_name":null,"aliases":[],
+"entity_type":"person","is_character":true,"confidence":0.0}],
+"relationships":[{"character_a":"name","character_b":"name","type":"snake_case",
+"shared_labels":[],"character_a_to_b_labels":[],"character_b_to_a_labels":[],
+"label_evidence":{"quote":"exact source phrase","confidence":0.0},
+"description":"brief source-grounded description"}]}.
+If nothing is found, return {"characters":[],"relationships":[]}."""
 
 MENTION_VERIFIER_SYSTEM = """You verify whether candidate mentions in story passages refer to actual people/characters.
 
@@ -143,6 +212,34 @@ Return ONLY valid JSON:
 """
 
 
+def collect_character_discovery_hints(chunk_text: str) -> tuple[list[str], list[str]]:
+    """Collect the strict and review hints supplied to character discovery."""
+    candidate_names = _candidate_names(chunk_text)
+    review_names = _candidate_names(chunk_text, allow_review_singletons=True)
+    review_names.extend(
+        token
+        for token in dict.fromkeys(SINGLE_NAME_RE.findall(chunk_text))
+        if len(token) == 3
+        and person_name_shape_score(token) >= 0
+        and _candidate_viability_band(chunk_text, token, allow_review=True) is not None
+    )
+    review_names.extend(
+        token
+        for token in dict.fromkeys(DIGIT_SUFFIX_NAME_RE.findall(chunk_text))
+        if person_name_shape_score(token) >= 0
+        and _candidate_viability_band(chunk_text, token, allow_review=True) is not None
+    )
+    known_hint_names = {_normalize_name(name) for name in candidate_names}
+    distinct_review_names: list[str] = []
+    for name in review_names:
+        normalized_hint = _normalize_name(name)
+        if not normalized_hint or normalized_hint in known_hint_names:
+            continue
+        known_hint_names.add(normalized_hint)
+        distinct_review_names.append(name)
+    return candidate_names, distinct_review_names
+
+
 async def extract_characters_and_relationships(
     chunk_text: str,
     *,
@@ -151,83 +248,131 @@ async def extract_characters_and_relationships(
     known_characters: list[dict] | None = None,
     usage_db=None,
     language: str | None = None,
+    discovery_only: bool = False,
 ) -> dict:
-    candidate_names = _candidate_names(chunk_text)
+    candidate_names, review_names = collect_character_discovery_hints(chunk_text)
     candidate_hint = (
         "\n\nPotential person names seen in this passage:\n- "
-        + "\n- ".join(candidate_names[:24])
+        + "\n- ".join(candidate_names)
         + "\nUse them only if they are actually people in the passage."
         if candidate_names
         else ""
     )
-    roster_hint = _known_character_prompt_block(known_characters)
-    raw = await complete_with_fallback(
-        system=CHARACTER_SYSTEM,
-        user=f"{chunk_text[:12000]}{candidate_hint}{roster_hint}",
-        openai_model=settings.OPENAI_EXTRACT_MODEL,
-        gemini_model=settings.GEMINI_EXTRACT_MODEL,
-        temperature=0.1,
-        max_tokens=3000,
-        response_format={"type": "json_object"},
-        usage_feature="character_relationship_extraction",
-        usage_user_id=user_id,
-        usage_book_id=book_id,
+    if review_names:
+        candidate_hint += (
+            "\n\nUncertain capitalized references to verify (some may be places, "
+            "titles, or ordinary words; never promote by capitalization alone):\n- "
+            + "\n- ".join(review_names)
+        )
+    roster_hint = _known_character_prompt_block(known_characters, chunk_text=chunk_text)
+    prompt = f"{chunk_text}{candidate_hint}{roster_hint}"
+    parsed = None
+    retry_instruction = ""
+    for attempt in range(2):
+        try:
+            raw = await complete_with_fallback(
+                system=(CHARACTER_DISCOVERY_SYSTEM if discovery_only else CHARACTER_SYSTEM),
+                user=prompt + retry_instruction,
+                openai_model=settings.OPENAI_EXTRACT_MODEL,
+                gemini_model=settings.GEMINI_EXTRACT_MODEL,
+                temperature=0.1,
+                max_tokens=3000,
+                response_format={"type": "json_object"},
+                require_complete_output=True,
+                usage_feature="character_relationship_extraction",
+                usage_user_id=user_id,
+                usage_book_id=book_id,
+                usage_db=usage_db,
+                language=language,
+            )
+        except LLMIncompleteResponseError as exc:
+            if attempt:
+                raise CharacterExtractionFormatError(
+                    "character_extraction_incomplete_response"
+                ) from exc
+            retry_instruction = (
+                "\nValidation feedback: The previous answer was cut off. Return a shorter, "
+                "complete JSON object with every supported person and relationship."
+            )
+            continue
+        except HTTPException as exc:
+            delay = short_llm_coordination_retry_delay(exc)
+            if attempt or delay is None:
+                raise
+            await asyncio.sleep(delay)
+            continue
+        except (OpenAIError, httpx.HTTPError, TimeoutError) as exc:
+            if attempt or not is_transient_llm_provider_error(exc):
+                raise
+            await asyncio.sleep(0.25)
+            continue
+        try:
+            candidate = json.loads(raw)
+        except (TypeError, json.JSONDecodeError):
+            candidate = None
+        if _valid_character_extraction_payload(candidate):
+            parsed = candidate
+            break
+        log.warning("character_extraction_invalid_response attempt=%s", attempt + 1)
+        retry_instruction = (
+            "\nValidation feedback: Return one complete JSON object with characters and "
+            "relationships arrays. Each character needs a nonempty name; each relationship "
+            "needs nonempty character_a and character_b. Use empty arrays when no supported "
+            "people or relationships occur in the passage. No markdown or commentary."
+        )
+    if parsed is None:
+        raise CharacterExtractionFormatError("character_extraction_invalid_response")
+
+    rejected_characters: list[dict] = []
+    characters = _clean_character_entries(
+        parsed.get("characters", []),
+        candidate_names,
+        chunk_text,
+        rejected_characters=rejected_characters,
+    )
+    relationships = parsed.get("relationships", [])
+    characters = _augment_with_named_mentions(
+        chunk_text,
+        characters,
+        candidate_names,
+        rejected_characters=rejected_characters,
+    )
+    characters = await _apply_contextual_mention_verification(
+        chunk_text,
+        characters,
+        rejected_characters=rejected_characters,
+        user_id=user_id,
+        book_id=book_id,
         usage_db=usage_db,
         language=language,
     )
-    try:
-        parsed = json.loads(raw)
-        rejected_characters: list[dict] = []
-        characters = _clean_character_entries(
-            parsed.get("characters", []),
-            candidate_names,
-            chunk_text,
-            rejected_characters=rejected_characters,
-        )
-        relationships = parsed.get("relationships", [])
-        characters = _augment_with_named_mentions(
-            chunk_text,
-            characters,
-            candidate_names,
-            rejected_characters=rejected_characters,
-        )
-        characters = await _apply_contextual_mention_verification(
-            chunk_text,
-            characters,
-            rejected_characters=rejected_characters,
-            user_id=user_id,
-            book_id=book_id,
-            usage_db=usage_db,
-            language=language,
-        )
-        characters = _apply_anti_merge_hints(chunk_text, characters)
-        return {
-            "characters": characters,
-            "relationships": relationships,
-            "rejected_characters": rejected_characters,
-        }
-    except json.JSONDecodeError:
-        rejected_characters: list[dict] = []
-        characters = _augment_with_named_mentions(
-            chunk_text,
-            [],
-            candidate_names,
-            rejected_characters=rejected_characters,
-        )
-        characters = await _apply_contextual_mention_verification(
-            chunk_text,
-            characters,
-            rejected_characters=rejected_characters,
-            user_id=user_id,
-            book_id=book_id,
-            usage_db=usage_db,
-            language=language,
-        )
-        return {
-            "characters": _apply_anti_merge_hints(chunk_text, characters),
-            "relationships": [],
-            "rejected_characters": rejected_characters,
-        }
+    characters = _apply_anti_merge_hints(chunk_text, characters)
+    return {
+        "characters": characters,
+        "relationships": relationships,
+        "rejected_characters": rejected_characters,
+    }
+
+
+def _valid_character_extraction_payload(candidate: object) -> bool:
+    """Reject incomplete JSON shape before it can masquerade as an empty extraction."""
+    if not isinstance(candidate, dict):
+        return False
+    characters = candidate.get("characters")
+    relationships = candidate.get("relationships")
+    if not isinstance(characters, list) or not isinstance(relationships, list):
+        return False
+    if any(
+        not isinstance(character, dict) or not str(character.get("name") or "").strip()
+        for character in characters
+    ):
+        return False
+    return not any(
+        not isinstance(relationship, dict)
+        or not str(relationship.get("character_a") or "").strip()
+        or not str(relationship.get("character_b") or "").strip()
+        for relationship in relationships
+    )
 
 
 async def fallback_character_mentions(
@@ -285,8 +430,10 @@ async def fallback_character_mentions(
     }
 
 
-def _known_character_prompt_block(known_characters: list[dict] | None) -> str:
-    lines: list[str] = []
+def _known_character_prompt_block(
+    known_characters: list[dict] | None, *, chunk_text: str = ""
+) -> str:
+    ranked_lines: list[tuple[int, int, str]] = []
     for item in known_characters or []:
         if not isinstance(item, dict):
             continue
@@ -306,17 +453,31 @@ def _known_character_prompt_block(known_characters: list[dict] | None) -> str:
             parts.append(f"role: {role}")
         if summary:
             parts.append(f"summary: {summary[:180]}")
-        lines.append(" | ".join(parts))
-    if not lines:
+        direct_mentions = len(_find_name_mentions(chunk_text, name)) if chunk_text else 0
+        alias_mentions = (
+            sum(len(_find_name_mentions(chunk_text, alias)) for alias in aliases)
+            if chunk_text
+            else 0
+        )
+        ranked_lines.append(
+            (
+                2 if direct_mentions else 1 if alias_mentions else 0,
+                direct_mentions + alias_mentions,
+                " | ".join(parts),
+            )
+        )
+    if not ranked_lines:
         return ""
+    ranked_lines.sort(key=lambda item: (item[0], item[1]), reverse=True)
+    lines = [line for _source_rank, _mentions, line in ranked_lines[:24]]
     return (
         "\n\nKnown story roster. Prefer resolving mentions to these existing characters when the passage supports it. "
-        "Do not invent canon names beyond the passage.\n- " + "\n- ".join(lines[:24])
+        "Do not invent canon names beyond the passage.\n- " + "\n- ".join(lines)
     )
 
 
 HONORIFIC_RE = re.compile(
-    r"\b(?:Mr|Mrs|Ms|Miss|Dr|Lady|Lord|Sir)\.?\s+[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?\b"
+    r"\b(?:Mr|Mrs|Ms|Miss|Madame|Monsieur|Dr|Lady|Lord|Sir)\.?\s+[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?\b"
 )
 FULL_NAME_RE = re.compile(
     r"\b[A-Z][a-z]+(?:[-'][A-Za-z]+)?(?:\s+[A-Z][a-z]+(?:[-'][A-Za-z]+)?){1,2}\b"
@@ -325,6 +486,7 @@ PARTICLE_NAME_RE = re.compile(
     r"\b(?:[Ll]e|[Ll]a|[Ll]es|[Dd]e|[Dd]u|[Dd]es|[Vv]an|[Vv]on)\s+[A-Z][a-z]+(?:[-'][A-Za-z]+)?(?:\s+[A-Z][a-z]+(?:[-'][A-Za-z]+)?){0,2}\b"
 )
 SINGLE_NAME_RE = re.compile(r"\b[A-Z][a-z]{2,}\b")
+DIGIT_SUFFIX_NAME_RE = re.compile(r"\b[A-Z][a-z]+-\d+\b")
 NAME_STOPWORDS = {
     "Chapter",
     "Prologue",
@@ -383,6 +545,8 @@ CHARACTER_CONTEXT_HINTS = {
     "mrs",
     "ms",
     "miss",
+    "madame",
+    "monsieur",
     "dr",
 }
 SINGLE_NAME_NON_PERSON_SUFFIXES = ("ing", "edly", "edly", "ness")
@@ -463,6 +627,7 @@ ACTION_VERB_CONTEXT = {
     "woke",
     "watched",
     "walked",
+    "paced",
     "stepped",
     "moved",
     "stood",
@@ -484,8 +649,12 @@ ACTION_VERB_CONTEXT = {
     "saw",
     "heard",
     "felt",
+    "texted",
+    "descended",
 }
-MAX_AUTO_AUGMENTED_CHARACTERS = 10
+SUBJECT_ACTION_RE = re.compile(
+    rf"^\s+(?:(?:{'|'.join(sorted(ACTION_VERB_CONTEXT))})\b|broke\s+(?:his|her|their)\b)"
+)
 MIN_CHARACTER_CONFIDENCE = 0.78
 MIN_BORDERLINE_CONFIDENCE = 0.55
 SAVE_SINGLE_MENTION_CONFIDENCE = 0.90
@@ -511,6 +680,7 @@ FRAGMENT_PREFIXES = (
     "where",
     "with",
 )
+DISCOURSE_NAME_PREFIXES = {"presently", "so"}
 TITLE_ONLY_WORDS = {
     "doctor",
     "professor",
@@ -528,6 +698,11 @@ TITLE_ONLY_WORDS = {
     "brother",
     "mother",
     "father",
+    "madame",
+    "mme",
+    "mademoiselle",
+    "mlle",
+    "monsieur",
 }
 TITLE_PREFIXES = (
     "assistant professor",
@@ -540,6 +715,11 @@ TITLE_PREFIXES = (
     "sir",
     "lady",
     "lord",
+    "madame",
+    "mme",
+    "mademoiselle",
+    "mlle",
+    "monsieur",
 )
 GENERIC_PROFILE_PHRASES = {
     "appearance not yet described",
@@ -697,7 +877,7 @@ def _single_token_subject_action(after: str) -> bool:
     lowered = after.casefold()
     return bool(
         re.match(
-            r"^\s+(?:said|asked|replied|called|told|whispered|shouted|muttered|smiled|laughed|sighed|nodded|stared|looked|turned|answered|cried|screamed|warned|snapped|grinned|awoke|woke|watched|walked|stepped|moved|stood|sat|rose|opened|closed|reached|grabbed|held|took|came|went|ran|hurried|followed|glanced|noticed|saw|heard|felt)\b",
+            SUBJECT_ACTION_RE,
             lowered,
         )
     )
@@ -1028,48 +1208,103 @@ async def _verify_review_candidates_with_llm(
             }
         )
 
-    raw = await complete_with_fallback(
-        system=MENTION_VERIFIER_SYSTEM,
-        user=json.dumps(
-            {"passage": source_text[:4000], "candidates": request_items}, ensure_ascii=True
-        ),
-        openai_model=settings.OPENAI_EXTRACT_MODEL,
-        gemini_model=settings.GEMINI_EXTRACT_MODEL,
-        temperature=0.0,
-        max_tokens=1200,
-        response_format={"type": "json_object"},
-        usage_feature="character_mention_verification",
-        usage_user_id=user_id,
-        usage_book_id=book_id,
-        usage_db=usage_db,
-        language=language,
-    )
+    results: dict[str, dict] = {}
+    for start in range(0, len(request_items), 8):
+        batch = request_items[start : start + 8]
+        expected_ids = {item["id"] for item in batch}
+        if len(expected_ids) != len(batch) or not all(expected_ids):
+            raise CharacterExtractionFormatError("mention_verifier_invalid_candidate_ids")
+        prompt = json.dumps(
+            {"source_length_chars": len(source_text), "candidates": batch},
+            ensure_ascii=True,
+        )
+        for attempt in range(2):
+            try:
+                raw = await complete_with_fallback(
+                    system=MENTION_VERIFIER_SYSTEM,
+                    user=prompt
+                    + (
+                        "\nValidation feedback: Return valid JSON with exactly one results item "
+                        "for every requested candidate id, including uncertain results as null."
+                        if attempt
+                        else ""
+                    ),
+                    openai_model=settings.OPENAI_EXTRACT_MODEL,
+                    gemini_model=settings.GEMINI_EXTRACT_MODEL,
+                    temperature=0.0,
+                    max_tokens=1200,
+                    response_format={"type": "json_object"},
+                    require_complete_output=True,
+                    usage_feature="character_mention_verification",
+                    usage_user_id=user_id,
+                    usage_book_id=book_id,
+                    usage_db=usage_db,
+                    language=language,
+                )
+            except LLMIncompleteResponseError as exc:
+                if attempt:
+                    raise CharacterExtractionFormatError(
+                        "mention_verifier_incomplete_response"
+                    ) from exc
+                continue
+            try:
+                verified = _parse_mention_verifier_results(raw, expected_ids)
+            except CharacterExtractionFormatError:
+                log.warning(
+                    "mention_verifier_invalid_response batch=%s attempt=%s",
+                    start // 8 + 1,
+                    attempt + 1,
+                )
+                if attempt:
+                    raise
+            else:
+                results.update(verified)
+                break
+    return results
+
+
+def _parse_mention_verifier_results(raw: str, expected_ids: set[str]) -> dict[str, dict]:
+    """Require a grounded decision or explicit uncertainty for every requested mention."""
     try:
         parsed = json.loads(raw)
-    except json.JSONDecodeError:
-        return {}
+    except (TypeError, json.JSONDecodeError) as exc:
+        raise CharacterExtractionFormatError("mention_verifier_invalid_json") from exc
+    if not isinstance(parsed, dict) or not isinstance(parsed.get("results"), list):
+        raise CharacterExtractionFormatError("mention_verifier_invalid_shape")
 
     results: dict[str, dict] = {}
-    for item in parsed.get("results", []):
+    for item in parsed["results"]:
         if not isinstance(item, dict):
-            continue
+            raise CharacterExtractionFormatError("mention_verifier_invalid_item")
         candidate_id = str(item.get("id") or "").strip()
-        if not candidate_id:
-            continue
+        if candidate_id not in expected_ids or candidate_id in results:
+            raise CharacterExtractionFormatError("mention_verifier_invalid_candidate_id")
+        is_person = item.get("is_person")
+        if "is_person" not in item or (is_person is not None and not isinstance(is_person, bool)):
+            raise CharacterExtractionFormatError("mention_verifier_invalid_person_decision")
         raw_confidence = item.get("confidence")
+        if isinstance(raw_confidence, bool):
+            raise CharacterExtractionFormatError("mention_verifier_invalid_confidence")
         try:
             confidence = float(raw_confidence) if raw_confidence is not None else None
-        except (TypeError, ValueError):
-            confidence = None
-        is_person_raw = item.get("is_person")
-        is_person_like = is_person_raw if isinstance(is_person_raw, bool) else None
+        except (TypeError, ValueError) as exc:
+            raise CharacterExtractionFormatError("mention_verifier_invalid_confidence") from exc
+        if confidence is not None and not 0 <= confidence <= 1:
+            raise CharacterExtractionFormatError("mention_verifier_invalid_confidence")
+        if any(
+            item.get(field) is not None and not isinstance(item[field], str)
+            for field in ("canonical_name_or_null", "reason")
+        ):
+            raise CharacterExtractionFormatError("mention_verifier_invalid_explanation")
         results[candidate_id] = {
             "used": True,
-            "is_person_like": is_person_like,
+            "is_person_like": is_person,
             "confidence": confidence,
             "canonical_name": _clean_verifier_reason(item.get("canonical_name_or_null")),
             "reason": _clean_verifier_reason(item.get("reason")),
         }
+    if set(results) != expected_ids:
+        raise CharacterExtractionFormatError("mention_verifier_incomplete_results")
     return results
 
 
@@ -1095,7 +1330,7 @@ async def _apply_contextual_mention_verification(
         candidate_id = f"candidate-{index}"
         traits = cast(
             dict[str, object],
-            character.get("traits") if isinstance(character.get("traits"), dict) else {},
+            (character.get("traits") if isinstance(character.get("traits"), dict) else {}),
         )
         aliases = [
             str(alias).strip() for alias in (character.get("aliases") or []) if str(alias).strip()
@@ -1268,7 +1503,6 @@ def _augment_with_named_mentions(
     }
     known = {name for name in existing_names | existing_aliases if name}
 
-    promoted = 0
     for candidate in candidates or _candidate_names(chunk_text):
         normalized = _normalize_name(candidate)
         if not normalized or normalized in known:
@@ -1319,9 +1553,6 @@ def _augment_with_named_mentions(
             }
         )
         known.add(normalized)
-        promoted += 1
-        if promoted >= MAX_AUTO_AUGMENTED_CHARACTERS:
-            break
     return characters
 
 
@@ -1367,13 +1598,37 @@ def _candidate_names(text: str, *, allow_review_singletons: bool = False) -> lis
         for full_name in full_names
         if (words := re.findall(r"[A-Za-z][A-Za-z'-]*", full_name))
     }
+    surname_prefixes: dict[str, set[str]] = {}
+    for full_name in full_names:
+        words = re.findall(r"[A-Za-z][A-Za-z'-]*", full_name)
+        if len(words) >= 2:
+            surname_prefixes.setdefault(words[-1].casefold(), set()).add(
+                " ".join(words[:-1]).casefold()
+            )
+    ambiguous_shared_surnames = {
+        surname for surname, prefixes in surname_prefixes.items() if len(prefixes) > 1
+    }
+    first_name_suffixes: dict[str, set[str]] = {}
+    for full_name in full_names:
+        words = re.findall(r"[A-Za-z][A-Za-z'-]*", full_name)
+        if len(words) >= 2:
+            first_name_suffixes.setdefault(words[0].casefold(), set()).add(
+                " ".join(words[1:]).casefold()
+            )
+    ambiguous_shared_first_names = {
+        first_name for first_name, suffixes in first_name_suffixes.items() if len(suffixes) > 1
+    }
 
     singles = [
         token
-        for token in SINGLE_NAME_RE.findall(text)
+        # A token inside a full-name span is not an independent single-name
+        # mention; only keep it when it also appears outside that span.
+        for token in SINGLE_NAME_RE.findall(masked_full_name_text)
         if token not in NAME_STOPWORDS
         and token.casefold() not in COMMON_NON_NAME_WORDS
         and token.lower() not in {"the", "this", "that"}
+        and (allow_review_singletons or token.casefold() not in ambiguous_shared_surnames)
+        and (allow_review_singletons or token.casefold() not in ambiguous_shared_first_names)
         and not _appears_as_nonpossessive_apostrophe_fragment(text, token)
         and not (
             token in full_name_last_tokens
@@ -1395,7 +1650,7 @@ def _candidate_names(text: str, *, allow_review_singletons: bool = False) -> lis
     deduped: list[str] = []
     seen: set[str] = set()
     for name in candidates:
-        cleaned = " ".join(name.split()).strip(" .,:;!?\"'")
+        cleaned = _clean_name_fragment(" ".join(name.split()).strip(" .,:;!?\"'"))
         normalized = _normalize_name(cleaned)
         words = re.findall(r"[A-Za-z][A-Za-z'-]*", cleaned)
         viability_band = (
@@ -1406,11 +1661,25 @@ def _candidate_names(text: str, *, allow_review_singletons: bool = False) -> lis
         if not cleaned or not normalized or normalized in seen:
             continue
         if not _looks_like_character_name(cleaned, text):
-            if not (
-                len(words) == 1
-                and viability_band is not None
-                and looks_like_person_entity_name(cleaned)
-            ):
+            # A one-off full name can be source-grounded without meeting the
+            # stricter automatic-promotion threshold. Keep it as a discovery
+            # hint for the model/verifier; this does not make it a character.
+            if len(words) >= 2:
+                viability_band = _candidate_viability_band(text, cleaned, allow_review=True)
+                # Surnames such as Voss receive a plural-shape penalty even
+                # when the surrounding prose establishes a person. Let strong
+                # contextual evidence rescue the hint, not the shape alone.
+                if not (
+                    first_person_self_identification(text, cleaned)
+                    or (viability_band is not None and looks_like_person_entity_name(cleaned))
+                    or (
+                        viability_band == "accept"
+                        and _has_name_support(text, cleaned)
+                        and _has_character_context(text, cleaned)
+                    )
+                ):
+                    continue
+            elif not (viability_band is not None and looks_like_person_entity_name(cleaned)):
                 continue
         elif len(words) == 1 and viability_band == "reject":
             continue
@@ -1432,7 +1701,10 @@ def _normalize_name(name: str | None) -> str:
 
 def _clean_name_fragment(name: str) -> str:
     parts = name.strip().split()
-    while parts and parts[0].casefold() in FRAGMENT_PREFIXES:
+    while parts and (
+        parts[0].casefold() in FRAGMENT_PREFIXES
+        or (len(parts) > 1 and parts[0].casefold() in DISCOURSE_NAME_PREFIXES)
+    ):
         parts.pop(0)
     return " ".join(parts).strip(" .,:;!?\"'")
 
@@ -1511,18 +1783,34 @@ def _mention_support_score(source_text: str, name: str) -> tuple[int, int]:
         context_after = source_text[end : min(len(source_text), end + 48)]
         if _mention_has_person_context(context_before, context_after):
             strong_mentions += 1
+    if first_person_self_identification(source_text, name):
+        strong_mentions = max(strong_mentions, 1)
     return len(mentions), strong_mentions
 
 
 def _build_evidence(source_text: str, name: str, traits: dict, aliases: list[str]) -> dict:
     mention_count, strong_mentions = _mention_support_score(source_text, name)
+    self_identification = first_person_self_identification(source_text, name)
+    addressed_name = first_person_addressed_name(source_text, name)
     alias_mentions = 0
     mention_snippets = _evidence_snippets(source_text, name)
+    has_attributed_speech = has_explicit_speech_attribution(source_text, name)
+    has_direct_communication = has_direct_communication_attribution(source_text, name)
+    has_human_self_action = has_named_human_self_action(source_text, name)
     for alias in aliases:
         alias_count, alias_strong = _mention_support_score(source_text, alias)
         alias_mentions += alias_count
         strong_mentions += alias_strong
         mention_snippets.extend(_evidence_snippets(source_text, alias))
+        has_attributed_speech = has_attributed_speech or has_explicit_speech_attribution(
+            source_text, alias
+        )
+        has_direct_communication = has_direct_communication or has_direct_communication_attribution(
+            source_text, alias
+        )
+        has_human_self_action = has_human_self_action or has_named_human_self_action(
+            source_text, alias
+        )
     total_mentions = mention_count + alias_mentions
     has_description = any(
         isinstance(value, dict) and value.get("value") for value in traits.values()
@@ -1531,9 +1819,45 @@ def _build_evidence(source_text: str, name: str, traits: dict, aliases: list[str
         "mention_count": total_mentions,
         "strong_mention_count": strong_mentions,
         "has_dialogue_or_action": strong_mentions >= 1,
+        "has_attributed_speech": has_attributed_speech,
+        "has_direct_communication": has_direct_communication,
+        "has_human_self_action": has_human_self_action,
+        "ambiguous_full_name_fragment": _ambiguous_full_name_fragment(source_text, name),
         "has_physical_description": has_description,
         "appears_multiple_times": total_mentions >= 2,
         "snippets": mention_snippets[:3],
+        **({"narrator_self_identification": self_identification} if self_identification else {}),
+        **({"narrator_addressed_as": addressed_name} if addressed_name else {}),
+    }
+
+
+def _ambiguous_full_name_fragment(source_text: str, name: str) -> bool:
+    """Hold a shared first name or surname that could name several people."""
+    if len(re.findall(r"[A-Za-z][A-Za-z'-]*", name)) != 1:
+        return False
+    return name.casefold() in ambiguous_full_name_fragments([source_text])
+
+
+def ambiguous_full_name_fragments(source_texts: Sequence[str]) -> set[str]:
+    """Find first names and surnames shared by distinct full names across batches."""
+    prefixes_by_surname: dict[str, set[str]] = {}
+    suffixes_by_first_name: dict[str, set[str]] = {}
+    for source_text in source_texts:
+        for full_name in [*FULL_NAME_RE.findall(source_text), *HONORIFIC_RE.findall(source_text)]:
+            words = re.findall(r"[A-Za-z][A-Za-z'-]*", full_name)
+            if len(words) < 2 or words[0].casefold() in DISCOURSE_NAME_PREFIXES:
+                continue
+            prefixes_by_surname.setdefault(words[-1].casefold(), set()).add(
+                " ".join(words[:-1]).casefold()
+            )
+            suffixes_by_first_name.setdefault(words[0].casefold(), set()).add(
+                " ".join(words[1:]).casefold()
+            )
+    return {
+        name
+        for groups in (prefixes_by_surname, suffixes_by_first_name)
+        for name, variations in groups.items()
+        if len(variations) > 1
     }
 
 
@@ -1668,7 +1992,7 @@ def _clean_character_entries(
 
         rejection_reason = _reject_obvious_bad_name(cleaned_name)
         if rejection_reason:
-            log.info("Rejected extracted character '%s': %s", raw_name, rejection_reason)
+            log.info("Rejected extracted character: %s", rejection_reason)
             _record_rejected_character(
                 rejected_characters,
                 stage="llm_clean",
@@ -1678,9 +2002,16 @@ def _clean_character_entries(
             )
             continue
 
-        if normalized not in candidate_norms and not _looks_like_character_name(
-            cleaned_name, source_text
-        ):
+        name_shape_supported = _looks_like_character_name(cleaned_name, source_text)
+        contextual_band = (
+            _candidate_viability_band(source_text, cleaned_name, allow_review=True)
+            if not name_shape_supported
+            else None
+        )
+        contextual_person = contextual_band == "accept" or (
+            contextual_band == "review" and confidence >= 0.7
+        )
+        if normalized not in candidate_norms and not name_shape_supported and not contextual_person:
             _record_rejected_character(
                 rejected_characters,
                 stage="llm_clean",
@@ -1692,7 +2023,8 @@ def _clean_character_entries(
         if (
             normalized in candidate_norms
             and person_name_shape_score(cleaned_name) < 1
-            and not _looks_like_character_name(cleaned_name, source_text)
+            and not name_shape_supported
+            and not contextual_person
         ):
             _record_rejected_character(
                 rejected_characters,
@@ -1703,10 +2035,8 @@ def _clean_character_entries(
             )
             continue
 
-        traits = cast(
-            dict[str, object], item.get("traits") if isinstance(item.get("traits"), dict) else {}
-        )
-        arc_summary = _sanitize_summary(item.get("arc_summary"))
+        grounded_claims, profile_evidence = ground_character_profile_claims(item, source_text)
+        traits = grounded_claims["traits"]
 
         aliases = []
         for alias in item.get("aliases") or []:
@@ -1719,7 +2049,10 @@ def _clean_character_entries(
                 and alias_norm != normalized
                 and _contains_supported_subspan(raw_alias, cleaned_alias, source_text)
                 and not _reject_obvious_bad_name(cleaned_alias)
-                and _looks_like_character_name(cleaned_alias, source_text)
+                and (
+                    _looks_like_character_name(cleaned_alias, source_text)
+                    or _candidate_viability_band(source_text, cleaned_alias) == "accept"
+                )
             ):
                 aliases.append(cleaned_alias)
 
@@ -1742,21 +2075,23 @@ def _clean_character_entries(
                 canonical_name = ""
 
         evidence = _build_evidence(source_text, cleaned_name, traits, aliases)
+        evidence["profile_claims"] = profile_evidence
 
         cleaned.append(
             {
                 **item,
+                **grounded_claims,
                 "name": cleaned_name,
                 "canonical_name": cleaned_name,
                 "aliases": list(dict.fromkeys(aliases)),
                 "entity_type": "person" if entity_type == "unknown" else entity_type,
                 "confidence": confidence,
-                "goal": _sanitize_summary(item.get("goal")),
-                "lie_they_believe": _sanitize_summary(item.get("lie_they_believe")),
-                "backstory_wound": _sanitize_summary(item.get("backstory_wound")),
-                "arc_type": _sanitize_summary(item.get("arc_type")),
-                "arc_summary": arc_summary,
-                "archetype": _sanitize_summary(item.get("archetype")),
+                "goal": _sanitize_summary(grounded_claims.get("goal")),
+                "lie_they_believe": _sanitize_summary(grounded_claims.get("lie_they_believe")),
+                "backstory_wound": _sanitize_summary(grounded_claims.get("backstory_wound")),
+                "arc_type": _sanitize_summary(grounded_claims.get("arc_type")),
+                "arc_summary": _sanitize_summary(grounded_claims.get("arc_summary")),
+                "archetype": _sanitize_summary(grounded_claims.get("archetype")),
                 "mention_count": evidence["mention_count"],
                 "evidence": evidence,
                 "rejection_reason": None,
@@ -1773,9 +2108,11 @@ def _has_character_context(text: str, name: str) -> bool:
 
     escaped = re.escape(name.casefold())
     context_patterns = [
+        rf"\b(?:i\s+am|my\s+name\s+is)\s+{escaped}\b",
+        rf"\b{escaped}\b\s*,\s*(?:my|his|her|their)\s+(?:mother|father|aunt|uncle|sister|brother)\b",
         rf"\b{escaped}\b\s+(?:said|asked|replied|called|told|whispered|shouted|muttered)\b",
         rf"\b(?:said|asked|replied|called|told|whispered|shouted|muttered)\s+\b{escaped}\b",
-        rf"\b(?:mr|mrs|ms|miss|dr|lord|lady|sir|professor|captain)\.?\s+{escaped}\b",
+        rf"\b(?:mr|mrs|ms|miss|madame|monsieur|dr|lord|lady|sir|professor|captain|inspector|detective|officer|judge)\.?\s+{escaped}\b",
         rf"\b{escaped}'s\b",
         rf"\b{escaped}\b\s+(?:brother|sister|father|mother|uncle|aunt|teacher|doctor|captain)\b",
         rf"\b(?:brother|sister|father|mother|uncle|aunt|teacher|doctor|captain)\s+{escaped}\b",
@@ -1803,6 +2140,8 @@ def _has_name_support(text: str, name: str) -> bool:
             strong_mentions += 1
 
     if multi_word:
+        if first_person_self_identification(text, name):
+            return True
         if person_name_shape_score(name) >= 3:
             return strong_mentions >= 1 or non_sentence_start_mentions >= 1 or len(mentions) >= 2
         return strong_mentions >= 1 or len(mentions) >= 2
@@ -1818,7 +2157,18 @@ def _has_name_support(text: str, name: str) -> bool:
 
 
 def _find_name_mentions(text: str, name: str) -> list[tuple[int, int]]:
-    pattern = re.compile(rf"(?<![A-Za-z]){re.escape(name)}(?![A-Za-z])")
+    # Unnamed role references may start a sentence as "The warden" and recur
+    # mid-sentence as "the warden". Keep single names case-sensitive so a
+    # character named Will does not absorb ordinary uses of "will".
+    article_led_role = bool(re.match(r"(?:the|a|an)\s+\S", name, flags=re.IGNORECASE))
+    pattern = re.compile(
+        # A short canonical name is not evidence for a distinct person when
+        # it occurs only as the prefix of a longer name (Alice Smith) or a
+        # hyphenated name (Alice-Marie). Keep possessives such as Alice's.
+        rf"(?<![A-Za-z]){re.escape(name)}"
+        r"(?![A-Za-z]|-[A-Za-z]|\s+(?-i:[A-Z])[\w'’-]*)",
+        flags=re.IGNORECASE if article_led_role else 0,
+    )
     return [(match.start(), match.end()) for match in pattern.finditer(text)]
 
 
@@ -1838,9 +2188,11 @@ def _mention_has_person_context(before: str, after: str) -> bool:
         any(word in CHARACTER_CONTEXT_HINTS for word in before_tail + after_head)
         or any(word in ACTION_VERB_CONTEXT for word in before_tail + after_head)
         or "'" in after[:2]
+        or follows_human_self_action(after)
         or bool(
             re.match(
-                r"^[, ]+(said|asked|replied|called|told|smiled|laughed|sighed)\b", after.casefold()
+                r"^[, ]+(said|asked|replied|called|told|smiled|laughed|sighed)\b",
+                after.casefold(),
             )
         )
     )
@@ -1856,6 +2208,8 @@ def _allow_auto_augmentation(
     mentions = _find_name_mentions(text, name)
     if not mentions:
         return False
+    if len(words) >= 2 and first_person_self_identification(text, name):
+        return True
     strong_mentions = 0
     non_sentence_start_mentions = 0
     for start, end in mentions:

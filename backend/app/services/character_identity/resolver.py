@@ -12,6 +12,9 @@ from app.services.character_identity.classification import CandidateKind, classi
 from app.services.character_identity.merge import add_character_alias, record_identity_action
 from app.services.character_identity.normalization import first_name_token, normalize_name
 from app.services.character_identity.suppression import suppress_candidate
+from app.utils.characters.candidates import recurring_role_review_supported
+from app.utils.characters.identity import has_explicit_full_name_alias_link
+from app.utils.characters.serialization import is_protected_character
 
 
 @dataclass(frozen=True)
@@ -144,6 +147,24 @@ async def resolve_character_mention(
             ]
             if len(full_name_matches) == 1:
                 full_name_match = full_name_matches[0]
+                entity = evidence.get("entity") if isinstance(evidence.get("entity"), dict) else {}
+                known_alias = any(
+                    normalize_name(alias) == normalized for alias in (full_name_match.aliases or [])
+                )
+                explicit_link = has_explicit_full_name_alias_link(
+                    full_name_match.name,
+                    aliases=entity.get("aliases")
+                    if isinstance(entity.get("aliases"), list)
+                    else [],
+                    evidence=evidence,
+                    reason_codes=evidence.get("resolver_reasons")
+                    if isinstance(evidence.get("resolver_reasons"), list)
+                    else [],
+                )
+                if not (known_alias or explicit_link) or is_protected_character(full_name_match):
+                    return IdentityResolutionResult(
+                        "needs_review", None, 0.5, "single_token_alias_link_unverified"
+                    )
                 await add_character_alias(
                     db,
                     character=full_name_match,
@@ -164,6 +185,10 @@ async def resolve_character_mention(
                 )
 
     if kind == CandidateKind.ROLE_DESCRIPTOR:
+        if recurring_role_review_supported(surface_text, evidence):
+            return IdentityResolutionResult(
+                "needs_review", None, 0.7, "recurring_role_person_needs_review"
+            )
         await suppress_candidate(
             db,
             book_id=book_id,
@@ -225,6 +250,15 @@ async def reconcile_pending_first_name_alias_candidates(
         if len(matches) != 1:
             continue
         target = matches[0]
+        if is_protected_character(target):
+            continue
+        if not has_explicit_full_name_alias_link(
+            target.name,
+            aliases=candidate.aliases,
+            evidence=candidate.evidence,
+            reason_codes=candidate.reason_codes,
+        ):
+            continue
         alias = await add_character_alias(
             db,
             character=target,

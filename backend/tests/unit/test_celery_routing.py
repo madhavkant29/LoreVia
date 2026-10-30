@@ -1,10 +1,12 @@
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
+from app.services.advisor_suggestion_jobs_service import ADVISOR_SUGGESTION_HARD_LIMIT
 from app.utils.billing_utils import PRIORITY_QUEUE_NAMES
 from app.utils.queue_utils import queue_for_user
 from app.workers.celery_app import celery_app
 from app.workers.queues.queues import TASK_QUEUES
+from app.workers.tasks.intelligence_tasks import generate_advisor_suggestions_task
 
 
 def test_architect_user_routes_to_priority_queue(monkeypatch):
@@ -47,3 +49,14 @@ def test_export_cleanup_and_public_asset_backfill_are_scheduled():
 
     assert "maintenance_tasks.cleanup_expired_manuscript_exports" in scheduled_tasks
     assert "maintenance_tasks.backfill_public_assets" in scheduled_tasks
+
+
+def test_advisor_suggestions_scan_has_longer_effective_limit_than_interactive_tasks():
+    """Multi-group audits must not inherit the one-minute intelligence limit."""
+    assert generate_advisor_suggestions_task.soft_time_limit == 15 * 60
+    assert generate_advisor_suggestions_task.time_limit == 20 * 60
+    assert (
+        generate_advisor_suggestions_task.time_limit
+        == ADVISOR_SUGGESTION_HARD_LIMIT.total_seconds()
+    )
+    assert celery_app.conf.task_annotations["intelligence_tasks.*"]["soft_time_limit"] == 60

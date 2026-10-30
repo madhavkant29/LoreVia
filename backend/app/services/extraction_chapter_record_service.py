@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import re
+import uuid
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, or_, select
 
 from app.core.storage import upload_text
 from app.models.book import Book, Chapter
@@ -123,8 +124,19 @@ async def replace_chapter_extraction_records(
     book_id,
     chapter_number: int,
     replace_generated_intelligence: bool = False,
-) -> None:
+) -> set[uuid.UUID]:
     """Clear replaceable rows only after new provider output is available."""
+    previous_character_ids = set(
+        (
+            await db.scalars(
+                select(CharacterMention.matched_character_id).where(
+                    CharacterMention.book_id == book_id,
+                    CharacterMention.chapter_number == chapter_number,
+                    CharacterMention.matched_character_id.is_not(None),
+                )
+            )
+        ).all()
+    )
     await db.execute(
         delete(CharacterMention).where(
             CharacterMention.book_id == book_id,
@@ -138,6 +150,11 @@ async def replace_chapter_extraction_records(
             CharacterCandidate.status.in_(
                 (CHARACTER_CANDIDATE_PENDING, CHARACTER_CANDIDATE_SUPPRESSED)
             ),
+            CharacterCandidate.rejection_reason.is_distinct_from("author_marked_place"),
+            or_(
+                CharacterCandidate.source_batch_key.is_(None),
+                ~CharacterCandidate.source_batch_key.like("manual-demote:%"),
+            ),
         )
     )
     await db.execute(
@@ -150,10 +167,13 @@ async def replace_chapter_extraction_records(
                     CHARACTER_RELATIONSHIP_CANDIDATE_SUPPRESSED,
                 )
             ),
+            func.array_position(
+                CharacterRelationshipCandidate.reason_codes, "author_attached_endpoint"
+            ).is_(None),
         )
     )
     if not replace_generated_intelligence:
-        return
+        return previous_character_ids
     await db.execute(
         delete(CharacterRelationship).where(
             CharacterRelationship.book_id == book_id,
@@ -169,3 +189,4 @@ async def replace_chapter_extraction_records(
             CharacterState.at_chapter == chapter_number,
         )
     )
+    return previous_character_ids

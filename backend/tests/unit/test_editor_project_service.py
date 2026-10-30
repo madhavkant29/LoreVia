@@ -171,7 +171,13 @@ async def test_reset_generated_data_preserves_anchor_characters(db):
         book_id=book.id,
         name="Curated",
         first_chapter=1,
-        analysis_metadata={"user_curated": True},
+        analysis_metadata={
+            "user_curated": True,
+            "user_reviewed": True,
+            "review_note": "Keep this identity separate.",
+            "review_audit": [{"action": "character_curated"}],
+            "profile_claims": [{"field": "goal", "value": "generated claim"}],
+        },
     )
     reviewed_char = Character(
         id=uuid.uuid4(),
@@ -210,6 +216,19 @@ async def test_reset_generated_data_preserves_anchor_characters(db):
     assert generated_char.id not in remaining_ids, "Generated character should be deleted"
     assert counts["characters_deleted"] == 1
     assert counts["characters_preserved"] == 4
+    assert curated_char.analysis_metadata == {
+        "user_curated": True,
+        "user_reviewed": True,
+        "review_note": "Keep this identity separate.",
+        "review_audit": [{"action": "character_curated"}],
+    }
+
+    await reset_generated_data(db, book)
+    remaining_ids_after_second_reset = set(
+        (await db.execute(select(Character.id).where(Character.book_id == book.id))).scalars()
+    )
+    assert curated_char.id in remaining_ids_after_second_reset
+    assert curated_char.analysis_metadata["review_note"] == "Keep this identity separate."
 
 
 @pytest.mark.asyncio
@@ -662,6 +681,85 @@ async def test_full_rebuild_keeps_active_chunks_until_atomic_promotion(db):
         .all()
     )
     assert promoted_texts == ["new staged text"]
+    generation = await db.get(BookDataGeneration, uuid.UUID(rebuild_run_id))
+    assert generation.chapter_state_snapshot is None
+
+
+@pytest.mark.asyncio
+async def test_failed_rebuild_restores_prior_chapter_readiness_and_analysis_state(db):
+    user_id = await _create_user(db)
+    book = Book(
+        id=uuid.uuid4(),
+        user_id=user_id,
+        title="Recoverable draft",
+        format="manual",
+        s3_key="recoverable.txt",
+        status="ready",
+        is_editor_project=True,
+        total_chapters=1,
+    )
+    prior_analysis = {
+        "status": "succeeded",
+        "generated_modes": ["detailed"],
+        "source_integrity": {"text_present": True},
+    }
+    chapter = Chapter(
+        id=uuid.uuid4(),
+        book_id=book.id,
+        number=1,
+        s3_key="recoverable-ch1.txt",
+        word_count=100,
+        processed=True,
+        analysis_state=prior_analysis,
+    )
+    db.add_all([book, chapter])
+    await db.flush()
+    db.add(
+        BookChunk(
+            book_id=book.id,
+            chapter_id=chapter.id,
+            chunk_index=0,
+            text="previous generated chapter text",
+        )
+    )
+    await db.commit()
+
+    from app.services.editor_project_service import fail_rebuild_if_active, prepare_rebuild
+
+    rebuild_run_id = await prepare_rebuild(db, book)
+    await db.refresh(chapter)
+    assert chapter.processed is False
+    assert chapter.analysis_state == {}
+    generation = await db.get(BookDataGeneration, uuid.UUID(rebuild_run_id))
+    assert (
+        generation.chapter_state_snapshot["chapters"][str(chapter.id)]["analysis_state"]
+        == prior_analysis
+    )
+
+    assert (
+        await fail_rebuild_if_active(db, book, expected_rebuild_run_id="a-different-run") is False
+    )
+    assert chapter.processed is False
+    chapter.processed = True
+    chapter.analysis_state = {
+        "status": "succeeded",
+        "generated_modes": ["short"],
+    }
+    await db.commit()
+    assert await fail_rebuild_if_active(
+        db, book, expected_rebuild_run_id=rebuild_run_id, error="provider unavailable"
+    )
+    await db.commit()
+    await db.refresh(book)
+    await db.refresh(chapter)
+    await db.refresh(generation)
+
+    assert book.status == "ready"
+    assert chapter.processed is True
+    assert chapter.analysis_state == prior_analysis
+    assert generation.status == "failed"
+    assert generation.chapter_state_snapshot is None
+    assert "rebuild_run_id" not in book.writer_workspace["processing"]
 
 
 @pytest.mark.asyncio
@@ -771,6 +869,50 @@ async def test_fail_rebuild_if_active_clears_only_matching_run(db):
 
 
 @pytest.mark.asyncio
+async def test_finalized_generation_rejects_stale_failure_and_cancellation(db):
+    user_id = await _create_user(db)
+    rebuild_run_id = uuid.uuid4().hex
+    book = Book(
+        id=uuid.uuid4(),
+        user_id=user_id,
+        title="Promoted draft",
+        format="manual",
+        s3_key="promoted.txt",
+        status="processing",
+        is_editor_project=True,
+        writer_workspace={"processing": {"rebuild_run_id": rebuild_run_id, "status": "processing"}},
+    )
+    generation = BookDataGeneration(
+        id=uuid.UUID(rebuild_run_id),
+        book_id=book.id,
+        rebuild_run_id=rebuild_run_id,
+        status="active",
+        reason="manual_reprocess",
+    )
+    db.add_all([book, generation])
+    await db.commit()
+
+    from app.services.editor_project_service import (
+        cancel_rebuild_for_manual_edit,
+        fail_rebuild_if_active,
+    )
+
+    assert not await fail_rebuild_if_active(
+        db, book, expected_rebuild_run_id=rebuild_run_id, error="stale worker failure"
+    )
+    assert not await cancel_rebuild_for_manual_edit(
+        db, book, reason="A chapter changed after promotion."
+    )
+    await db.refresh(book)
+    await db.refresh(generation)
+
+    assert generation.status == "active"
+    assert book.status == "processing"
+    assert book.writer_workspace["processing"]["rebuild_run_id"] == rebuild_run_id
+    assert "last_failed_rebuild_run_id" not in book.writer_workspace.get("reprocess", {})
+
+
+@pytest.mark.asyncio
 async def test_cancel_rebuild_releases_unfinished_manual_reservations(db):
     user_id = await _create_user(db)
     book = Book(
@@ -809,6 +951,89 @@ async def test_cancel_rebuild_releases_unfinished_manual_reservations(db):
 
     assert reservation.status == "released"
     assert book.writer_workspace["processing"]["status"] == "failed"
+
+
+@pytest.mark.asyncio
+async def test_cancelled_rebuild_restores_unchanged_chapter_but_not_edited_or_reorganized(db):
+    user_id = await _create_user(db)
+    book = Book(
+        id=uuid.uuid4(),
+        user_id=user_id,
+        title="Edited during rebuild",
+        format="manual",
+        s3_key="edited-draft.txt",
+        status="ready",
+        is_editor_project=True,
+        total_chapters=3,
+    )
+    unchanged = Chapter(
+        id=uuid.uuid4(),
+        book_id=book.id,
+        number=1,
+        s3_key="unchanged-ch1.txt",
+        content_version=1,
+        word_count=100,
+        processed=True,
+        analysis_state={"status": "succeeded", "generated_modes": ["detailed"]},
+    )
+    edited = Chapter(
+        id=uuid.uuid4(),
+        book_id=book.id,
+        number=2,
+        s3_key="edited-ch2.txt",
+        content_version=1,
+        word_count=100,
+        processed=True,
+        analysis_state={"status": "succeeded", "generated_modes": ["detailed"]},
+    )
+    reorganized = Chapter(
+        id=uuid.uuid4(),
+        book_id=book.id,
+        number=3,
+        s3_key="reorganized-ch3.txt",
+        content_version=1,
+        structure_version=0,
+        title="Before reorganization",
+        word_count=100,
+        processed=True,
+        analysis_state={"status": "succeeded", "generated_modes": ["detailed"]},
+    )
+    db.add_all([book, unchanged, edited, reorganized])
+    await db.commit()
+
+    from app.services.editor_project_service import (
+        cancel_rebuild_for_manual_edit,
+        prepare_rebuild,
+    )
+
+    rebuild_run_id = await prepare_rebuild(db, book)
+    edited.content_version = 2
+    edited.analysis_state = {"status": "pending"}
+    reorganized.structure_version = 1
+    reorganized.title = "After reorganization"
+    reorganized.analysis_state = {"status": "pending"}
+    await db.commit()
+
+    assert await cancel_rebuild_for_manual_edit(
+        db, book, reason="The manuscript changed during reprocessing."
+    )
+    await db.commit()
+    await db.refresh(unchanged)
+    await db.refresh(edited)
+    await db.refresh(reorganized)
+    generation = await db.get(BookDataGeneration, uuid.UUID(rebuild_run_id))
+
+    assert unchanged.processed is True
+    assert unchanged.analysis_state == {
+        "status": "succeeded",
+        "generated_modes": ["detailed"],
+    }
+    assert edited.processed is False
+    assert edited.analysis_state == {"status": "pending"}
+    assert reorganized.processed is False
+    assert reorganized.analysis_state == {"status": "pending"}
+    assert generation.status == "failed"
+    assert generation.chapter_state_snapshot is None
 
 
 @pytest.mark.asyncio

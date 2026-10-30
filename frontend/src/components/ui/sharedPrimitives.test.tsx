@@ -132,6 +132,7 @@ describe("shared accessible primitives", () => {
       />,
     )
     const trigger = container?.querySelector("button") as HTMLButtonElement
+    trigger.focus()
     await pointerDown(trigger)
 
     expect(trigger.getAttribute("aria-expanded")).toBe("true")
@@ -141,6 +142,7 @@ describe("shared accessible primitives", () => {
     await act(async () => {
       menu?.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))
       await Promise.resolve()
+      await new Promise((resolve) => window.setTimeout(resolve, 0))
     })
     expect(document.querySelector('[role="menu"]')).toBeNull()
     expect(document.activeElement).toBe(trigger)

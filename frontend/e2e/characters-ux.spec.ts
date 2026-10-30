@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test"
-import type { Character } from "@/types/character"
+import type { Character, CharacterCandidate } from "@/types/character"
 import { installMockApi } from "./support/mockApi"
 import { criticalAccessibilityViolations } from "./support/accessibility"
 
@@ -30,6 +30,96 @@ test("character load failures offer retry instead of an empty cast", async ({ pa
   failed = false
   await page.getByRole("button", { name: "Retry character roster" }).click()
   await expect(page.getByRole("heading", { name: "Gregor", exact: true })).toBeVisible()
+})
+
+test("review queue can inspect candidates beyond the sidebar's first eight", async ({ page }) => {
+  await page.goto(route)
+  const review = await page.evaluate(async () =>
+    (await fetch("/api/v1/books/book-1/character-review")).json(),
+  ) as { candidates: CharacterCandidate[] }
+  const candidates = Array.from({ length: 10 }, (_, index) => ({
+    ...review.candidates[0],
+    id: `candidate-${index + 1}`,
+    proposed_name: `Candidate ${index + 1}`,
+    raw_name: `Candidate ${index + 1}`,
+  }))
+  await page.route("**/api/v1/books/book-1/character-review?**", (request) =>
+    request.fulfill({ json: { ...review, candidates } }),
+  )
+  await page.reload()
+  await expect(page.getByRole("heading", { name: "Gregor", exact: true })).toBeVisible()
+  await page.getByRole("button", { name: "Open menu", exact: true }).click()
+  await page.getByRole("button", { name: "Open review queue", exact: true }).click()
+  await expect(page.getByText("1 of 10 candidates")).toBeVisible()
+  for (let index = 1; index < 10; index += 1) {
+    await page.getByRole("button", { name: "Next candidate" }).click()
+  }
+  await expect(page.getByText("10 of 10 candidates")).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Candidate 10", exact: true })).toBeVisible()
+  await expect(page.getByRole("button", { name: "Next candidate" })).toBeDisabled()
+})
+
+test("character profile displays current source quotes and hides stale claims", async ({ page }) => {
+  await page.goto(route)
+  await expect(page.getByRole("heading", { name: "Gregor", exact: true })).toBeVisible()
+  const characters = await page.evaluate(async () => (await fetch("/api/v1/books/book-1/characters")).json()) as Character[]
+  const gregor = characters.find((item) => item.name === "Gregor")!
+  gregor.goal = "Protect Grete"
+  gregor.analysis_metadata = {
+    ...gregor.analysis_metadata,
+    profile_claims: [
+      { field: "goal", value: "Protect Grete", quote: "I promised to protect Grete.", chapter_number: 2 },
+      { field: "goal", value: "Win the race", quote: "I will win the race.", chapter_number: 1 },
+    ],
+  }
+  await page.route("**/api/v1/books/book-1/characters", (request) => request.fulfill({ json: characters }))
+  await page.reload()
+  await expect(page.getByRole("heading", { name: "Source-backed profile claims" })).toBeVisible()
+  await expect(page.getByText("I promised to protect Grete.")).toBeVisible()
+  await expect(page.getByText("I will win the race.")).toHaveCount(0)
+})
+
+test("character mention counts distinguish verified names from legacy estimates", async ({ page }) => {
+  await page.goto(route)
+  await expect(page.getByRole("heading", { name: "Gregor", exact: true })).toBeVisible()
+  await expect(page.getByText("16 estimated mentions")).toBeVisible()
+
+  const characters = await page.evaluate(async () =>
+    (await fetch("/api/v1/books/book-1/characters")).json(),
+  ) as Character[]
+  const gregor = characters.find((item) => item.name === "Gregor")!
+  gregor.analysis_metadata = {
+    ...gregor.analysis_metadata,
+    mention_count_basis: "source_positions",
+  }
+  await page.route("**/api/v1/books/book-1/characters", (request) =>
+    request.fulfill({ json: characters }),
+  )
+  await page.reload()
+  await expect(page.getByText("16 named mentions")).toBeVisible()
+  await page.getByRole("tab", { name: "Mentions" }).click()
+  await expect(page.getByText("Named mentions", { exact: true })).toBeVisible()
+  await expect(page.getByText(/not pronouns or unnamed references/)).toBeVisible()
+})
+
+test("unknown optional profile details do not appear as continuity alerts", async ({ page }) => {
+  await page.goto(route)
+  const characters = await page.evaluate(async () => (await fetch("/api/v1/books/book-1/characters")).json()) as Character[]
+  const gregor = characters.find((item) => item.name === "Gregor")!
+  gregor.description = null
+  gregor.goal = null
+  gregor.motivations = []
+  gregor.trait_state = {}
+  gregor.arc_summary = null
+  gregor.arc_tracker = undefined
+  await page.route("**/api/v1/books/book-1/characters", (request) => request.fulfill({ json: characters }))
+  await page.reload()
+  await expect(page.getByRole("heading", { name: "Gregor", exact: true })).toBeVisible()
+  await page.getByRole("button", { name: "Details", exact: true }).click()
+  await expect(page.getByRole("heading", { name: "Continuity alerts 0" })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Profile coverage" })).toBeVisible()
+  await expect(page.getByText("No character-specific continuity alerts are open.")).toBeVisible()
+  await expect(page.getByText("Unknown traits are not continuity errors.", { exact: false })).toBeVisible()
 })
 
 test("character editing preserves a failed save and can retry", async ({ page }) => {
@@ -192,6 +282,33 @@ test("repair preview failure prevents applying a plan until retry succeeds", asy
   failed = false
   await page.getByRole("button", { name: "Retry repair preview" }).click()
   await expect(page.getByRole("button", { name: "Apply repair plan", exact: true })).toBeEnabled()
+})
+
+test("repair option switches reach both preview and apply requests", async ({ page }) => {
+  await page.goto(route)
+  await expect(page.getByRole("heading", { name: "Gregor", exact: true })).toBeVisible()
+  await page.getByRole("button", { name: "Open menu", exact: true }).click()
+  await page.getByRole("button", { name: "Open repair workspace", exact: true }).click()
+  await expect(page.getByRole("button", { name: "Apply repair plan", exact: true })).toBeEnabled()
+  await page.getByLabel("Allow safe duplicate merges").uncheck()
+  await page.getByLabel("Allow obvious-noise demotions").uncheck()
+
+  const previewRequest = page.waitForRequest((request) =>
+    request.method() === "GET" &&
+    request.url().includes("/character-review/reprocess?") &&
+    request.url().includes("allow_merge_safe_pairs=false") &&
+    request.url().includes("allow_demote_obvious_noise=false"),
+  )
+  await page.getByRole("button", { name: "Refresh preview", exact: true }).click()
+  await previewRequest
+  const applyRequest = page.waitForRequest((request) =>
+    request.method() === "POST" &&
+    request.url().includes("/character-review/reprocess?") &&
+    request.url().includes("allow_merge_safe_pairs=false") &&
+    request.url().includes("allow_demote_obvious_noise=false"),
+  )
+  await page.getByRole("button", { name: "Apply repair plan", exact: true }).click()
+  await applyRequest
 })
 
 test("character evidence failure offers an effective retry", async ({ page }) => {

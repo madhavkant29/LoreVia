@@ -162,6 +162,7 @@ function suggestionsMeta(overrides: Record<string, unknown> = {}) {
 }
 
 beforeEach(() => {
+  window.history.replaceState({}, "", "/")
   getBookMock.mockReset()
   advisorGreetingMock.mockReset()
   advisorSuggestionsMock.mockReset()
@@ -261,6 +262,15 @@ afterEach(() => {
 })
 
 describe("AdvisorPage", () => {
+  it("opens recommended checks from a project overview deep link", async () => {
+    window.history.replaceState({}, "", "/book-1/advisor?tab=scan")
+    renderPage()
+    await flushUi()
+    await flushUi()
+
+    expect(container?.querySelector("#advisor-tab-scan")?.getAttribute("aria-selected")).toBe("true")
+    expect(container?.querySelector("#advisor-scan-panel")?.hasAttribute("hidden")).toBe(false)
+  })
   it("preserves existing hidden checks when adopting account-specific storage", async () => {
     localStorage.setItem("lorevia-advisor-scan:book-1", JSON.stringify({ dismissed: ["scan-1"], intentional: [] }))
     renderPage()
@@ -326,6 +336,119 @@ describe("AdvisorPage", () => {
     expect(container?.textContent).toContain("Fallback analysis")
     expect(container?.textContent).toContain("Editorial focus pass")
     expect(container?.textContent).toContain("Find the best pressure point")
+  })
+
+  it("shows verified scan evidence and partial AI audit coverage", async () => {
+    advisorSuggestionsMock.mockResolvedValue({
+      suggestions: [{
+        id: "proactive-1", type: "event_conflict", severity: "warning",
+        title: "Bridge timing", description: "Check the bridge sequence.",
+        evidence_excerpt: "The bridge remained open until dawn.",
+        chapter_ref: 2, action_label: "Trace bridge", ask_prompt: "When did it close?",
+        source: "proactive_audit",
+      }],
+      total: 1, book_title: "The Ember Gate",
+      meta: {
+        character_count: 3, state_count: 0, open_thread_count: 1,
+        clue_count: 0, relationship_count: 0, world_element_count: 0,
+        heuristic_count: 0, fallback_applied: false, proactive_audit_applied: true,
+        scan_basis: ["plot threads"], data_gaps: [],
+        audit_summary: "AI audit completed 2 of 3 evidence groups.",
+        audit_failure_category: "invalid_ai_response",
+        audit_groups_total: 3, audit_groups_completed: 2,
+      },
+    })
+
+    renderPage()
+    await flushUi()
+    await flushUi()
+    clickByText("Recommended checks")
+    await flushUi()
+
+    expect(container?.textContent).toContain("The bridge remained open until dawn.")
+    expect(container?.textContent).toContain("AI evidence groups reviewed: 2/3")
+    expect(container?.textContent).toContain("incomplete or unverified evidence")
+  })
+
+  it("shows legacy checks with unsupported priorities instead of silently hiding them", async () => {
+    advisorSuggestionsMock.mockResolvedValue({
+      suggestions: [
+        {
+          id: "legacy-1", type: "event_conflict", severity: "high",
+          title: "Legacy bridge check", description: "The bridge timing needs review.",
+          chapter_ref: 2, action_label: "Trace bridge", ask_prompt: "When did it close?",
+          source: "proactive_audit",
+        },
+        {
+          id: "current-1", type: "event_conflict", severity: "warning",
+          title: "Current bridge check", description: "The bridge is still open.",
+          chapter_ref: 2, action_label: "Trace bridge", ask_prompt: "Is it open?",
+          source: "proactive_audit",
+        },
+      ],
+      total: 2, book_title: "The Ember Gate", meta: suggestionsMeta(),
+    })
+
+    renderPage()
+    await flushUi()
+    await flushUi()
+    clickByText("Recommended checks")
+    await flushUi()
+
+    expect(container?.textContent).toContain("Legacy bridge check")
+    expect(container?.textContent).toContain("Current bridge check")
+    expect(container?.textContent).toContain("unrecognized priority from an earlier scan")
+  })
+
+  it.each([
+    [null, true, "No supported checks were found in the reviewed evidence"],
+    ["ai_unavailable", false, "The AI audit did not finish"],
+    [null, false, "No supported checks are available from the extracted evidence yet"],
+  ] as const)("distinguishes empty recommended-check states", async (failure, applied, expected) => {
+    advisorSuggestionsMock.mockResolvedValue({
+      suggestions: [], total: 0, book_title: "The Ember Gate",
+      meta: {
+        character_count: 0, state_count: 0, open_thread_count: 0,
+        clue_count: 0, relationship_count: 0, world_element_count: 0,
+        heuristic_count: 0, fallback_applied: false, proactive_audit_applied: applied,
+        scan_basis: [], data_gaps: ["characters"], audit_summary: null,
+        audit_failure_category: failure, audit_groups_total: failure || applied ? 1 : 0,
+        audit_groups_completed: applied ? 1 : 0,
+      },
+    })
+
+    renderPage()
+    await flushUi()
+    await flushUi()
+    clickByText("Recommended checks")
+    await flushUi()
+
+    expect(container?.textContent).toContain(expected)
+  })
+
+  it.each([
+    ["budget_exhausted", "Monthly AI budget reached", "monthly reset"],
+    ["capacity_busy", "AI processing slots are temporarily busy", "Refresh checks shortly"],
+  ] as const)("shows actionable Advisor audit status for %s", async (failure, label, nextStep) => {
+    advisorSuggestionsMock.mockResolvedValue({
+      suggestions: [], total: 0, book_title: "The Ember Gate",
+      meta: {
+        character_count: 0, state_count: 0, open_thread_count: 0,
+        clue_count: 0, relationship_count: 0, world_element_count: 0,
+        heuristic_count: 0, fallback_applied: false, proactive_audit_applied: false,
+        scan_basis: [], data_gaps: [], audit_summary: null,
+        audit_failure_category: failure, audit_groups_total: 1, audit_groups_completed: 0,
+      },
+    })
+
+    renderPage()
+    await flushUi()
+    await flushUi()
+    clickByText("Recommended checks")
+    await flushUi()
+
+    expect(container?.textContent).toContain(label)
+    expect(container?.textContent).toContain(nextStep)
   })
 
   it("drives scan card actions, cached scan refresh, note saving, and advisor chat", async () => {

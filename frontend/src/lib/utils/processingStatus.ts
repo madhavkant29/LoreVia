@@ -1,5 +1,58 @@
 import type { Book, BookProcessing, ProcessingStage } from "@/types/book"
 
+export function storyUnitName(workType?: Book["work_type"], plural = false) {
+  if (workType === "screenplay") return plural ? "scenes" : "scene"
+  return plural ? "chapters" : "chapter"
+}
+
+export function storyUnitTitle(workType?: Book["work_type"]) {
+  return workType === "screenplay" ? "Scene" : "Chapter"
+}
+
+export function storyUnitPrefix(workType?: Book["work_type"]) {
+  return workType === "screenplay" ? "Sc." : "Ch."
+}
+
+function formatEtaLabel(seconds?: number | null) {
+  if (typeof seconds !== "number" || Number.isNaN(seconds)) return null
+  if (seconds <= 0) return "almost done"
+
+  const minutes = Math.max(1, Math.round(seconds / 60))
+  if (minutes < 60) return `${minutes} min left`
+
+  const hours = Math.max(1, Math.round(minutes / 60))
+  return `${hours} hr left`
+}
+
+export function getProcessingSummary(book: Book | null) {
+  const processing = book?.processing
+  if (!processing) return null
+
+  const normalized = normalizeProcessingStatus(processing, book)
+  const stage = normalized?.label ?? (processing.stage ?? processing.status ?? "").toString().trim()
+  const completed = normalized?.chaptersCompleted ?? null
+  const total = normalized?.chaptersTotal ?? book?.total_chapters
+  const storedProgress = normalized?.progressPct ?? book?.progress_pct
+  const progress = completed !== null && total && completed < total && storedProgress === 100
+    ? Math.round((completed / total) * 100)
+    : storedProgress
+  const eta = formatEtaLabel(processing.eta_seconds)
+  const chapterLabel =
+    processing.last_chapter_number
+      ? `${storyUnitPrefix(book?.work_type)} ${processing.last_chapter_number}${processing.last_chapter_title ? ` - ${processing.last_chapter_title}` : ""}`
+      : null
+
+  const parts = [
+    stage ? stage.replace(/_/g, " ") : null,
+    completed !== null && total ? `${completed}/${total} ${storyUnitName(book?.work_type, true)}` : null,
+    typeof progress === "number" ? `${Math.round(progress)}%` : null,
+    eta,
+    chapterLabel,
+  ].filter(Boolean)
+
+  return parts.length > 0 ? parts.join(" / ") : null
+}
+
 export type NormalizedProcessingStatus = {
   stage: ProcessingStage
   label: string

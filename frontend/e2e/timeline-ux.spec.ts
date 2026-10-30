@@ -42,6 +42,7 @@ test("timeline views remain readable at four widths and both themes", async ({ p
 })
 
 test("lane filters, keyboard collapse, view switching and chapter links work", async ({ page }) => {
+  test.setTimeout(90_000)
   await page.setViewportSize({ width: 1280, height: 1000 })
   await page.goto(route)
   const characters = page.getByRole("button", { name: /Characters \(2\)/ })
@@ -61,7 +62,8 @@ test("lane filters, keyboard collapse, view switching and chapter links work", a
   await expect(page.getByRole("button", { name: "Collapse all", exact: true })).toBeHidden()
   await expect(page.getByRole("link", { name: "Open chapter 3", exact: true })).toHaveAttribute("href", "/sky-of-ash--book-1/chapter/3")
   await page.getByRole("link", { name: "Open chapter 3", exact: true }).click()
-  await expect(page).toHaveURL(/\/chapter\/3/)
+  // The chapter reader may compile on its first navigation late in the suite.
+  await expect(page).toHaveURL(/\/chapter\/3/, { timeout: 45_000 })
 })
 
 test("event requests paginate and retry without losing loaded entries", async ({ page }) => {

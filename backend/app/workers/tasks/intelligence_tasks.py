@@ -598,10 +598,26 @@ def generate_advisor_suggestions_task(
 
             advisor_work_started = True
             cache_version = await get_book_cache_version(str(book.id))
+
+            async def report_audit_progress(completed: int, total: int) -> None:
+                from app.services.advisor_suggestion_jobs_service import (
+                    mark_advisor_suggestion_job_progress,
+                )
+
+                await mark_advisor_suggestion_job_progress(
+                    db,
+                    job_id=job_uuid,
+                    completed=completed,
+                    total=total,
+                    execution_id=execution_id,
+                )
+
             payload = await build_advisor_suggestions_payload(
                 db=db,
                 book=book,
                 user_id=uuid.UUID(user_id),
+                force_audit=True,
+                on_audit_progress=report_audit_progress,
             )
             payload["cached"] = False
 
@@ -624,12 +640,13 @@ def generate_advisor_suggestions_task(
                 .values(cache_key=result_cache_key)
             )
             await db.commit()
-            await set_suggestion_scan_cache(
-                str(book.id),
-                result_cache_key,
-                payload,
-                expected_version=cache_version,
-            )
+            if not payload["meta"].get("audit_failure_category"):
+                await set_suggestion_scan_cache(
+                    str(book.id),
+                    result_cache_key,
+                    payload,
+                    expected_version=cache_version,
+                )
             await mark_advisor_suggestion_job_complete(
                 db,
                 job_id=job_uuid,

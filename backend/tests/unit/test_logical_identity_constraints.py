@@ -83,7 +83,9 @@ def test_book_data_generation_schema_has_no_duplicate_or_legacy_columns():
         "updated_at",
         "promoted_at",
         "failed_at",
+        "chapter_state_snapshot",
     ]
+    assert isinstance(table.c.chapter_state_snapshot.type, JSONB)
     assert {index.name for index in table.indexes} == {
         "ix_book_data_generations_book_id",
         "ix_book_data_generations_rebuild_run_id",

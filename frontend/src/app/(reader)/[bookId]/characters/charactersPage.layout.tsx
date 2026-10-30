@@ -536,9 +536,8 @@ export function CharactersPageLayout({
                   <CharacterReviewTab
                     candidateActionId={candidateActionId}
                     evidenceCache={evidenceCache}
-                    filteredPendingCandidatesCount={derived.filteredPendingCandidates.length}
+                    pendingCandidates={derived.filteredPendingCandidates}
                     relationshipCandidates={derived.filteredRelationshipCandidates}
-                    selectedCandidate={derived.selectedReviewCandidate}
                     hasSelectedCharacter={Boolean(derived.selectedCharacter)}
                     isDark={isDark}
                     onAttachCandidate={onAttachCandidate}

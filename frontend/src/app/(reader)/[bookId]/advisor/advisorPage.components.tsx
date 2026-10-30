@@ -334,6 +334,7 @@ export function SuggestionGroup({
                   <p className={`max-w-3xl text-sm leading-6 ${isDark ? "text-slate-300" : "text-stone-600"}`}>
                     {s.description}
                   </p>
+                  {s.evidence_excerpt ? <blockquote className={`mt-3 max-w-3xl border-l-2 pl-3 text-sm leading-6 ${isDark ? "border-slate-600 text-slate-300" : "border-stone-300 text-stone-600"}`}><span className="sr-only">Extracted evidence: </span>{s.evidence_excerpt}</blockquote> : null}
                   </div>
                   <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2 xl:max-w-[24rem] xl:justify-end">
                     <button
@@ -359,6 +360,7 @@ export function SuggestionGroup({
                           `Type: ${s.type.replace(/_/g, " ")}`,
                           "",
                           s.description,
+                          s.evidence_excerpt ? `Extracted evidence: ${s.evidence_excerpt}` : "",
                         ].filter(Boolean).join("\n"),
                       })}
                       className={`text-xs font-medium underline decoration-transparent underline-offset-4 hover:decoration-current ${isDark ? "text-slate-300" : "text-stone-600"}`}

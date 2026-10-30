@@ -199,6 +199,29 @@ def test_can_auto_save_character_blocks_role_only_reference_without_named_cluste
     assert _can_auto_save_character(entity) is False
 
 
+def test_can_auto_save_character_holds_recurring_unnamed_role_even_with_strong_person_evidence():
+    entity = {
+        "name": "examining magistrate",
+        "entity_type": "person",
+        "confidence": 0.96,
+        "evidence": {
+            "mention_count": 5,
+            "strong_mention_count": 4,
+            "source_mention_count_verified": True,
+            "has_attributed_speech": True,
+            "has_dialogue_or_action": True,
+            "has_physical_description": True,
+            "appears_multiple_times": True,
+            "verifier": {
+                "local": {"person_ner_mentions": 1, "mid_sentence_mentions": 3},
+                "final": {"confidence_band": "accept", "is_person_like": True},
+            },
+        },
+    }
+
+    assert _can_auto_save_character(entity) is False
+
+
 def test_character_save_decision_rejects_review_band_from_mention_verifier():
     entity = {
         "name": "Mother",

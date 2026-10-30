@@ -1,4 +1,4 @@
-import type { AdvisorMessage, AdvisorResponse } from "@/types/intelligence"
+import type { AdvisorMessage, AdvisorResponse, AdvisorScanMeta } from "@/types/intelligence"
 import { buildDailyCapEventDetail, isDailyLimitDetail } from "@/lib/limits/dailyCap"
 
 export type AdvisorEntry = { id: number; question: string; answer: string; status: "streaming" | "complete" | "failed" | "stopped"; error?: string; evidence?: AdvisorResponse }
@@ -28,4 +28,15 @@ export function parseAdvisorChoices(raw: string | null): { dismissed: string[]; 
     const strings = (items: unknown) => Array.isArray(items) ? [...new Set(items.filter((item): item is string => typeof item === "string" && !!item))].slice(-2000) : []
     return { dismissed: strings(value?.dismissed), intentional: strings(value?.intentional) }
   } catch { return { dismissed: [], intentional: [] } }
+}
+
+export function advisorAuditStatus(category: AdvisorScanMeta["audit_failure_category"]): string {
+  switch (category) {
+    case "budget_exhausted": return "Monthly AI budget reached. Refresh checks after the monthly reset; heuristic checks remain available."
+    case "capacity_busy": return "AI processing slots are temporarily busy. Refresh checks shortly; heuristic checks remain available."
+    case "invalid_ai_response": return "AI returned incomplete or unverified evidence. Refresh checks to retry; heuristic checks remain available."
+    case "not_configured": return "AI audit is not configured. Heuristic checks remain available."
+    case "database_unavailable": return "Story evidence could not be read right now. Refresh checks later; heuristic checks remain available."
+    default: return "AI audit is temporarily unavailable. Refresh checks later; heuristic checks remain available."
+  }
 }

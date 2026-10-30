@@ -137,6 +137,7 @@ async def test_book_characters_eager_loading(client, db):
         id=uuid.uuid4(),
         book_id=book.id,
         name="Voice Test Char",
+        aliases=["Mara"],
         role="protagonist",
         first_chapter=1,
         mention_count=5,
@@ -172,6 +173,28 @@ async def test_book_characters_eager_loading(client, db):
         f"Expected <= 6 execute calls but got {call_count[0]}. "
         f"Selectinload for Character.voice_profile should reduce DB round-trips."
     )
+
+    db.expunge_all()
+    sparse_response = await client.get(
+        f"/api/v1/books/{book.id}/characters?fields=id,name", headers=headers
+    )
+    assert sparse_response.status_code == 200
+    assert sparse_response.json() == [{"id": str(char.id), "name": "Voice Test Char"}]
+
+    db.expunge_all()
+    navigation_response = await client.get(
+        f"/api/v1/books/{book.id}/characters?fields=id,name,aliases,status",
+        headers=headers,
+    )
+    assert navigation_response.status_code == 200
+    assert navigation_response.json() == [
+        {
+            "id": str(char.id),
+            "name": "Voice Test Char",
+            "aliases": ["Mara"],
+            "status": "alive",
+        }
+    ]
 
 
 @pytest.mark.asyncio

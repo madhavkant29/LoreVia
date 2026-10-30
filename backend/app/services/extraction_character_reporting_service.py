@@ -87,10 +87,38 @@ async def _embed_new_character_candidates(
         )
         for entity, _blocked_ids in pending_new_entities
     ]
-    return await embed_batch(
-        embedding_inputs,
-        db=db,
+    for _attempt in range(2):
+        embeddings = await embed_batch(
+            embedding_inputs,
+            db=db,
+            user_id=user_id,
+            book_id=book_id,
+            feature="character_embedding",
+        )
+        if len(embeddings) == len(pending_new_entities) and all(embeddings):
+            return embeddings
+    raise RuntimeError("character_embedding_result_incomplete")
+
+
+async def precompute_chapter_character_embeddings(
+    entities: list[dict[str, Any]], *, user_id: uuid.UUID, book_id: uuid.UUID
+) -> list[list[float]]:
+    """Embed source-anchored proposals before chapter records are replaced."""
+    candidates = [
+        (index, entity)
+        for index, entity in enumerate(entities)
+        if not (
+            isinstance(entity.get("evidence"), dict)
+            and entity["evidence"].get("profile_enrichment_status") == "unanchored_reference"
+        )
+    ]
+    vectors = await _embed_new_character_candidates(
+        [(entity, set()) for _, entity in candidates],
+        db=None,
         user_id=user_id,
         book_id=book_id,
-        feature="character_embedding",
     )
+    aligned_vectors: list[list[float]] = [[] for _ in entities]
+    for (index, _entity), vector in zip(candidates, vectors, strict=True):
+        aligned_vectors[index] = vector
+    return aligned_vectors

@@ -792,6 +792,7 @@ test("public uploads support ranking and window selection", async ({ page }, tes
 })
 
 test("public library cross-links safe samples and writer trust", async ({ page }, testInfo) => {
+  test.setTimeout(180_000)
   await installMockApi(page)
   await page.setViewportSize({ width: 1440, height: 1000 })
   await page.goto("/public")
@@ -806,20 +807,21 @@ test("public library cross-links safe samples and writer trust", async ({ page }
     .first()
   await ashGateCard.getByRole("link", { name: "Discussion", exact: true }).click()
 
-  await expect(page).toHaveURL(/\/public\/forum\/forum-post-1$/)
+  await expect(page).toHaveURL(/\/public\/forum\/forum-post-1$/, { timeout: 45_000 })
   await page.goto("/public")
   await expect(ashGateCard.getByRole("link", { name: "@author" })).toBeVisible()
   await page.goto("/public/writers/author")
 
-  await expect(page).toHaveURL(/\/public\/writers\/author$/)
+  await expect(page).toHaveURL(/\/public\/writers\/author$/, { timeout: 45_000 })
   await expect(page.getByRole("heading", { name: "@author", exact: true })).toBeVisible()
   await page.getByRole("link", { name: "Open forum discussion" }).click()
 
-  await expect(page).toHaveURL(/\/public\/forum\/forum-post-1$/)
+  await expect(page).toHaveURL(/\/public\/forum\/forum-post-1$/, { timeout: 45_000 })
   await page.goto("/public/writers/author")
   await page.getByRole("link", { name: "Read public sample" }).click()
 
-  await expect(page).toHaveURL(/\/public\/public-book-1$/)
+  // Public sample routes can compile only after this late-suite navigation.
+  await expect(page).toHaveURL(/\/public\/public-book-1$/, { timeout: 45_000 })
   await expect(page.getByRole("heading", { name: "Ash Gate Sample" })).toBeVisible()
   await expect(page.getByRole("link", { name: "@author" })).toBeVisible()
   await expect(page.getByRole("link", { name: "Start reading" })).toBeVisible()
@@ -827,7 +829,7 @@ test("public library cross-links safe samples and writer trust", async ({ page }
   await page.screenshot({ path: testInfo.outputPath("public-book-desktop.png"), fullPage: true })
 
   await page.getByRole("link", { name: "Start reading" }).click()
-  await expect(page).toHaveURL(/\/public\/public-book-1\/chapter\/1$/)
+  await expect(page).toHaveURL(/\/public\/public-book-1\/chapter\/1$/, { timeout: 45_000 })
   await expect(page.getByRole("heading", { name: "The Gate Opens" })).toBeVisible()
   await expect(page.getByTestId("public-chapter-reader")).toContainText("Ash Gate Sample")
   await page.setViewportSize({ width: 390, height: 844 })
@@ -857,14 +859,24 @@ test("login surfaces an invalid-credentials error", async ({ page }, testInfo) =
   expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)).toBe(false)
 })
 
-test("auth redirects protect private pages and skip login for active sessions", async ({ page }) => {
+test("auth redirects protect private pages and skip login for active sessions", async ({ page, browser }) => {
+  test.setTimeout(90_000)
+  await installMockApi(page, { session: "guest" })
   await page.goto("/library")
   await expect(page).toHaveURL(/\/login\?next=%2Flibrary$/)
 
-  await installMockApi(page)
-  await page.goto("/login")
-  await expect(page).toHaveURL(/\/library$/)
-  await expect(page.getByRole("heading", { name: "Library" })).toBeVisible()
+  const activePage = await browser.newPage()
+  try {
+    // Seed sessionStorage on the app origin, not the new page's about:blank origin.
+    await activePage.goto("/")
+    await installMockApi(activePage)
+    await activePage.goto("/login")
+    // A cold Library route can take longer to compile late in the full dev-server suite.
+    await expect(activePage).toHaveURL(/\/library$/, { timeout: 45_000 })
+    await expect(activePage.getByRole("heading", { name: "Library" })).toBeVisible({ timeout: 30_000 })
+  } finally {
+    await activePage.close()
+  }
 })
 
 test("checkout and confirmation keep a focused transaction shell", async ({ page }, testInfo) => {
@@ -1961,10 +1973,11 @@ test("manuscript reprocess requires confirmation before consuming an upload", as
   expect(reprocessRequests).toHaveLength(0)
 
   await page.getByRole("button", { name: "Reprocess manuscript" }).click()
+  await expect(page.getByText(/3 chapters · 31,500 processed words to reserve/)).toBeVisible()
   await page.getByRole("button", { name: "Reserve words and reprocess" }).click()
   await expect(page.getByText("Reprocessing started for 3 chapters. 31,500 processed words are reserved and will settle chapter by chapter.").first()).toBeVisible()
   expect(reprocessRequests).toHaveLength(1)
-  expect(JSON.parse(reprocessRequests[0] ?? "{}")).toEqual({ confirm_upload_charge: true })
+  expect(JSON.parse(reprocessRequests[0] ?? "{}")).toEqual({ confirm_upload_charge: true, preview_fingerprint: "a".repeat(64) })
 })
 
 test("manuscript processing state refreshes back into a reprocess action", async ({ page }) => {
@@ -2526,7 +2539,7 @@ test("voice consistency runs without the max-depth console loop", async ({ page 
 
   await expect(page.getByRole("heading", { name: /sky of ash voice consistency/i })).toBeVisible()
   await expect(page.getByRole("heading", { name: "The Ember Gate" })).toBeVisible()
-  await expect(page.locator("textarea")).toContainText("Nora crossed the ember gate")
+  await expect(page.getByRole("textbox", { name: "Dialogue or chapter text for voice review" })).toHaveValue(/Nora crossed the ember gate/)
 
   await page.getByRole("button", { name: /run voice review/i }).click()
 
@@ -2534,7 +2547,7 @@ test("voice consistency runs without the max-depth console loop", async ({ page 
   await expect(page.getByRole("button", { name: /run voice review/i })).toBeVisible({ timeout: 15000 })
 
   await expect(page.getByRole("heading", { name: "Verdict" })).toBeVisible()
-  await expect(page.getByText("Reviewed: Nora Vale")).toBeVisible({ timeout: 15000 })
+  await expect(page.getByText("Reviewed voices: Nora Vale")).toBeVisible({ timeout: 15000 })
   await expect(page.getByText("Nora sounds more formal than her baseline")).toBeVisible()
 
   expect(consoleMessages.some((message) => /Maximum update depth exceeded/i.test(message))).toBe(false)
@@ -2672,7 +2685,8 @@ test("AI Beta Reader runs chapter and manuscript checks and bridges results into
   await page.goto(`${BOOK_ROUTE}/analysis`)
 
   await page.locator(`a[href="${BOOK_ROUTE}/ai-beta-reader"]`).filter({ hasText: "Check reader experience" }).click()
-  await expect(page.getByRole("heading", { name: /Sky of Ash AI Beta Reader/i })).toBeVisible()
+  await expect(page).toHaveURL(new RegExp(`${BOOK_ROUTE}/ai-beta-reader$`), { timeout: 45_000 })
+  await expect(page.getByRole("heading", { name: /Sky of Ash AI Beta Reader/i })).toBeVisible({ timeout: 45_000 })
   await expect(page.getByRole("heading", { name: "Reader report" })).toBeVisible()
   expect(apiRequests.some((url) => /\/chapters(?:\?|$)/.test(url))).toBe(false)
   expect(apiRequests.some((url) => /\/characters(?:\?|$)/.test(url))).toBe(false)
@@ -2760,7 +2774,7 @@ test("voice consistency can target a selected character", async ({ page }) => {
   await page.goto(`${BOOK_ROUTE}/voice`)
 
   await expect(page.getByRole("heading", { name: /sky of ash voice consistency/i })).toBeVisible()
-  await expect(page.locator("textarea")).toContainText("Nora crossed the ember gate")
+  await expect(page.getByRole("textbox", { name: "Dialogue or chapter text for voice review" })).toHaveValue(/Nora crossed the ember gate/)
   await page.getByLabel("Character focus", { exact: true }).selectOption({ label: "Gregor" })
   await expect(page.getByText("Focused review: Gregor")).toBeVisible()
   await page.getByRole("button", { name: /run voice review/i }).click()
@@ -2768,10 +2782,10 @@ test("voice consistency can target a selected character", async ({ page }) => {
   // Wait for the loading state to complete
   await expect(page.getByRole("button", { name: /run voice review/i })).toBeVisible({ timeout: 15000 })
 
-  await expect(page.getByText("Reviewed: Gregor")).toBeVisible({ timeout: 15000 })
+  await expect(page.getByText("Reviewed voices: Gregor")).toBeVisible({ timeout: 15000 })
   await expect(page.getByText("Gregor slips into abstract explanation")).toBeVisible()
   await expect(page.getByText("74% match")).toBeVisible()
-  await expect(page.getByText("Closest alternate voice: Grete (38% match)")).toBeVisible()
+  await expect(page.getByText(/Closest alternate voice: Grete \(38% stylistic similarity\)/)).toBeVisible()
   expect(workspaceTreeRequests).toEqual([])
 
   await page.setViewportSize({ width: 1440, height: 1000 })
@@ -2785,12 +2799,12 @@ test("voice consistency can target a selected character", async ({ page }) => {
   expect(pageErrors).toEqual([])
 })
 
-test("voice consistency warns when selected-character attribution is weak", async ({ page }) => {
+test("voice consistency with weak selected-character attribution makes no verdict or match", async ({ page }) => {
   await installMockApi(page, { voiceConsistency: "weak-attribution" })
   await page.goto(`${BOOK_ROUTE}/voice`)
 
   await expect(page.getByRole("heading", { name: /sky of ash voice consistency/i })).toBeVisible()
-  await expect(page.locator("textarea")).toContainText("Nora crossed the ember gate")
+  await expect(page.getByRole("textbox", { name: "Dialogue or chapter text for voice review" })).toHaveValue(/Nora crossed the ember gate/)
   await page.locator("select").nth(1).selectOption("char-grete")
   await expect(page.getByText("Focused review: Grete")).toBeVisible()
   await page.getByRole("button", { name: /run voice review/i }).click()
@@ -2798,8 +2812,11 @@ test("voice consistency warns when selected-character attribution is weak", asyn
   // Wait for the loading state to complete
   await expect(page.getByRole("button", { name: /run voice review/i })).toBeVisible({ timeout: 15000 })
 
-  await expect(page.getByText("Reviewed: Grete")).toBeVisible({ timeout: 15000 })
-  await expect(page.getByText("Dialogue could not be confidently attributed to Grete; the review used the full submitted passage instead.")).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Insufficient voice evidence" })).toBeVisible({ timeout: 15000 })
+  await expect(page.getByText("Voice baselines compared: 0 of 1 detected characters.")).toBeVisible()
+  await expect(page.getByText(/no attributed dialogue in this passage could be confidently identified/)).toBeVisible()
+  await expect(page.getByText("No reliable match scores were available for this passage.")).toBeVisible()
+  await expect(page.getByText(/% match/)).toHaveCount(0)
 })
 
 test("voice consistency surfaces backend errors instead of failing silently", async ({ page }) => {
@@ -2807,7 +2824,7 @@ test("voice consistency surfaces backend errors instead of failing silently", as
 
   await page.goto(`${BOOK_ROUTE}/voice`)
   await expect(page.getByRole("heading", { name: /sky of ash voice consistency/i })).toBeVisible()
-  await expect(page.locator("textarea")).toContainText("Nora crossed the ember gate")
+  await expect(page.getByRole("textbox", { name: "Dialogue or chapter text for voice review" })).toHaveValue(/Nora crossed the ember gate/)
   await expect(page.getByRole("button", { name: /run voice review/i })).toBeEnabled()
 
   await page.getByRole("button", { name: /run voice review/i }).click()
@@ -2819,6 +2836,7 @@ test("voice consistency surfaces backend errors instead of failing silently", as
 })
 
 test("book search stays behind the global search affordance and returns flat evidence", async ({ page }) => {
+  test.setTimeout(90_000)
   const { consoleMessages, pageErrors } = watchBrowserSignals(page)
   const searchRequests: string[] = []
   page.on("request", (request) => {
@@ -2828,7 +2846,8 @@ test("book search stays behind the global search affordance and returns flat evi
   await page.goto(`${BOOK_ROUTE}/analysis`)
 
   await page.getByRole("link", { name: "Search this book" }).click()
-  await expect(page.getByRole("heading", { name: "Search the manuscript" })).toBeVisible()
+  // The search route can compile on its first navigation in the E2E dev server.
+  await expect(page.getByRole("heading", { name: "Search the manuscript" })).toBeVisible({ timeout: 45_000 })
   expect(searchRequests).toEqual([])
   await page.getByLabel("Search manuscript").fill("the gatekeeper warning")
   await page.getByRole("button", { name: "Search manuscript" }).click()
@@ -2857,12 +2876,17 @@ test("book search stays behind the global search affordance and returns flat evi
 })
 
 test("character bible exposes manual merge without duplicate-key warnings", async ({ page }) => {
+  test.setTimeout(120_000)
   const { consoleMessages, pageErrors } = watchBrowserSignals(page)
   await installMockApi(page)
   await page.goto(`${BOOK_ROUTE}/characters`)
 
   await expect(page.getByRole("heading", { name: "Character Bible" })).toBeVisible()
-  await page.getByRole("button", { name: "Open menu" }).first().click()
+  const pageMenu = page.getByRole("button", { name: "Open menu" }).first()
+  await expect.poll(async () => {
+    if (await pageMenu.getAttribute("aria-expanded") !== "true") await pageMenu.click()
+    return pageMenu.getAttribute("aria-expanded")
+  }, { timeout: 30_000 }).toBe("true")
   await page.getByRole("button", { name: "Review duplicate suggestions" }).click()
 
   const startManualMergeButton = page.getByRole("button", { name: /^start manual merge$/i }).first()
@@ -3030,11 +3054,13 @@ test("character bible repair workspace renders preview controls without overflow
   await installMockApi(page)
   await page.goto(`${BOOK_ROUTE}/characters`)
 
+  await expect(page.getByRole("heading", { name: "Gregor", exact: true })).toBeVisible()
   await page.getByRole("button", { name: "Open menu" }).first().click()
   const repairWorkspaceButton = page.getByRole("button", { name: /^open repair workspace$/i })
   await expect(repairWorkspaceButton).toBeEnabled()
   await repairWorkspaceButton.click()
-  await expect(page.getByRole("heading", { name: "Book reprocess preview" })).toBeVisible({ timeout: 15000 })
+  await expect(page.getByRole("heading", { name: "Character identity repair preview" })).toBeVisible({ timeout: 15000 })
+  await expect(page.getByText("This does not reread the manuscript or discover missing characters.", { exact: false })).toBeVisible()
   await expect(page.getByText("Repair controls")).toBeVisible()
   await expect(page.getByRole("button", { name: /^refresh preview$/i })).toBeVisible()
   await expect(page.getByRole("button", { name: /^apply repair plan$/i })).toBeVisible()

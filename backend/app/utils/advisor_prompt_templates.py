@@ -198,7 +198,7 @@ You are performing a proactive continuity and editorial scan for the novel "{tit
 
 You will receive:
 - STORY KNOWLEDGE summarizing the manuscript state
-- RECENT CHAPTER SUMMARIES
+- CHAPTER SUMMARY EVIDENCE from a bounded part of the manuscript
 - OPEN PLOT THREADS
 - RELATIONSHIP CHANGES
 - WORLD ELEMENT WATCHLIST
@@ -211,6 +211,7 @@ Return JSON only with this exact shape:
       "type": "event_conflict" | "relationship_flip" | "location_conflict" | "object_continuity" | "world_rule_conflict" | "role_drift" | "foreshadowing_opportunity" | "future_direction",
       "title": "short label",
       "description": "specific explanation grounded in the provided story context",
+      "evidence_excerpt": "exact text copied from one supplied evidence block",
       "chapter_ref": 0,
       "action_label": "short CTA",
       "ask_prompt": "follow-up prompt the author can send to the advisor"
@@ -221,12 +222,14 @@ Return JSON only with this exact shape:
 
 Rules:
 - Prefer high-confidence findings over speculative ones.
+- Every finding must include an exact excerpt copied from a CHAPTER SUMMARY EVIDENCE, OPEN PLOT THREAD, RELATIONSHIP CHANGE, or WORLD ELEMENT WATCHLIST block. Never invent an evidence quote.
+- Set chapter_ref only to the chapter number on the block that contains the cited excerpt; use 0 when that block has no chapter reference. Never infer a chapter from unrelated story context.
 - Do not repeat obvious duplicates from the same root issue.
 - Use "warning" only for likely contradictions or structural risks.
 - Use "direction" for unresolved arcs that need an ending decision soon.
 - Use "opportunity" for foreshadowing, setup, payoff, or underused narrative material.
 - Use "info" only for light watchlist items.
-- Keep findings to at most 4 items.
+- Report every distinct, source-supported check found in this evidence group. Do not stop at four, and do not pad the list to reach a target count.
 - If there are no strong findings, return an empty findings array and a brief overall_note.
 
 --- STORY KNOWLEDGE ---
@@ -237,7 +240,7 @@ Rules:
 PROACTIVE_SCAN_USER = """\
 Run a proactive continuity scan using the manuscript evidence below.
 
---- RECENT CHAPTER SUMMARIES ---
+--- CHAPTER SUMMARY EVIDENCE ---
 {recent_summaries}
 -------------------------------
 
@@ -255,40 +258,41 @@ Run a proactive continuity scan using the manuscript evidence below.
 """
 
 VOICE_CONSISTENCY_SYSTEM = """\
-You are a developmental editor reviewing dialogue and behaviour consistency for the novel "{title}".
+You are reviewing evidence-backed character voice for the novel "{title}".
 
 You will receive:
-- STORY KNOWLEDGE about the manuscript
-- CHARACTER BASELINES for characters likely present in the passage
-- RETRIEVED PASSAGES from the manuscript for comparison
+- Source-exact baseline excerpts for one character
+- Profile notes only when their exact citation appears in those baseline excerpts
 - A NEW PASSAGE the author just wrote
 
 Return JSON only with this exact shape:
 {{
   "issues": [
     {{
-      "character_name": "name",
+      "character_name": "the named character under review",
+      "classification": "confirmed" | "possible" | "justified_variation",
       "severity": "critical" | "moderate" | "minor",
       "title": "short label",
-      "description": "specific explanation of what feels off and why",
-      "evidence": "reference the established personality or earlier behaviour",
-      "suggestion": "a concrete adjustment the author could make",
-      "intentionality_prompt": "short question asking whether the change is intentional"
+      "description": "how the voice differs, considering the scene context",
+      "submitted_excerpt": "exact substring of the NEW PASSAGE section",
+      "baseline_excerpt": "exact substring of a supplied baseline quotation",
+      "baseline_chapter_number": 1,
+      "confidence": 0.0,
+      "revision_direction": "a voice-preserving option, not generic grammar advice",
+      "intentionality_prompt": "question asking whether this change is intentional"
     }}
   ],
   "overall_verdict": "1-2 sentence summary of whether the passage feels voice-consistent overall."
 }}
 
 Rules:
-- Only flag genuine inconsistencies in dialogue, behaviour, emotional response, or decision-making.
-- Compare against the CHARACTER BASELINES first, then use retrieved passages as supporting evidence.
-- Do not flag growth when it is plausibly earned; only flag it if the passage skips the transition.
-- Prefer fewer, high-confidence issues over speculative ones.
-- If nothing is clearly off, return an empty issues array but use overall_verdict to name the next-best refinement target or watchpoint. Never call the passage perfect.
-
---- STORY KNOWLEDGE ---
-{story_context}
-----------------------
+- Review only the named character in the supplied mode. In dialogue mode compare explicitly attributed speech; in first-person narrator mode compare narrative prose from the selected or explicitly identified narrator without treating it as dialogue. If narrator identity is tentative, do not claim certainty.
+- Every issue MUST cite exact text present in BOTH the new section and one supplied baseline quote, with that quote's chapter number.
+- Cited profile notes provide context only; they never replace direct baseline evidence. Do not use uncited summaries or profile guesses as proof.
+- Never invent or paraphrase evidence. If there is no supported issue, return an empty issues array and say only that no supported inconsistency was found in this section.
+- Distinguish a possible shift from a contextually justified change. Do not call earned growth, fear, anger, or code-switching an error without evidence.
+- Return at most three high-value issues for this section so the JSON remains complete.
+- Do not provide generic grammar or writing advice, a match percentage, or a fabricated refinement target.
 """
 
 VOICE_CONSISTENCY_USER = """\

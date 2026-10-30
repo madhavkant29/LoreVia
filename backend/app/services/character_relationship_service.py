@@ -51,6 +51,10 @@ async def attach_relationship_candidate_a_for_user(
         pending_error="Only pending relationship candidates can be updated",
     )
     candidate.matched_character_a_id = character.id
+    candidate.generation_id = None
+    candidate.reason_codes = list(
+        dict.fromkeys([*(candidate.reason_codes or []), "author_attached_endpoint"])
+    )
     append_character_review_audit_entry(
         character,
         action="relationship_candidate_attached_a",
@@ -77,6 +81,10 @@ async def attach_relationship_candidate_b_for_user(
         pending_error="Only pending relationship candidates can be updated",
     )
     candidate.matched_character_b_id = character.id
+    candidate.generation_id = None
+    candidate.reason_codes = list(
+        dict.fromkeys([*(candidate.reason_codes or []), "author_attached_endpoint"])
+    )
     append_character_review_audit_entry(
         character,
         action="relationship_candidate_attached_b",
@@ -157,6 +165,7 @@ async def accept_relationship_candidate_for_user(
     candidate.matched_character_a_id = relationship_a.id
     candidate.matched_character_b_id = relationship_b.id
     candidate.status = CHARACTER_RELATIONSHIP_CANDIDATE_ACCEPTED
+    candidate.generation_id = None
     record_quality_review(
         db,
         book_id=book.id,
@@ -196,6 +205,7 @@ async def resolve_relationship_candidate_for_user(
         candidate_id=candidate_id,
     )
     candidate.status = CHARACTER_RELATIONSHIP_CANDIDATE_RESOLVED
+    candidate.generation_id = None
     record_quality_review(
         db,
         book_id=book.id,
@@ -223,6 +233,7 @@ async def reject_relationship_candidate_for_user(
         candidate_id=candidate_id,
     )
     candidate.status = CHARACTER_RELATIONSHIP_CANDIDATE_REJECTED
+    candidate.generation_id = None
     record_quality_review(
         db,
         book_id=book.id,

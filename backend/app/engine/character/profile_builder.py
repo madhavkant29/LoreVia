@@ -7,6 +7,13 @@ import re
 import uuid
 from collections.abc import Iterable
 
+from app.utils.characters.governance import is_author_curated_character
+from app.utils.characters.profile_evidence import (
+    character_mention_weight,
+    merge_profile_claim_records,
+    profile_claim_records,
+)
+
 PROMPT_CONFIDENCE_THRESHOLD = 0.45
 SUBJECTIVE_MAX_CONFIDENCE = 0.50
 
@@ -209,11 +216,16 @@ def choose_richer_text(*values: str | None) -> str | None:
 
 
 def build_character_analysis_metadata(
-    extracted: dict, *, persistence_reason: str | None = None
+    extracted: dict,
+    *,
+    persistence_reason: str | None = None,
+    chapter_number: int | None = None,
 ) -> dict:
     evidence = extracted.get("evidence") if isinstance(extracted.get("evidence"), dict) else {}
-    mention_count = int(evidence.get("mention_count") or 0)
-    strong_mentions = int(evidence.get("strong_mention_count") or 0)
+    self_identification = str(evidence.get("narrator_self_identification") or "").strip()
+    addressed_name = str(evidence.get("narrator_addressed_as") or "").strip()
+    mention_count = max(0, int(evidence.get("mention_count") or 0))
+    strong_mentions = min(mention_count, max(0, int(evidence.get("strong_mention_count") or 0)))
     grounding_passage_count = max(mention_count, strong_mentions)
     cluster_size = int(evidence.get("cluster_size") or 1)
     cluster_mention_count = int(evidence.get("cluster_mention_count") or mention_count or 0)
@@ -257,6 +269,7 @@ def build_character_analysis_metadata(
     return {
         "persistence_reason": persistence_reason or "extracted_character",
         "evidence_count": mention_count,
+        "strong_mention_count": strong_mentions,
         "summary_quality": summary_quality,
         "needs_review": bool(quality_flags),
         "rejected_duplicate_candidates": [],
@@ -282,6 +295,28 @@ def build_character_analysis_metadata(
         else None,
         "trust_tier": trust_tier,
         "trust_reasons": trust_reasons,
+        "profile_claims": profile_claim_records(extracted, chapter_number=chapter_number),
+        **(
+            {
+                "first_person_self_identification": {
+                    "chapter_number": chapter_number,
+                    "excerpt": self_identification,
+                }
+            }
+            if self_identification
+            else {}
+        ),
+        **(
+            {
+                "first_person_addressed_as": {
+                    "chapter_number": chapter_number,
+                    "excerpt": addressed_name,
+                    "attribution_confidence": "contextual",
+                }
+            }
+            if addressed_name
+            else {}
+        ),
     }
 
 
@@ -289,12 +324,7 @@ def build_character_profile(extracted: dict, book_id: uuid.UUID, first_chapter: 
     raw_traits = _normalize_trait_state(extracted.get("traits"))
     archetype = extracted.get("archetype")
     trait_state = merge_trait_states({}, raw_traits)
-    evidence = extracted.get("evidence") if isinstance(extracted.get("evidence"), dict) else {}
-    mention_weight = max(
-        1,
-        int(evidence.get("cluster_size") or 0),
-        int(extracted.get("cluster_size") or 0),
-    )
+    mention_weight = character_mention_weight(extracted)
 
     return {
         "book_id": book_id,
@@ -320,7 +350,9 @@ def build_character_profile(extracted: dict, book_id: uuid.UUID, first_chapter: 
         "arc_summary": extracted.get("arc_summary"),
         "archetype": archetype,
         "growth_events": merge_growth_events(_growth_event_group(extracted.get("growth_event"))),
-        "analysis_metadata": build_character_analysis_metadata(extracted),
+        "analysis_metadata": build_character_analysis_metadata(
+            extracted, chapter_number=first_chapter
+        ),
         "visibility_state": str(extracted.get("visibility_state") or "visible").strip()
         or "visible",
         "approval_state": str(extracted.get("approval_state") or "approved").strip() or "approved",
@@ -397,16 +429,43 @@ def merge_profile_fields(existing, incoming) -> dict:
         if isinstance(incoming, dict)
         else getattr(incoming, "growth_events", None)
     )
-    incoming_evidence = (
-        incoming.get("evidence")
-        if isinstance(incoming, dict) and isinstance(incoming.get("evidence"), dict)
-        else {}
+    existing_metadata = existing.analysis_metadata or {}
+    incoming_metadata = build_character_analysis_metadata(
+        incoming if isinstance(incoming, dict) else {},
+        persistence_reason=str(existing_metadata.get("persistence_reason") or "updated_character"),
+        chapter_number=incoming_first_chapter,
     )
-    mention_weight = max(
-        1,
-        int(incoming_evidence.get("cluster_size") or 0),
-        int(incoming.get("cluster_size") or 0) if isinstance(incoming, dict) else 0,
+    mention_weight = character_mention_weight(incoming if isinstance(incoming, dict) else {})
+    evidence_count = max(0, int(existing_metadata.get("evidence_count") or 0)) + max(
+        0, int(incoming_metadata["evidence_count"])
     )
+    old_strong = existing_metadata.get("strong_mention_count")
+    strong_mentions = (
+        max(0, int(old_strong)) + max(0, int(incoming_metadata["strong_mention_count"]))
+        if isinstance(old_strong, int) and not isinstance(old_strong, bool)
+        else max(0, int(incoming_metadata["strong_mention_count"]))
+        if not existing_metadata.get("evidence_count")
+        else None
+    )
+    grounding_passage_count = max(
+        0, int(existing_metadata.get("grounding_passage_count") or 0)
+    ) + max(0, int(incoming_metadata["grounding_passage_count"]))
+    arc_summary = choose_richer_text(existing.arc_summary, incoming_arc)
+    previous_flags = existing_metadata.get("quality_flags")
+    incoming_flags = incoming_metadata["quality_flags"]
+    quality_flags = list(
+        dict.fromkeys(
+            [*(previous_flags if isinstance(previous_flags, list) else []), *incoming_flags]
+        )
+    )
+    if arc_summary:
+        quality_flags = [flag for flag in quality_flags if flag != "generic_summary"]
+    if grounding_passage_count > 1:
+        quality_flags = [flag for flag in quality_flags if flag != "light_grounding"]
+    if "no_dialogue_or_action" not in incoming_flags or (
+        isinstance(previous_flags, list) and "no_dialogue_or_action" not in previous_flags
+    ):
+        quality_flags = [flag for flag in quality_flags if flag != "no_dialogue_or_action"]
 
     aliases = merge_list_values(
         existing_aliases, incoming_aliases, [incoming_name] if incoming_name else []
@@ -440,20 +499,54 @@ def merge_profile_fields(existing, incoming) -> dict:
             getattr(existing, "backstory_wound", None), incoming_wound
         ),
         "arc_type": choose_richer_text(getattr(existing, "arc_type", None), incoming_arc_type),
-        "arc_summary": choose_richer_text(existing.arc_summary, incoming_arc),
+        "arc_summary": arc_summary,
         "archetype": choose_richer_text(existing.archetype, incoming_archetype),
         "growth_events": merge_growth_events(existing.growth_events, incoming_growth_events),
         "analysis_metadata": {
-            **(existing.analysis_metadata or {}),
-            **build_character_analysis_metadata(
-                incoming if isinstance(incoming, dict) else {},
-                persistence_reason=str(
-                    (existing.analysis_metadata or {}).get("persistence_reason")
-                    or "updated_character"
-                ),
+            **existing_metadata,
+            **incoming_metadata,
+            "evidence_count": evidence_count,
+            "strong_mention_count": strong_mentions,
+            "cluster_mention_count": max(
+                0, int(existing_metadata.get("cluster_mention_count") or 0)
+            )
+            + max(0, int(incoming_metadata["cluster_mention_count"])),
+            "grounding_passage_count": grounding_passage_count,
+            "grounding_coverage": (
+                round(strong_mentions / evidence_count, 3)
+                if strong_mentions is not None and evidence_count
+                else 0.0
+                if strong_mentions is not None
+                else None
+            ),
+            "quality_flags": quality_flags,
+            "needs_review": bool(quality_flags),
+            "summary_quality": (
+                "generic"
+                if "generic_summary" in quality_flags
+                else "grounded"
+                if grounding_passage_count > 1
+                else "thin"
+            ),
+            **(
+                {
+                    "first_person_self_identification": existing_metadata[
+                        "first_person_self_identification"
+                    ]
+                }
+                if existing_metadata.get("first_person_self_identification")
+                else {}
+            ),
+            **(
+                {"first_person_addressed_as": existing_metadata["first_person_addressed_as"]}
+                if existing_metadata.get("first_person_addressed_as")
+                else {}
+            ),
+            "profile_claims": merge_profile_claim_records(
+                existing_metadata.get("profile_claims"), incoming_metadata.get("profile_claims")
             ),
             "rejected_duplicate_candidates": list(
-                (existing.analysis_metadata or {}).get("rejected_duplicate_candidates") or []
+                existing_metadata.get("rejected_duplicate_candidates") or []
             ),
         },
     }
@@ -461,7 +554,7 @@ def merge_profile_fields(existing, incoming) -> dict:
 
 def update_profile(existing, extracted: dict) -> dict:
     chapter = extracted.get("first_chapter", existing.first_chapter)
-    return merge_profile_fields(
+    merged = merge_profile_fields(
         existing,
         {
             "name": extracted.get("name"),
@@ -482,5 +575,36 @@ def update_profile(existing, extracted: dict) -> dict:
             "growth_events": merge_growth_events(
                 _growth_event_group(extracted.get("growth_event"))
             ),
+            "evidence": extracted.get("evidence")
+            if isinstance(extracted.get("evidence"), dict)
+            else {},
+            "confidence": extracted.get("confidence"),
+            "canonical_confidence": extracted.get("canonical_confidence"),
+            "resolver_status": extracted.get("resolver_status"),
         },
     )
+    if is_author_curated_character(existing):
+        for field in (
+            "aliases",
+            "role",
+            "first_chapter",
+            "trait_state",
+            "hair",
+            "eyes",
+            "build",
+            "age_descriptor",
+            "distinguishing",
+            "personality_tags",
+            "goal",
+            "motivations",
+            "fears",
+            "lie_they_believe",
+            "backstory_wound",
+            "arc_type",
+            "arc_summary",
+            "archetype",
+            "growth_events",
+            "analysis_metadata",
+        ):
+            merged[field] = getattr(existing, field)
+    return merged

@@ -1,3 +1,4 @@
+import json
 import uuid
 
 import fitz
@@ -17,6 +18,7 @@ from app.models.character import (
 from app.models.intelligence import BookChunk, CharacterRelationship, Notification
 from app.models.operations import TaskExecution
 from app.models.user import User
+from app.services.extraction_character_profile_service import enrich_chapter_character_profiles
 from app.services.extraction_processing_flow_service import _claim_book_completion
 from app.workers.consumers import extraction_consumer
 from app.workers.consumers.extraction_consumer import (
@@ -52,6 +54,17 @@ async def _allow_ingestion_tests_to_dispatch_all_fixture_chapters(monkeypatch, d
         .values(status="succeeded")
     )
     await db.commit()
+
+
+@pytest.fixture(autouse=True)
+def _isolate_existing_ingestion_tests_from_profile_model(monkeypatch):
+    async def _passthrough_profiles(entities, **_kwargs):
+        return entities
+
+    monkeypatch.setattr(
+        "app.services.extraction_chapter_llm_service.enrich_chapter_character_profiles",
+        _passthrough_profiles,
+    )
 
 
 def _bind_worker_session(monkeypatch, db) -> None:
@@ -221,6 +234,113 @@ async def test_process_chapter_clears_stale_pending_and_suppressed_candidates_on
 
 
 @pytest.mark.asyncio
+async def test_process_chapter_persists_cited_profile_from_separate_model_stage(db, monkeypatch):
+    user = User(email="profile-stage@lorevia.app", username="profile-stage", password_hash="hash")
+    db.add(user)
+    await db.flush()
+    book = Book(
+        user_id=user.id,
+        title="Evidence Stage",
+        format="pdf",
+        s3_key="books/evidence-stage.pdf",
+        status="processing",
+        total_chapters=1,
+    )
+    db.add(book)
+    await db.commit()
+    source = "Mara Vale promised to protect the gate. Mara Vale stood watch until morning."
+
+    async def fake_discover(_text: str, **kwargs) -> dict:
+        assert kwargs["discovery_only"] is True
+        return {
+            "characters": [
+                {
+                    "name": "Mara Vale",
+                    "aliases": [],
+                    "entity_type": "person",
+                    "confidence": 0.95,
+                    "evidence": {
+                        "has_dialogue_or_action": True,
+                        "appears_multiple_times": True,
+                        "mention_count": 2,
+                        "strong_mention_count": 2,
+                    },
+                }
+            ],
+            "relationships": [],
+        }
+
+    async def fake_profile(**kwargs) -> str:
+        assert source in kwargs["user"]
+        return json.dumps(
+            {
+                "profile": {
+                    "goal": "protect the gate",
+                    "claim_evidence": {"goal": "Mara Vale promised to protect the gate."},
+                }
+            }
+        )
+
+    async def fake_embed(texts: list[str], **_kwargs) -> list[list[float]]:
+        return _embedding_for(len(texts))
+
+    monkeypatch.setattr(
+        "app.services.extraction_chapter_llm_service.enrich_chapter_character_profiles",
+        enrich_chapter_character_profiles,
+    )
+    monkeypatch.setattr(
+        "app.services.extraction_chapter_llm_service.extract_characters_and_relationships",
+        fake_discover,
+    )
+    monkeypatch.setattr(
+        "app.services.extraction_character_profile_service.complete_with_fallback",
+        fake_profile,
+    )
+    _patch_embedding_batches(monkeypatch, fake_embed)
+
+    await _process_chapter(
+        db,
+        book,
+        {"number": 1, "title": "One", "text": source},
+        queue_wait_ms=1,
+    )
+    await _process_chapter(
+        db,
+        book,
+        {"number": 1, "title": "One", "text": source},
+        queue_wait_ms=1,
+    )
+
+    characters = (
+        (await db.execute(select(Character).where(Character.book_id == book.id))).scalars().all()
+    )
+    candidates = (
+        (await db.execute(select(CharacterCandidate).where(CharacterCandidate.book_id == book.id)))
+        .scalars()
+        .all()
+    )
+    assert len(characters) == 1, [
+        (candidate.proposed_name, candidate.status, candidate.reason_codes)
+        for candidate in candidates
+    ]
+    character = characters[0]
+    assert character.mention_count == 2
+    assert character.analysis_metadata["mention_count_basis"] == "source_positions"
+    assert character.goal == "protect the gate"
+    assert character.analysis_metadata["profile_claims"] == [
+        {
+            "field": "goal",
+            "value": "protect the gate",
+            "quote": "Mara Vale promised to protect the gate.",
+            "chapter_number": 1,
+            "source_batch_key": f"{book.id}:1:1",
+            "start": 0,
+            "end": 39,
+        }
+    ]
+
+
+@pytest.mark.asyncio
 async def test_process_chapter_remains_incomplete_when_embedding_provider_disconnects(
     db,
     monkeypatch,
@@ -369,6 +489,9 @@ async def test_upload_pipeline_stages_and_processes_multiple_chapters(
                     "type": "ally",
                     "sentiment": 0.6,
                     "description": "They decide to work together.",
+                    "label_evidence": {
+                        "quote": "Aoi Tanaka enters the archive and meets Ren Sato."
+                    },
                 }
             ],
         }
@@ -616,7 +739,7 @@ async def test_upload_pipeline_rejects_noise_characters_and_records_diagnostics(
         {
             "number": 1,
             "title": "One",
-            "text": "Well, Gregor watched the room while Grete spoke softly. Help, he shouted toward the pier.",
+            "text": "Well, Gregor watched the room while Grete spoke softly. Help, he shouted toward the pier. Gregor returned to the room.",
         },
     ]
 
@@ -792,7 +915,7 @@ async def test_upload_pipeline_routes_low_confidence_new_character_into_review_q
         {
             "number": 1,
             "title": "One",
-            "text": "Anna looked up once. Gregor kept moving toward the door.",
+            "text": "Anna looked up once. Gregor kept moving toward the door. Gregor paused at the threshold.",
         },
     ]
 
@@ -1200,6 +1323,7 @@ async def test_upload_pipeline_collapses_same_batch_full_name_and_short_name_dup
                     "type": "family",
                     "sentiment": 0.7,
                     "description": "Gregor warns Grete to stay back.",
+                    "label_evidence": {"quote": "Gregor warned Grete to stay back."},
                 }
             ],
         }
@@ -1358,6 +1482,7 @@ async def test_unresolved_relationships_become_relationship_review_records(
                     "type": "hostile",
                     "sentiment": -0.5,
                     "description": "A tense confrontation.",
+                    "label_evidence": {"quote": "Gregor argued with the Doctor in the hall."},
                 }
             ],
         }
@@ -1508,7 +1633,7 @@ async def test_upload_pipeline_continues_when_cover_upload_fails(
 
 
 @pytest.mark.asyncio
-async def test_upload_pipeline_recovers_named_characters_when_llm_extraction_fails(
+async def test_upload_pipeline_keeps_chapter_incomplete_when_llm_extraction_fails(
     client, db, auth_headers, monkeypatch
 ):
     captured_book_tasks: list[dict] = []
@@ -1586,25 +1711,26 @@ async def test_upload_pipeline_recovers_named_characters_when_llm_extraction_fai
     assert book is not None
 
     for chapter_data in chapters:
-        await _process_chapter(db, book, chapter_data, queue_wait_ms=3)
+        with pytest.raises(RuntimeError, match="extractor offline"):
+            await _process_chapter(db, book, chapter_data, queue_wait_ms=3)
 
-    ready_notification = (
-        await db.execute(
-            select(Notification).where(
-                Notification.book_id == book_id, Notification.kind == "book_ready"
+    ready_notifications = (
+        (
+            await db.execute(
+                select(Notification).where(
+                    Notification.book_id == book_id, Notification.kind == "book_ready"
+                )
             )
         )
-    ).scalar_one()
-
-    assert ready_notification.data is not None
-    assert "Chapter extraction is complete" in ready_notification.body
+        .scalars()
+        .all()
+    )
 
     refreshed_book = await db.get(Book, book_id)
-    processing = (refreshed_book.writer_workspace or {}).get("processing", {})
-    extraction_diagnostics = (processing.get("parser_diagnostics") or {}).get(
-        "character_extraction"
-    ) or {}
-    fallback_characters = (
+    chapter = (
+        await db.execute(select(Chapter).where(Chapter.book_id == book_id, Chapter.number == 1))
+    ).scalar_one()
+    characters = (
         (
             await db.execute(
                 select(Character).where(Character.book_id == book_id).order_by(Character.name.asc())
@@ -1613,7 +1739,7 @@ async def test_upload_pipeline_recovers_named_characters_when_llm_extraction_fai
         .scalars()
         .all()
     )
-    fallback_candidates = (
+    candidates = (
         (
             await db.execute(
                 select(CharacterCandidate)
@@ -1624,12 +1750,11 @@ async def test_upload_pipeline_recovers_named_characters_when_llm_extraction_fai
         .scalars()
         .all()
     )
-    assert len(fallback_characters) == 1
-    candidate_names = [candidate.proposed_name for candidate in fallback_candidates]
-    assert "Gregor Samsa" in candidate_names or "Gregor" in candidate_names
-    assert extraction_diagnostics["failed_batches"] == 1
-    assert extraction_diagnostics["fallback_batches"] == 1
-    assert extraction_diagnostics["fallback_character_count"] >= 2
+    assert refreshed_book.status != "ready"
+    assert chapter.processed is False
+    assert ready_notifications == []
+    assert characters == []
+    assert candidates == []
 
 
 @pytest.mark.asyncio

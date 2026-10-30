@@ -10,6 +10,16 @@ export interface TraitState {
   [key: string]: Trait | undefined
 }
 
+export interface CharacterProfileClaim {
+  field: string
+  value: string
+  quote: string
+  chapter_number?: number | null
+  source_batch_key?: string | null
+  start?: number | null
+  end?: number | null
+}
+
 export interface Character {
   id: string
   book_id: string
@@ -46,6 +56,7 @@ export interface Character {
   analysis_metadata?: {
     persistence_reason?: string | null
     evidence_count?: number | null
+    strong_mention_count?: number | null
     summary_quality?: string | null
     needs_review?: boolean
     rejected_duplicate_candidates?: string[]
@@ -53,13 +64,16 @@ export interface Character {
     grounding_passage_count?: number
     confidence_band?: string | null
     user_curated?: boolean
+    user_reviewed?: boolean
     protected_from_repair?: boolean
     canonical_confidence?: number | null
     grounding_coverage?: number | null
     cluster_size?: number
     cluster_mention_count?: number
+    mention_count_basis?: "source_positions" | "mixed_legacy_records"
     resolver_status?: string | null
     review_note?: string | null
+    first_person_self_identification?: { chapter_number: number; excerpt: string } | null
     visibility_state?: "visible" | "quarantined" | "noise" | null
     approval_state?: "approved" | "pending_review" | "rejected" | "protected" | null
     approval_source?: "manual_review" | "deterministic_auto" | "backfill_review" | "legacy_import" | null
@@ -67,6 +81,7 @@ export interface Character {
     dossier_summary?: Record<string, unknown> | null
     trust_tier?: "visible" | "review_only" | "repaired_noise" | null
     trust_reasons?: string[]
+    profile_claims?: CharacterProfileClaim[]
   }
   visibility_state?: "visible" | "quarantined" | "noise" | null
   approval_state?: "approved" | "pending_review" | "rejected" | "protected" | null

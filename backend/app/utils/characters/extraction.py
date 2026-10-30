@@ -22,7 +22,13 @@ from app.utils.characters.identity import (
     normalize_character_name,
     partition_identity_key,
 )
-from app.utils.characters.text import _clean_reason_codes, clean_optional_text, clean_string_list
+from app.utils.characters.profile_evidence import merge_grounded_profile_claims
+from app.utils.characters.text import (
+    _clean_reason_codes,
+    clean_optional_text,
+    clean_string_list,
+    unique_source_mention_spans,
+)
 
 
 def build_character_mention_cluster_key(
@@ -319,6 +325,42 @@ def cluster_character_entities(entities: Sequence[Mapping[str, Any]]) -> list[di
                 )
             )
 
+        has_source_mentions = all(
+            isinstance(item.get("_source_mentions"), list) for item in cluster
+        )
+        if has_source_mentions:
+            source_mentions = unique_source_mention_spans(
+                [
+                    span
+                    for item in cluster
+                    for span in item["_source_mentions"]
+                    if isinstance(span, dict)
+                    and all(
+                        isinstance(span.get(key), int) for key in ("chunk_index", "start", "end")
+                    )
+                ]
+            )
+            total_mentions = len(source_mentions)
+            strong_mentions = min(strong_mentions, total_mentions)
+        else:
+            total_mentions = total_mentions or int(evidence.get("mention_count") or 0)
+            strong_mentions = strong_mentions or int(evidence.get("strong_mention_count") or 0)
+
+        for evidence_key in ("narrator_self_identification", "narrator_addressed_as"):
+            for item in ranked:
+                narrator_evidence = _mention_entity_evidence(item).get(evidence_key)
+                if isinstance(narrator_evidence, str) and narrator_evidence.strip():
+                    evidence[evidence_key] = narrator_evidence.strip()
+                    break
+
+        if any("profile_claims" in _mention_entity_evidence(item) for item in ranked):
+            grounded_profile, profile_citations = merge_grounded_profile_claims(
+                ranked, merged_traits
+            )
+            primary.update(grounded_profile)
+            merged_traits = grounded_profile["traits"]
+            evidence["profile_claims"] = profile_citations
+
         primary["aliases"] = filter_character_identity_aliases(
             primary.get("name"),
             merge_list_values(cluster_aliases, cluster_names),
@@ -327,11 +369,11 @@ def cluster_character_entities(entities: Sequence[Mapping[str, Any]]) -> list[di
         primary["confidence"] = max(float(item.get("confidence") or 0.0) for item in cluster)
         evidence.update(
             {
-                "mention_count": total_mentions or int(evidence.get("mention_count") or 0),
-                "strong_mention_count": strong_mentions
-                or int(evidence.get("strong_mention_count") or 0),
+                "mention_count": total_mentions,
+                "strong_mention_count": strong_mentions,
                 "cluster_size": len(cluster),
-                "cluster_mention_count": total_mentions or int(evidence.get("mention_count") or 0),
+                "cluster_mention_count": total_mentions,
+                "source_mention_count_verified": has_source_mentions,
                 "cluster_names": cluster_names,
                 "resolver_status": "clustered" if len(cluster) > 1 else "single",
                 "snippets": clean_string_list(passages)[:6],
@@ -352,6 +394,9 @@ def cluster_character_entities(entities: Sequence[Mapping[str, Any]]) -> list[di
                 "aliases": _entity_aliases(item),
                 "source_batch_key": item.get("_source_batch_key"),
                 "source_text": _entity_source_text(item),
+                "source_start": item.get("_source_start"),
+                "source_windows": item.get("_source_windows"),
+                "source_mentions": item.get("_source_mentions"),
                 "evidence": _mention_entity_evidence(item),
             }
             for item in cluster
