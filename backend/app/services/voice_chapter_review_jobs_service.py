@@ -230,13 +230,16 @@ def serialize_voice_chapter_job(job: AdvisorJob) -> dict[str, Any]:
     state = voice_job_state(job)
     completed = state.get("completed") or {}
     plan = state.get("plan") or {}
+    result = state.get("result") if job.status == "complete" else state.get("partial_result")
+    if isinstance(result, dict) and job.status != "complete":
+        result = {**result, "status": "partial_evidence"}
     return {
         "job_id": str(job.id),
         "status": job.status,
         "chapter_number": state.get("chapter_number"),
         "progress": {"completed": len(completed), "total": len(plan.get("work") or [])},
         "next_resume_at": state.get("next_resume_at"),
-        "result": state.get("result") if job.status == "complete" else None,
+        "result": result,
         "error": job.error_detail or job.error_code,
     }
 
@@ -244,9 +247,9 @@ def serialize_voice_chapter_job(job: AdvisorJob) -> dict[str, Any]:
 async def public_voice_chapter_job(
     db: AsyncSession, *, book_id: uuid.UUID, job: AdvisorJob
 ) -> dict[str, Any]:
-    """Hide a finished review when its saved source has since changed."""
+    """Hide saved findings when the chapter source has since changed."""
     payload = serialize_voice_chapter_job(job)
-    if job.status != "complete":
+    if payload["result"] is None:
         return payload
     try:
         _chapter, _source, fingerprint = await load_saved_voice_chapter(

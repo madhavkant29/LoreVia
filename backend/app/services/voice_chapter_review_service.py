@@ -225,11 +225,18 @@ async def process_voice_chapter_job(db: AsyncSession, *, job: Any, execution_id:
             "coverage": result["coverage"],
         }
         attempts = 0
+        partial_result = aggregate_voice_chapter_results(
+            source_text=source, plan=plan, completed=completed
+        )
         if not await update_voice_chapter_job(
             db,
             job_id=job_id,
             execution_id=execution_id,
-            state_changes={"completed": completed, "attempts": 0},
+            state_changes={
+                "completed": completed,
+                "attempts": 0,
+                "partial_result": partial_result,
+            },
         ):
             return "superseded"
     try:

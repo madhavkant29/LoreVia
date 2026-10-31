@@ -212,6 +212,25 @@ describe("VoiceConsistencyPage", () => {
     expect(startVoiceChapterReviewMock).toHaveBeenCalledWith("book-1", 1, true, false)
   })
 
+  it("shows completed voice cards during an unfinished chapter review", async () => {
+    latestVoiceChapterReviewMock.mockResolvedValue({
+      job_id: "running-job", status: "running", chapter_number: 1,
+      progress: { completed: 1, total: 3 }, next_resume_at: null, error: null,
+      result: {
+        status: "partial_evidence",
+        voices: [{ character_id: "character-1", character_name: "Mara", voice_mode: "dialogue", status: "complete", issues: [], warnings: [], coverage: { compared_ranges: [{ start: 10, end: 42 }] } }],
+        coverage: { processed_ranges: [{ start: 0, end: 50 }], unattributed_ranges: [{ start: 50, end: 100 }], unattributed_quoted_ranges: [], total_characters: 100 },
+        narrator_identified: false, narration_present: false,
+        unreviewed_ranges: [{ start: 50, end: 100 }],
+      },
+    })
+    renderPage()
+    await waitForContent("Reviewing chapter")
+    expect(container?.textContent).toContain("1 of 3 voice sections reviewed")
+    expect(container?.textContent).toContain("Mara · Dialogue")
+    expect(container?.textContent).toContain("This is not a clean verdict")
+  })
+
   it("starts a fresh review when the saved chapter already has a complete result", async () => {
     latestVoiceChapterReviewMock.mockResolvedValue({
       job_id: "completed-job", status: "complete", chapter_number: 1,

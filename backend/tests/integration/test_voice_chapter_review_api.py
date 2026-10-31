@@ -49,6 +49,7 @@ async def test_chapter_review_start_reuses_job_and_reports_progress(
         return chapter, source, voice_chapter_fingerprint(source)
 
     monkeypatch.setattr(voice_chapter, "load_saved_voice_chapter", load)
+    monkeypatch.setattr(voice_chapter_review_jobs_service, "load_saved_voice_chapter", load)
     enqueued = []
     monkeypatch.setattr(
         voice_chapter.review_voice_chapter_task,
@@ -91,12 +92,30 @@ async def test_chapter_review_start_reuses_job_and_reports_progress(
         db,
         job_id=job_id,
         execution_id="worker-1",
-        state_changes={"completed": {"one": {"review": {"issues": []}}}},
+        state_changes={
+            "completed": {"one": {"review": {"issues": []}}},
+            "partial_result": {"status": "complete", "voices": [{"character_name": "Mara"}]},
+        },
     )
     progress = await client.get(f"{path}/jobs/{job_id}", headers=auth_headers)
     assert progress.json()["progress"] == {"completed": 1, "total": 2}
-    assert progress.json()["result"] is None
+    assert progress.json()["result"] == {
+        "status": "partial_evidence",
+        "voices": [{"character_name": "Mara"}],
+    }
     assert "worker-1" not in progress.text
+
+    async def changed_source(_db, *, book_id, chapter_number):
+        assert book_id == book.id and chapter_number == 2
+        return chapter, "changed chapter", voice_chapter_fingerprint("changed chapter")
+
+    monkeypatch.setattr(voice_chapter, "load_saved_voice_chapter", changed_source)
+    monkeypatch.setattr(
+        voice_chapter_review_jobs_service, "load_saved_voice_chapter", changed_source
+    )
+    stale = await client.get(f"{path}/jobs/{job_id}", headers=auth_headers)
+    assert stale.json()["status"] == "failed"
+    assert stale.json()["result"] is None
     job.expires_at = datetime.now(UTC) - timedelta(seconds=1)
     await db.commit()
     assert (await client.get(f"{path}/jobs/{job_id}", headers=auth_headers)).status_code == 404
