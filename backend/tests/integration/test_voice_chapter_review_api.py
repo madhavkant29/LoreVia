@@ -105,6 +105,125 @@ async def test_chapter_review_start_reuses_job_and_reports_progress(
 
 
 @pytest.mark.asyncio
+async def test_duplicate_delivery_cannot_resume_manual_quota_pause(db, client, auth_headers):
+    me = await client.get("/api/v1/auth/me", headers=auth_headers)
+    user_id = uuid.UUID(me.json()["id"])
+    book = Book(
+        user_id=user_id,
+        title="Manual quota pause",
+        format="manual",
+        work_type="novel",
+        s3_key="books/manual-quota.txt",
+        status="ready",
+        mode="author",
+    )
+    db.add(book)
+    await db.commit()
+    fingerprint = voice_chapter_fingerprint("unchanged source")
+    job, _ = await start_voice_chapter_job(
+        db,
+        book_id=book.id,
+        user_id=user_id,
+        chapter_number=1,
+        source_fingerprint=fingerprint,
+    )
+    job.status = "paused"
+    job.result_json = {**job.result_json, "next_resume_at": None}
+    await db.commit()
+
+    assert await claim_voice_chapter_job(db, job_id=job.id, execution_id="duplicate") is None
+    await db.refresh(job)
+    assert job.status == "paused"
+
+    retried, enqueue = await start_voice_chapter_job(
+        db,
+        book_id=book.id,
+        user_id=user_id,
+        chapter_number=1,
+        source_fingerprint=fingerprint,
+        retry_paused=True,
+    )
+    assert enqueue and retried.id == job.id
+    assert await claim_voice_chapter_job(db, job_id=job.id, execution_id="manual-retry")
+    future = (datetime.now(UTC) + timedelta(minutes=10)).isoformat()
+    assert await update_voice_chapter_job(
+        db,
+        job_id=job.id,
+        execution_id="manual-retry",
+        status="paused",
+        state_changes={"next_resume_at": future},
+    )
+    assert await claim_voice_chapter_job(db, job_id=job.id, execution_id="too-early") is None
+    job.result_json = {
+        **job.result_json,
+        "next_resume_at": (datetime.now(UTC) - timedelta(seconds=1)).isoformat(),
+    }
+    await db.commit()
+    assert await claim_voice_chapter_job(db, job_id=job.id, execution_id="due-retry")
+
+
+@pytest.mark.asyncio
+async def test_configuration_error_fails_without_scheduling_ai_capacity_retry(
+    db, client, auth_headers, monkeypatch
+):
+    me = await client.get("/api/v1/auth/me", headers=auth_headers)
+    user_id = uuid.UUID(me.json()["id"])
+    book = Book(
+        user_id=user_id,
+        title="Configuration failure",
+        format="manual",
+        work_type="novel",
+        s3_key="books/voice-config.txt",
+        status="ready",
+        mode="author",
+    )
+    db.add(book)
+    await db.flush()
+    chapter = Chapter(book_id=book.id, number=1, s3_key="chapters/voice-config-1")
+    db.add(chapter)
+    await db.commit()
+    source = 'Mara said, "Take the north road before nightfall."'
+    fingerprint = voice_chapter_fingerprint(source)
+    job, _ = await start_voice_chapter_job(
+        db, book_id=book.id, user_id=user_id, chapter_number=1, source_fingerprint=fingerprint
+    )
+
+    async def access(*_args, **_kwargs):
+        return book, None, None
+
+    async def load(*_args, **_kwargs):
+        return chapter, source, fingerprint
+
+    async def characters(*_args, **_kwargs):
+        return [{"id": uuid.uuid4(), "name": "Mara", "aliases": []}]
+
+    async def version(*_args, **_kwargs):
+        return 1
+
+    async def review(**_kwargs):
+        raise HTTPException(503, detail={"kind": "llm_configuration"})
+
+    monkeypatch.setattr(voice_chapter_review_service, "get_book_with_ai_scan_access", access)
+    monkeypatch.setattr(voice_chapter_review_service, "load_saved_voice_chapter", load)
+    monkeypatch.setattr(voice_chapter_review_service, "load_voice_review_characters", characters)
+    monkeypatch.setattr(voice_chapter_review_service, "get_book_cache_version", version)
+    monkeypatch.setattr(voice_chapter_review_service, "run_voice_consistency_review", review)
+
+    claimed = await claim_voice_chapter_job(db, job_id=job.id, execution_id="config")
+    assert claimed is not None
+    assert (
+        await voice_chapter_review_service.process_voice_chapter_job(
+            db, job=claimed, execution_id="config"
+        )
+        == "failed"
+    )
+    await db.refresh(job)
+    assert job.status == "failed"
+    assert job.result_json.get("next_resume_at") is None
+    assert "contact support" in job.error_detail.lower()
+
+
+@pytest.mark.asyncio
 async def test_completed_voice_review_is_hidden_after_source_changes(
     client, db, auth_headers, monkeypatch
 ):

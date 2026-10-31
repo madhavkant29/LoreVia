@@ -113,13 +113,18 @@ async def start_voice_chapter_job(
     )
     if current is not None:
         state = voice_job_state(current)
-        if state.get("source_fingerprint") == source_fingerprint and current.status in {
-            "queued",
-            "running",
-            "paused",
-            "complete",
-            "failed",
-        } and not (force_refresh and current.status == "complete"):
+        if (
+            state.get("source_fingerprint") == source_fingerprint
+            and current.status
+            in {
+                "queued",
+                "running",
+                "paused",
+                "complete",
+                "failed",
+            }
+            and not (force_refresh and current.status == "complete")
+        ):
             if current.status == "failed" or (current.status == "paused" and retry_paused):
                 current.status = "queued"
                 current.result_json = {**state, "next_resume_at": None}
@@ -168,7 +173,7 @@ async def claim_voice_chapter_job(
         return None
     if job.status == "paused":
         resume_at = state.get("next_resume_at")
-        if resume_at and datetime.fromisoformat(resume_at) > now:
+        if not resume_at or datetime.fromisoformat(resume_at) > now:
             return None
     job.status = "running"
     job.result_json = {**state, "_execution_id": execution_id, "next_resume_at": None}

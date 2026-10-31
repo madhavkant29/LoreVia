@@ -9,6 +9,7 @@ from app.utils.voice_chapter_review_utils import (
     plan_voice_chapter_work,
     voice_chapter_fingerprint,
 )
+from app.utils.voice_review_utils import attributed_voice_samples
 
 
 def cast(names):
@@ -42,6 +43,35 @@ def test_unknown_quote_is_reported_and_named_alias_can_be_reviewed():
     plan = plan_voice_chapter_work(text, 2, characters)
     assert any(item["character_name"] == "Mara" for item in plan["work"])
     assert plan["unknown_quotes"]
+
+
+def test_quote_at_section_boundary_is_assigned_once_to_an_attributable_section():
+    character = cast(["Mara"])[0]
+    for filler_length in (9800, 9950):
+        text = (
+            "x " * (filler_length // 2)
+            + 'Mara said, "I will take the north road before dawn."'
+            + " y" * 100
+        )
+        plan = plan_voice_chapter_work(text, 2, [character])
+        dialogue = [item for item in plan["work"] if item["voice_mode"] == "dialogue"]
+        assert len(dialogue) == 1
+        item = dialogue[0]
+        assert attributed_voice_samples(
+            text[item["start"] : item["end"]],
+            character_name="Mara",
+            chapter_number=2,
+        )
+        assert plan["unreviewed_known_ranges"] == []
+
+
+def test_oversized_quote_is_reported_as_unreviewed_instead_of_silently_skipped():
+    text = 'Mara said, "' + "north road " * 1100 + '"'
+    plan = plan_voice_chapter_work(text, 2, cast(["Mara"]))
+    assert plan["unreviewed_known_ranges"]
+    report = aggregate_voice_chapter_results(source_text=text, plan=plan, completed={})
+    assert report["status"] != "complete"
+    assert report["unreviewed_ranges"] == plan["unreviewed_known_ranges"]
 
 
 def test_identified_narrator_gets_separate_voice_work():

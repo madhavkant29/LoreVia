@@ -38,8 +38,19 @@ def voice_chapter_pause(exc: HTTPException, attempts: int) -> tuple[str, str | N
     if kind in {"llm_tokens", "llm_budget"}:
         next_resume = detail.get("next_resume_at")
         if detail.get("auto_resume") and isinstance(next_resume, str):
-            return "Token allowance will refresh before the review resumes.", next_resume
+            try:
+                resume_at = datetime.fromisoformat(next_resume)
+            except ValueError:
+                resume_at = None
+            if resume_at is not None and resume_at.tzinfo is not None:
+                if resume_at > datetime.now(UTC):
+                    return "Token allowance will refresh before the review resumes.", next_resume
+                if attempts < 3:
+                    retry_at = (datetime.now(UTC) + timedelta(minutes=2**attempts)).isoformat()
+                    return "AI allowance is still unavailable. Review will retry shortly.", retry_at
         return "AI allowance is unavailable. Retry after your plan window refreshes.", None
+    if kind in {"llm_attribution", "llm_configuration"}:
+        return None
     if exc.status_code in {429, 503} and attempts < 3:
         next_resume = (datetime.now(UTC) + timedelta(minutes=2**attempts)).isoformat()
         return "AI processing is temporarily busy. Review will resume automatically.", next_resume
@@ -163,7 +174,13 @@ async def process_voice_chapter_job(db: AsyncSession, *, job: Any, execution_id:
                 execution_id=execution_id,
                 status="failed",
                 error_code="voice_review_failed",
-                error_detail="A voice section could not be reviewed. Retry the chapter.",
+                error_detail=(
+                    "AI review is unavailable due to a service configuration problem. "
+                    "Please contact support."
+                    if isinstance(exc.detail, dict)
+                    and exc.detail.get("kind") in {"llm_attribution", "llm_configuration"}
+                    else "A voice section could not be reviewed. Retry the chapter."
+                ),
             )
             return "failed"
         completed[item["key"]] = {
