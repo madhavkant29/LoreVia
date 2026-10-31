@@ -260,21 +260,16 @@ async def whats_the_word(
     require_author_access(current_user)
 
     client = get_openai_client()
-    try:
-        payload = await generate_whats_the_word_result(
-            client=client,
-            model=settings.OPENAI_INTEL_MODEL,
-            user_id=current_user.id,
-            book_id=book.id,
-            book_title=book.title,
-            description=body.description,
-            previous_word=body.previous_word,
-        )
-        return WhatsTheWordResponse(**payload)
-    finally:
-        # The client is owned by the process/loop registry and is closed only
-        # during application or worker shutdown.
-        pass
+    payload = await generate_whats_the_word_result(
+        client=client,
+        model=settings.OPENAI_INTEL_MODEL,
+        user_id=current_user.id,
+        book_id=book.id,
+        book_title=book.title,
+        description=body.description,
+        previous_word=body.previous_word,
+    )
+    return WhatsTheWordResponse(**payload)
 
 
 @router.post("/{book_id}/advisor/whats-the-word-stream")
@@ -310,10 +305,6 @@ async def whats_the_word_stream(
             yield _advisor_sse("error", {"error": public_llm_http_error_message(exc)})
         except ADVISOR_STREAM_ERRORS:
             yield _advisor_sse("error", {"error": public_error_message(500)})
-        finally:
-            # The client is owned by the process/loop registry and is closed
-            # only during application or worker shutdown.
-            pass
 
     return _advisor_stream_response(event_stream())
 
