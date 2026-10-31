@@ -15,21 +15,52 @@ test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => { if (!localStorage.getItem("lorevia-preferences")) localStorage.setItem("lorevia-preferences", JSON.stringify({ state: { theme: "dark" }, version: 0 })); document.cookie = "lorevia_analytics_consent=false; Path=/; SameSite=Lax" })
 })
 
+test("saved chapter review resumes after reload and shows separate voices", async ({ page }) => {
+  await page.goto(path)
+  await expect(page.getByRole("button", { name: "Review chapter", exact: true })).toBeEnabled()
+  await page.getByRole("button", { name: "Review chapter", exact: true }).click()
+  await expect(page.getByText("Chapter review queued")).toBeVisible()
+  await page.reload()
+  await expect(page.getByText("Reviewing chapter")).toBeVisible()
+  await expect(page.getByText("1 of 2 voice sections reviewed.")).toBeVisible()
+  await expect(page.getByText("Chapter review finished with limitations")).toBeVisible({ timeout: 10_000 })
+  await expect(page.getByRole("heading", { name: "Gregor · Dialogue" })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Grete · Dialogue" })).toBeVisible()
+  await expect(page.getByText(/1 quoted range without a supported speaker comparison/)).toBeVisible()
+  await page.getByRole("button", { name: "Review focused passage" }).first().click()
+  await expect(page.getByLabel("Character focus")).toHaveValue("char-gregor")
+})
+
+test("failed chapter review stays actionable on mobile in light and dark themes", async ({ page }) => {
+  await page.route((url) => url.pathname === "/api/v1/intelligence/book-1/advisor/voice-chapters/latest", (route) => route.fulfill({
+    json: { job_id: "failed-voice-job", status: "failed", chapter_number: 2, progress: { completed: 1, total: 2 }, next_resume_at: null, result: null, error: "A voice section could not be reviewed. Retry the chapter." },
+  }))
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto(path)
+  await expect(page.getByText("Chapter review stopped")).toBeVisible()
+  await expect(page.getByRole("button", { name: "Review chapter again" })).toBeEnabled()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy()
+  await page.evaluate(() => localStorage.setItem("lorevia-preferences", JSON.stringify({ state: { theme: "light" }, version: 0 })))
+  await page.reload()
+  await expect(page.getByText("Chapter review stopped")).toBeVisible()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy()
+})
+
 test("voice explanation opens by hover and click in dark and light themes", async ({ page }) => {
   await page.goto(path)
   const info = page.getByRole("button", { name: "How Voice Consistency works" })
   await expect(info).toBeVisible()
   await info.hover()
-  await expect(page.getByRole("tooltip")).toContainText("up to five known characters separately")
+  await expect(page.getByRole("tooltip")).toContainText("entire saved chapter")
   await page.mouse.move(0, 0)
   await expect(page.getByRole("tooltip")).toHaveCount(0)
   await info.click()
-  await expect(page.getByRole("tooltip")).toContainText("Longer chapters need a shorter passage")
+  await expect(page.getByRole("tooltip")).toContainText("Passage Auto-detect checks up to five known characters")
   await page.evaluate(() => localStorage.setItem("lorevia-preferences", JSON.stringify({ state: { theme: "light" }, version: 0 })))
   await page.reload()
   await expect(info).toBeVisible()
   await info.click()
-  await expect(page.getByRole("tooltip")).toContainText("Longer chapters need a shorter passage")
+  await expect(page.getByRole("tooltip")).toContainText("Passage Auto-detect checks up to five known characters")
 })
 
 test("short current dialogue shows a tentative review without a match percentage", async ({ page }) => {

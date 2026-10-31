@@ -2445,6 +2445,8 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
   const manuscriptProcessingMode = options.manuscriptProcessing ?? "default"
   const firstImpressionMode = options.firstImpression ?? "complete"
   let betaReaderJobPolls = 0
+  let voiceChapterJob: Record<string, unknown> | null = null
+  let voiceChapterPolls = 0
   let betaReaderRevisionCreated = false
   const mockConversationMessages: DirectMessage[] = [
     {
@@ -4992,6 +4994,36 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
       })
     }
 
+    if (path === "/api/v1/intelligence/book-1/advisor/voice-chapters/latest" && method === "GET") {
+      if (voiceChapterJob) {
+        voiceChapterPolls += 1
+        if (voiceChapterPolls === 2) voiceChapterJob = { ...voiceChapterJob, status: "running", progress: { completed: 1, total: 2 } }
+        if (voiceChapterPolls >= 3) voiceChapterJob = {
+          ...voiceChapterJob,
+          status: "complete",
+          progress: { completed: 2, total: 2 },
+          result: {
+            status: "partial_evidence", work_total: 2, work_completed: 2,
+            narrator_identified: false, unreviewed_ranges: [],
+            coverage: { processed_ranges: [{ start: 0, end: 80 }], unattributed_ranges: [], unattributed_quoted_ranges: [{ start: 72, end: 80 }], total_characters: 80 },
+            voices: [
+              { character_id: "char-gregor", character_name: "Gregor", voice_mode: "dialogue", status: "complete", issues: [], warnings: [], coverage: { processed_ranges: [{ start: 0, end: 60 }], compared_ranges: [{ start: 5, end: 25 }], total_characters: 80 } },
+              { character_id: "char-grete", character_name: "Grete", voice_mode: "dialogue", status: "partial_evidence", issues: [], warnings: ["Only one attributed speech sample was available."], coverage: { processed_ranges: [{ start: 40, end: 80 }], compared_ranges: [{ start: 45, end: 65 }], total_characters: 80 } },
+            ],
+          },
+        }
+      }
+      return json(route, voiceChapterJob)
+    }
+    if (path === "/api/v1/intelligence/book-1/advisor/voice-chapters" && method === "POST") {
+      const body = route.request().postDataJSON() as { chapter_number: number }
+      voiceChapterJob = { job_id: "voice-chapter-job-1", status: "queued", chapter_number: body.chapter_number, progress: { completed: 0, total: 2 }, next_resume_at: null, result: null, error: null }
+      voiceChapterPolls = 0
+      return json(route, voiceChapterJob, 202)
+    }
+    if (path === "/api/v1/intelligence/book-1/advisor/voice-chapters/jobs/voice-chapter-job-1" && method === "GET") {
+      return json(route, voiceChapterJob)
+    }
     if ((path === "/api/v1/intelligence/book-1/advisor/voice-consistency" || path === "/api/v1/intelligence/book-1/advisor/voice-consistency-stream") && method === "POST") {
       const respond = (body: unknown) => path.endsWith("-stream") ? voiceStreamResult(route, body) : json(route, body)
       if (voiceConsistencyMode === "backend-error") {

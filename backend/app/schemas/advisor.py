@@ -117,6 +117,21 @@ class VoiceConsistencyRequest(BaseModel):
     voice_mode: Literal["dialogue", "first_person_narration"] = "dialogue"
 
 
+class VoiceChapterReviewRequest(BaseModel):
+    chapter_number: int = Field(ge=1)
+    retry_paused: bool = False
+
+
+class VoiceChapterReviewJobResponse(BaseModel):
+    job_id: uuid.UUID
+    status: Literal["queued", "running", "paused", "complete", "failed"]
+    chapter_number: int
+    progress: dict[str, int]
+    next_resume_at: str | None = None
+    result: dict | None = None
+    error: str | None = None
+
+
 class VoiceReviewDecisionRequest(BaseModel):
     decision: Literal["intentional", "incorrect", "resolved"]
     note: str | None = Field(default=None, max_length=500)

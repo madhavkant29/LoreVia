@@ -12,6 +12,8 @@ const getWorkspaceTreeMock = vi.hoisted(() => vi.fn())
 const getChapterListMock = vi.hoisted(() => vi.fn())
 const getChapterMock = vi.hoisted(() => vi.fn())
 const voiceConsistencyReviewMock = vi.hoisted(() => vi.fn())
+const latestVoiceChapterReviewMock = vi.hoisted(() => vi.fn())
+const startVoiceChapterReviewMock = vi.hoisted(() => vi.fn())
 const saveVoiceReviewDecisionMock = vi.hoisted(() => vi.fn())
 const saveSceneMock = vi.hoisted(() => vi.fn())
 const saveNoteMock = vi.hoisted(() => vi.fn())
@@ -47,6 +49,8 @@ vi.mock("@/lib/api/reader", () => ({
 vi.mock("@/lib/api/intelligence", () => ({
   MAX_ADVISOR_PASSAGE_CHARS: 12_000,
   intelligenceApi: {
+    latestVoiceChapterReview: (...args: unknown[]) => latestVoiceChapterReviewMock(...args),
+    startVoiceChapterReview: (...args: unknown[]) => startVoiceChapterReviewMock(...args),
     voiceConsistencyReview: (...args: unknown[]) => voiceConsistencyReviewMock(...args),
     voiceConsistencyReviewStream: (...args: unknown[]) => {
       const handlers = args[3] as { onStage?: (message: string) => void } | undefined
@@ -120,6 +124,8 @@ beforeEach(() => {
   getChapterListMock.mockReset()
   getChapterMock.mockReset()
   voiceConsistencyReviewMock.mockReset()
+  latestVoiceChapterReviewMock.mockReset().mockResolvedValue(null)
+  startVoiceChapterReviewMock.mockReset().mockResolvedValue({ job_id: "job-1", status: "queued", chapter_number: 1, progress: { completed: 0, total: 0 }, next_resume_at: null, result: null, error: null })
   saveVoiceReviewDecisionMock.mockReset().mockResolvedValue({ finding_key: "a".repeat(64), decision: "intentional", note: null })
   saveSceneMock.mockReset()
 
@@ -178,6 +184,34 @@ afterEach(() => {
 })
 
 describe("VoiceConsistencyPage", () => {
+  it("starts a saved chapter review without submitting the passage", async () => {
+    latestVoiceChapterReviewMock.mockResolvedValueOnce(null).mockResolvedValue({
+      job_id: "job-1", status: "queued", chapter_number: 1,
+      progress: { completed: 0, total: 3 }, next_resume_at: null, result: null, error: null,
+    })
+    renderPage()
+    await waitForContent("The Ember Gate")
+    const start = Array.from(container?.querySelectorAll("button") ?? []).find((button) => button.textContent === "Review chapter")
+    await act(async () => { start?.click(); await new Promise((resolve) => setTimeout(resolve, 10)) })
+    await waitForContent("Chapter review queued")
+    expect(startVoiceChapterReviewMock).toHaveBeenCalledWith("book-1", 1, false)
+    expect(voiceConsistencyReviewMock).not.toHaveBeenCalled()
+  })
+
+  it("shows paused chapter progress and offers a retry", async () => {
+    latestVoiceChapterReviewMock.mockResolvedValue({
+      job_id: "job-1", status: "paused", chapter_number: 1,
+      progress: { completed: 2, total: 5 }, next_resume_at: null, result: null,
+      error: "AI allowance is unavailable.",
+    })
+    renderPage()
+    await waitForContent("Chapter review paused")
+    expect(container?.textContent).toContain("2 of 5 voice sections reviewed")
+    const retry = Array.from(container?.querySelectorAll("button") ?? []).find((button) => button.textContent === "Retry chapter review")
+    await act(async () => { retry?.click(); await new Promise((resolve) => setTimeout(resolve, 10)) })
+    expect(startVoiceChapterReviewMock).toHaveBeenCalledWith("book-1", 1, true)
+  })
+
   it("explains the voice comparison when the info button is clicked", async () => {
     renderPage()
     await waitForContent("The Ember Gate")
@@ -185,9 +219,9 @@ describe("VoiceConsistencyPage", () => {
     expect(info?.getAttribute("aria-expanded")).toBe("false")
     await act(async () => { info?.click() })
     expect(info?.getAttribute("aria-expanded")).toBe("true")
-    expect(container?.querySelector('[role="tooltip"]')?.textContent).toContain("current chapter loads automatically")
-    expect(container?.querySelector('[role="tooltip"]')?.textContent).toContain("up to five known characters separately")
-    expect(container?.querySelector('[role="tooltip"]')?.textContent).toContain("Longer chapters need a shorter passage")
+    expect(container?.querySelector('[role="tooltip"]')?.textContent).toContain("review runs in the background")
+    expect(container?.querySelector('[role="tooltip"]')?.textContent).toContain("entire saved chapter")
+    expect(container?.querySelector('[role="tooltip"]')?.textContent).toContain("Passage Auto-detect checks up to five known characters")
     await act(async () => { container?.querySelector<HTMLButtonElement>('button[aria-label="Close help"]')?.click() })
     expect(info?.getAttribute("aria-expanded")).toBe("false")
   })

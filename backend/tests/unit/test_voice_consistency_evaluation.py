@@ -19,9 +19,12 @@ CORPUS = Path(__file__).resolve().parents[2] / "evals/voice_consistency/v1/cases
 def test_voice_corpus_covers_all_original_synthetic_scenarios_and_late_issue():
     cases = load_voice_evaluation_cases(CORPUS)
 
-    assert len(cases) == 16
+    assert len(cases) == 19
     assert len(REQUIRED_SCENARIOS) == 13
-    assert {case["scenario"] for case in cases} == REQUIRED_SCENARIOS
+    assert REQUIRED_SCENARIOS.issubset({case["scenario"] for case in cases})
+    assert {"multi_speaker_chapter", "long_narrator_chapter"}.issubset(
+        {case["scenario"] for case in cases}
+    )
     long_case = next(case for case in cases if case["scenario"] == "long_passage")
     assert 4_000 < len(long_case["submitted_text"]) <= 12_000
     assert (

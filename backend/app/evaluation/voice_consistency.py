@@ -156,7 +156,7 @@ def load_voice_evaluation_cases(path: Path) -> list[dict[str, Any]]:
         ):
             raise ValueError(f"voice_corpus_invalid_probe:{case_id}")
         expanded.append({**raw, "submitted_text": submitted_text, "baseline_samples": baseline})
-    if scenarios != REQUIRED_SCENARIOS:
+    if not REQUIRED_SCENARIOS.issubset(scenarios):
         raise ValueError(f"voice_corpus_scenarios_missing:{sorted(REQUIRED_SCENARIOS - scenarios)}")
     return expanded
 

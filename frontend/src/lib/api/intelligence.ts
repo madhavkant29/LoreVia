@@ -22,6 +22,7 @@ import type {
   ProseTightenResponse,
   WhatsTheWordResponse,
   VoiceConsistencyResponse,
+  VoiceChapterReviewJob,
   VoiceReviewDecision,
   VoiceReviewDecisionResponse,
   BetaReaderAnalysisRequest,
@@ -310,6 +311,17 @@ export const intelligenceApi = {
         ...(options?.voiceMode ? { voice_mode: options.voiceMode } : {}),
       },
     }, handlers),
+  startVoiceChapterReview: (bookId: string, chapterNumber: number, retryPaused = false) =>
+    apiClient.post<VoiceChapterReviewJob>(intelligencePath(bookId, "/advisor/voice-chapters"), {
+      chapter_number: chapterNumber,
+      retry_paused: retryPaused,
+    }).then((response) => response.data),
+  latestVoiceChapterReview: (bookId: string, chapterNumber: number) =>
+    apiClient.get<VoiceChapterReviewJob | null>(intelligencePath(bookId, "/advisor/voice-chapters/latest"), {
+      params: { chapter_number: chapterNumber },
+    }).then((response) => response.data),
+  voiceChapterReviewStatus: (bookId: string, jobId: string) =>
+    apiClient.get<VoiceChapterReviewJob>(intelligencePath(bookId, `/advisor/voice-chapters/jobs/${encodeURIComponent(jobId)}`)).then((response) => response.data),
   saveVoiceReviewDecision: (bookId: string, findingKey: string, decision: VoiceReviewDecision) =>
     apiClient.put<VoiceReviewDecisionResponse>(
       intelligencePath(bookId, `/advisor/voice-decisions/${encodeURIComponent(findingKey)}`),

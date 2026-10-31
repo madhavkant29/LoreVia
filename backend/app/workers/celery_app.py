@@ -119,6 +119,7 @@ celery_app = Celery(
         "app.workers.tasks.embedding_tasks",
         "app.workers.tasks.export_tasks",
         "app.workers.tasks.intelligence_tasks",
+        "app.workers.tasks.voice_chapter_tasks",
         "app.workers.tasks.maintenance_tasks",
     ],
 )
@@ -178,6 +179,11 @@ celery_app.conf.update(
             "soft_time_limit": 15 * 60,
             "time_limit": 20 * 60,
         },
+        "intelligence_tasks.review_voice_chapter": {
+            "rate_limit": "30/m",
+            "soft_time_limit": 15 * 60,
+            "time_limit": 20 * 60,
+        },
         "intelligence_tasks.*": {
             "rate_limit": "60/m",
             "soft_time_limit": 60,
@@ -190,6 +196,11 @@ celery_app.conf.update(
     },
     result_expires=settings.CELERY_RESULT_EXPIRES_SECONDS if result_backend_url else None,
     beat_schedule={
+        "maintenance-resume-voice-chapter-reviews-every-5-minutes": {
+            "task": "maintenance_tasks.resume_voice_chapter_reviews",
+            "schedule": crontab(minute="*/5"),
+            "kwargs": {"limit": 50},
+        },
         "maintenance-release-stale-processing-reservations-every-15-minutes": {
             "task": "maintenance_tasks.release_stale_processing_reservations",
             "schedule": crontab(minute="*/15"),

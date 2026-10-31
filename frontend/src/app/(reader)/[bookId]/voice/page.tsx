@@ -7,6 +7,7 @@ import { WorkspacePage } from "@/components/ui/Workspace"
 import { HelpBubble } from "@/components/ui/HelpBubble"
 import { SUPPORT_HELP_EVENT } from "@/components/ui/ShortcutHelp"
 import { useVoiceWorkspace } from "./voicePage.state"
+import { ChapterVoiceReview } from "./voicePage.chapterReview"
 import { countVoiceSourceCharacters } from "@/lib/utils/voiceWorkspace"
 
 export default function VoiceConsistencyPage() {
@@ -43,13 +44,19 @@ function VoiceWorkspace({ bookId }: { bookId: string }) {
         <div className="mt-2 flex items-center gap-1 text-sm text-[rgb(var(--foreground))]">
           <span>How voice review works</span>
           <HelpBubble label="How Voice Consistency works" icon="info">
-            The current chapter loads automatically; you can switch chapters or paste a passage up to 12,000 characters. In dialogue mode, Auto-detect checks up to five known characters separately, using only speech it can attribute to each one. First-person narration checks one identified narrator. The review compares those samples with earlier manuscript evidence, shows supported shifts, and warns when speech or baseline evidence is missing. Longer chapters need a shorter passage. Your manuscript is not changed; save a note or snapshot to keep the result.
+            Review chapter checks the entire saved chapter, with a separate result for every identifiable speaker and first-person narrator. It compares attributable voice with earlier chapters, shows supporting passages, and reports unknown speakers or missing baseline evidence. The review runs in the background and can resume after a pause. For unsaved edits or a focused question, use passage review below: paste up to 12,000 characters or choose a chapter, then optionally select one character. Passage Auto-detect checks up to five known characters. Neither review changes your manuscript.
           </HelpBubble>
         </div>
 
         {bookQuery.isLoading ? <p className="mt-5" role="status">Loading book context…</p> : bookQuery.isError || !book ? <div className="mt-5 border-l-2 border-[rgb(var(--border))] pl-4" role="alert"><p>Book context could not be loaded. Your passage stays here; reviewing is unavailable until it loads.</p><button type="button" className="app-button-secondary mt-2" disabled={bookQuery.isFetching} onClick={() => void bookQuery.refetch()}>Retry book context</button></div> : null}
 
-        <section className="mt-6 border-y border-[rgb(var(--border))]">
+        <ChapterVoiceReview bookId={bookId} chapterNumber={selectedChapter} onFocusCharacter={(characterId, mode) => {
+          setSelectedCharacterId(characterId)
+          setVoiceMode(mode)
+          document.getElementById("voice-passage-review")?.scrollIntoView({ behavior: "smooth" })
+        }} />
+
+        <section id="voice-passage-review" className="mt-6 border-y border-[rgb(var(--border))]">
           <div className="grid border-b border-[rgb(var(--border))] md:grid-cols-2 md:divide-x md:divide-[rgb(var(--border))]">
             <div className="min-w-0 p-5 text-sm">
               <label htmlFor="voice-chapter" className="font-semibold">Chapter or passage</label>

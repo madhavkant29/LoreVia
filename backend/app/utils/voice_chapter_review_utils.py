@@ -1,0 +1,189 @@
+"""Source-wide voice work planning and result aggregation."""
+
+from __future__ import annotations
+
+import hashlib
+from collections.abc import Sequence
+from typing import Any
+
+from app.utils.characters.narrator import detect_explicit_first_person_narrator
+from app.utils.voice_review_coverage import (
+    aggregate_voice_review_coverage,
+    unattributed_quoted_ranges,
+)
+from app.utils.voice_review_utils import (
+    attributed_voice_samples,
+    disambiguate_voice_aliases,
+    first_person_narration_samples,
+    split_voice_passage,
+)
+
+
+def voice_chapter_fingerprint(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def plan_voice_chapter_work(
+    text: str, chapter_number: int, characters: Sequence[dict[str, Any]]
+) -> dict[str, Any]:
+    """Plan every known attributable voice without a cast-count cutoff."""
+    cast = disambiguate_voice_aliases(list(characters))
+    sections = split_voice_passage(text, max_chars=10_000, overlap=500)
+    narrator = detect_explicit_first_person_narrator(text, cast)
+    dialogue_narrator = narrator
+    work: list[dict[str, Any]] = []
+    samples_by_character = {
+        str(character["id"]): attributed_voice_samples(
+            text,
+            character_name=str(character["name"]),
+            aliases=list(character.get("aliases") or []),
+            chapter_number=chapter_number,
+            include_offsets=True,
+            first_person_speaker=dialogue_narrator is character,
+        )
+        for character in cast
+    }
+    for character in cast:
+        samples = samples_by_character[str(character["id"])]
+        for section in sections:
+            if any(
+                int(sample["source_start"]) < section["end"]
+                and int(sample["source_end"]) > section["start"]
+                for sample in samples
+            ):
+                work.append(
+                    {
+                        "key": f"dialogue:{character['id']}:{section['start']}",
+                        "character_id": str(character["id"]),
+                        "character_name": str(character["name"]),
+                        "voice_mode": "dialogue",
+                        "start": section["start"],
+                        "end": section["end"],
+                    }
+                )
+    if narrator is not None and first_person_narration_samples(
+        text, chapter_number=chapter_number, include_offsets=True
+    ):
+        for section in sections:
+            if first_person_narration_samples(section["text"], chapter_number=chapter_number):
+                work.append(
+                    {
+                        "key": f"first_person_narration:{narrator['id']}:{section['start']}",
+                        "character_id": str(narrator["id"]),
+                        "character_name": str(narrator["name"]),
+                        "voice_mode": "first_person_narration",
+                        "start": section["start"],
+                        "end": section["end"],
+                    }
+                )
+    attributed = [
+        {"start": int(sample["source_start"]), "end": int(sample["source_end"])}
+        for samples in samples_by_character.values()
+        for sample in samples
+        if sample.get("attribution_confidence") != "contextual"
+    ]
+    attribution_coverage = aggregate_voice_review_coverage(
+        [{"coverage": {"processed_ranges": attributed, "total_characters": len(text)}}],
+        total_characters=len(text),
+    )
+    unknown_quotes = unattributed_quoted_ranges(text, attribution_coverage["unattributed_ranges"])
+    return {
+        "work": work,
+        "sections": [{"start": item["start"], "end": item["end"]} for item in sections],
+        "unknown_quotes": unknown_quotes,
+        "narrator_identified": narrator is not None,
+        "narration_present": bool(
+            first_person_narration_samples(text, chapter_number=chapter_number)
+        ),
+        "known_character_count": len(cast),
+    }
+
+
+def aggregate_voice_chapter_results(
+    *,
+    source_text: str,
+    plan: dict[str, Any],
+    completed: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    """Translate bounded result offsets to the whole chapter and deduplicate overlap."""
+    total_characters = len(source_text)
+    grouped: dict[tuple[str, str], dict[str, Any]] = {}
+    seen: set[str] = set()
+    for item in plan["work"]:
+        result = completed.get(item["key"])
+        if result is None:
+            continue
+        review = result["review"]
+        group_key = (item["character_id"], item["voice_mode"])
+        group = grouped.setdefault(
+            group_key,
+            {
+                "character_id": item["character_id"],
+                "character_name": item["character_name"],
+                "voice_mode": item["voice_mode"],
+                "status": "complete",
+                "issues": [],
+                "warnings": [],
+                "coverage": [],
+            },
+        )
+        if review.get("status") == "insufficient_evidence":
+            group["status"] = "insufficient_evidence"
+        elif review.get("status") != "complete" and group["status"] != "insufficient_evidence":
+            group["status"] = "partial_evidence"
+        for issue in review.get("issues") or []:
+            key = str(issue.get("finding_key") or "")
+            if key and key not in seen:
+                seen.add(key)
+                group["issues"].append(issue)
+        group["warnings"].extend(result.get("warnings") or [])
+        coverage = result.get("coverage") or {}
+        group["coverage"].append(
+            {
+                "coverage": {
+                    "processed_ranges": [
+                        {"start": item["start"] + span["start"], "end": item["start"] + span["end"]}
+                        for span in coverage.get("processed_ranges") or []
+                    ],
+                    "compared_ranges": [
+                        {"start": item["start"] + span["start"], "end": item["start"] + span["end"]}
+                        for span in coverage.get("compared_ranges") or []
+                    ],
+                    "total_characters": total_characters,
+                }
+            }
+        )
+    voices = []
+    for group in grouped.values():
+        group["coverage"] = aggregate_voice_review_coverage(
+            group["coverage"], total_characters=total_characters
+        )
+        group["warnings"] = list(dict.fromkeys(group["warnings"]))
+        voices.append(group)
+    union = aggregate_voice_review_coverage(
+        [{"coverage": voice["coverage"]} for voice in voices],
+        total_characters=total_characters,
+    )
+    unknown_quotes = unattributed_quoted_ranges(
+        source_text, union.get("not_compared_ranges") or union["unattributed_ranges"]
+    )
+    missing = [item for item in plan["work"] if item["key"] not in completed]
+    return {
+        "status": (
+            "insufficient_evidence"
+            if not voices
+            else "partial_evidence"
+            if missing
+            or unknown_quotes
+            or (plan.get("narration_present") and not plan["narrator_identified"])
+            or any(v["status"] != "complete" for v in voices)
+            else "complete"
+        ),
+        "voices": voices,
+        "coverage": {**union, "unattributed_quoted_ranges": unknown_quotes},
+        "unreviewed_ranges": [{"start": item["start"], "end": item["end"]} for item in missing],
+        "work_total": len(plan["work"]),
+        "work_completed": len(completed),
+        "narrator_identified": plan["narrator_identified"],
+        "narration_present": bool(plan.get("narration_present")),
+    }

@@ -302,6 +302,35 @@ export interface VoiceConsistencyResponse {
   suppressed_findings?: VoiceConsistencyIssue[]
 }
 
+export interface VoiceChapterReviewResult {
+  status: "complete" | "partial_evidence" | "insufficient_evidence"
+  voices: Array<{
+    character_id: string
+    character_name: string
+    voice_mode: "dialogue" | "first_person_narration"
+    status: "complete" | "partial_evidence" | "insufficient_evidence"
+    issues: VoiceConsistencyIssue[]
+    warnings: string[]
+    coverage: VoiceSourceCoverage
+  }>
+  coverage: VoiceSourceCoverage
+  unreviewed_ranges: Array<{ start: number; end: number }>
+  work_total: number
+  work_completed: number
+  narrator_identified: boolean
+  narration_present?: boolean
+}
+
+export interface VoiceChapterReviewJob {
+  job_id: string
+  status: "queued" | "running" | "paused" | "complete" | "failed"
+  chapter_number: number
+  progress: { completed: number; total: number }
+  next_resume_at: string | null
+  result: VoiceChapterReviewResult | null
+  error: string | null
+}
+
 export type VoiceReviewDecision = "intentional" | "incorrect" | "resolved"
 
 export interface VoiceReviewDecisionResponse {
