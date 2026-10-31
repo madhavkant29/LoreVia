@@ -82,6 +82,7 @@ async def voice_consistency_review(
         body=body,
         current_user=current_user,
         cache_version=cache_version,
+        billing_user=billing_user,
     )
 
 

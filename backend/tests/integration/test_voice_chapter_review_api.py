@@ -621,8 +621,8 @@ async def test_collaborator_chapter_review_bills_book_owner(db, client, auth_hea
 
     billed = []
 
-    async def review(*, body, current_user, **_kwargs):
-        billed.append(current_user.id)
+    async def review(*, body, current_user, billing_user, **_kwargs):
+        billed.append((current_user.id, billing_user.id))
         return {
             "review": {"status": "insufficient_evidence", "issues": []},
             "warnings": [],
@@ -646,7 +646,7 @@ async def test_collaborator_chapter_review_bills_book_owner(db, client, auth_hea
         )
         == "complete"
     )
-    assert billed == [owner_id]
+    assert billed == [(collaborator_user.id, owner_id)]
 
 
 @pytest.mark.asyncio

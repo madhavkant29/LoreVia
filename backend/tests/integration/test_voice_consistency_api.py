@@ -8,9 +8,11 @@ from httpx import Request, Response
 from openai import APIConnectionError, APIStatusError
 from sqlalchemy import select
 
+from app.api.v1.routes.advisor import voice
 from app.core.security import create_access_token
 from app.models.book import Book
 from app.models.character import Character, CharacterVoiceProfile, VoiceReviewDecision
+from app.models.user import User
 from app.services.data_generation_service import (
     create_staging_generation,
     promote_staging_generation,
@@ -21,6 +23,52 @@ from app.services.voice_consistency_review_service import (
     load_voice_review_characters,
 )
 from app.utils.request_context import get_request_id
+
+
+@pytest.mark.asyncio
+async def test_collaborator_passage_review_bills_owner_and_keeps_reviewer_decisions(
+    client, db, auth_headers, monkeypatch
+):
+    me = await client.get("/api/v1/auth/me", headers=auth_headers)
+    owner_id = uuid.UUID(me.json()["id"])
+    reviewer = User(email=f"voice-reviewer-{uuid.uuid4()}@example.test", password_hash="test")
+    db.add(reviewer)
+    book = Book(
+        user_id=owner_id,
+        title="Shared voice review",
+        format="manual",
+        work_type="novel",
+        s3_key="books/shared-voice.txt",
+        status="ready",
+        mode="author",
+    )
+    db.add(book)
+    await db.commit()
+
+    async def access(*_args, **_kwargs):
+        return book, SimpleNamespace(role="editor", scope={}, permissions={}), None
+
+    async def version(*_args):
+        return 3
+
+    captured = {}
+
+    async def review(**kwargs):
+        captured.update(kwargs)
+        return {"review": {"status": "insufficient_evidence"}}
+
+    monkeypatch.setattr(voice, "get_book_with_ai_scan_access", access)
+    monkeypatch.setattr(voice, "get_book_cache_version", version)
+    monkeypatch.setattr(voice, "run_voice_consistency_review", review)
+    headers = {"Authorization": f"Bearer {create_access_token(str(reviewer.id))}"}
+    response = await client.post(
+        f"/api/v1/intelligence/{book.id}/advisor/voice-consistency",
+        headers=headers,
+        json={"text": "A short revision", "chapter_num": 2},
+    )
+    assert response.status_code == 200
+    assert captured["current_user"].id == reviewer.id
+    assert captured["billing_user"].id == owner_id
 
 
 @pytest.mark.asyncio

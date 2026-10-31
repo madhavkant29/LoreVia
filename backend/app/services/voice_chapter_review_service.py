@@ -51,9 +51,22 @@ def voice_chapter_pause(exc: HTTPException, attempts: int) -> tuple[str, str | N
         return "AI allowance is unavailable. Retry after your plan window refreshes.", None
     if kind in {"llm_attribution", "llm_configuration"}:
         return None
+    if kind == "manuscript_source":
+        if attempts >= 3:
+            return None
+        next_resume = (datetime.now(UTC) + timedelta(minutes=2**attempts)).isoformat()
+        return (
+            "Saved manuscript evidence is temporarily unavailable. Review will retry.",
+            next_resume,
+        )
     if exc.status_code in {429, 503} and attempts < 3:
         next_resume = (datetime.now(UTC) + timedelta(minutes=2**attempts)).isoformat()
-        return "AI processing is temporarily busy. Review will resume automatically.", next_resume
+        message = (
+            "Voice evidence could not be verified. Review will retry automatically."
+            if exc.status_code == 503 and not kind
+            else "AI processing is temporarily busy. Review will resume automatically."
+        )
+        return message, next_resume
     return None
 
 
@@ -151,7 +164,8 @@ async def process_voice_chapter_job(db: AsyncSession, *, job: Any, execution_id:
                 db=db,
                 book=book,
                 body=body,
-                current_user=billing_user,
+                current_user=user,
+                billing_user=billing_user,
                 cache_version=cache_version,
             )
         except HTTPException as exc:
@@ -179,6 +193,10 @@ async def process_voice_chapter_job(db: AsyncSession, *, job: Any, execution_id:
                     "Please contact support."
                     if isinstance(exc.detail, dict)
                     and exc.detail.get("kind") in {"llm_attribution", "llm_configuration"}
+                    else "Saved manuscript evidence could not be loaded. Retry the chapter, "
+                    "and contact support if it keeps failing."
+                    if isinstance(exc.detail, dict)
+                    and exc.detail.get("kind") == "manuscript_source"
                     else "A voice section could not be reviewed. Retry the chapter."
                 ),
             )

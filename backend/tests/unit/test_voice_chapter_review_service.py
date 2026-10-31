@@ -47,3 +47,16 @@ def test_malformed_quota_refresh_does_not_crash_or_auto_retry():
         0,
     )
     assert pause is not None and pause[1] is None
+
+
+def test_missing_baseline_source_is_not_presented_as_ai_capacity():
+    error = HTTPException(503, detail={"kind": "manuscript_source"})
+    pause = voice_chapter_pause(error, 0)
+    assert pause is not None and "manuscript evidence" in pause[0]
+    assert pause[1] is not None
+    assert voice_chapter_pause(error, 3) is None
+
+
+def test_unverifiable_model_evidence_is_not_presented_as_ai_capacity():
+    pause = voice_chapter_pause(HTTPException(503, detail="Invalid voice evidence"), 0)
+    assert pause is not None and "Voice evidence" in pause[0]

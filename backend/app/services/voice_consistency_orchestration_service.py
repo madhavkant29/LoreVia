@@ -69,9 +69,11 @@ async def run_voice_consistency_review(
     body: VoiceConsistencyRequest,
     current_user: Any,
     cache_version: int,
+    billing_user: Any | None = None,
 ) -> dict[str, Any]:
     """Build an evidence-backed review without holding a transaction through model calls."""
     book_id = book.id
+    billing_user_id = (billing_user or current_user).id
     total_ch = int(book.total_chapters or 0)
 
     try:
@@ -447,7 +449,7 @@ async def run_voice_consistency_review(
                     feature="advisor_voice_consistency",
                     model=settings.OPENAI_INTEL_MODEL,
                     db=db,
-                    user_id=current_user.id,
+                    user_id=billing_user_id,
                     book_id=book.id,
                     temperature=0.2,
                     max_tokens=1400,
