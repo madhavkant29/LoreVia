@@ -70,6 +70,7 @@ async def run_voice_consistency_review(
     current_user: Any,
     cache_version: int,
     billing_user: Any | None = None,
+    allowed_chapter_range: tuple[int | None, int | None] | None = None,
 ) -> dict[str, Any]:
     """Build an evidence-backed review without holding a transaction through model calls."""
     book_id = book.id
@@ -169,6 +170,7 @@ async def run_voice_consistency_review(
                 voice_mode=body.voice_mode,
                 source_cache=source_cache,
                 known_character_names=[str(item["name"]) for item in character_payloads],
+                allowed_chapter_range=allowed_chapter_range,
             )
             current = (
                 first_person_narration_samples(
@@ -375,6 +377,7 @@ async def run_voice_consistency_review(
                     submitted_chapter=body.chapter_num,
                     voice_mode="dialogue",
                     source_cache=source_cache,
+                    allowed_chapter_range=allowed_chapter_range,
                 )
 
         baseline_signature = voice_review_context_signature(

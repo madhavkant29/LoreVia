@@ -17,11 +17,14 @@ from app.services.voice_chapter_review_jobs_service import (
     VoiceChapterSourceError,
     load_saved_voice_chapter,
     update_voice_chapter_job,
+    voice_chapter_job_matches_scope,
     voice_job_state,
 )
 from app.services.voice_consistency_orchestration_service import run_voice_consistency_review
 from app.services.voice_consistency_review_service import load_voice_review_characters
+from app.utils.books.collaboration import collaboration_scope_payload
 from app.utils.books.collaboration_access import (
+    collaboration_is_chapter_restricted,
     get_book_with_ai_scan_access,
     require_collaboration_chapter_access,
 )
@@ -98,6 +101,20 @@ async def process_voice_chapter_job(db: AsyncSession, *, job: Any, execution_id:
         billing_user = user if collaborator is None else await db.get(User, book.user_id)
         if billing_user is None:
             raise VoiceChapterSourceError("Book owner not found.")
+        allowed_chapter_range = None
+        if collaboration_is_chapter_restricted(collaborator):
+            scope = collaboration_scope_payload(collaborator)
+            allowed_chapter_range = (scope.get("chapter_start"), scope.get("chapter_end"))
+        if not voice_chapter_job_matches_scope(job, allowed_chapter_range):
+            await update_voice_chapter_job(
+                db,
+                job_id=job_id,
+                execution_id=execution_id,
+                status="failed",
+                error_code="access_changed",
+                error_detail="Chapter access changed. Start a fresh review.",
+            )
+            return "failed"
         chapter, source, source_fingerprint = await load_saved_voice_chapter(
             db, book_id=book_id, chapter_number=chapter_number
         )
@@ -166,6 +183,7 @@ async def process_voice_chapter_job(db: AsyncSession, *, job: Any, execution_id:
                 body=body,
                 current_user=user,
                 billing_user=billing_user,
+                allowed_chapter_range=allowed_chapter_range,
                 cache_version=cache_version,
             )
         except HTTPException as exc:

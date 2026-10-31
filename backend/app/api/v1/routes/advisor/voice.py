@@ -24,7 +24,12 @@ from app.schemas.advisor import (
 from app.services.voice_consistency_orchestration_service import run_voice_consistency_review
 from app.services.voice_consistency_review_service import save_voice_review_decision
 from app.utils.advisor_route_errors import ADVISOR_STREAM_ERRORS
-from app.utils.books.collaboration_access import get_book_with_ai_scan_access
+from app.utils.books.collaboration import collaboration_scope_payload
+from app.utils.books.collaboration_access import (
+    collaboration_is_chapter_restricted,
+    get_book_with_ai_scan_access,
+    require_collaboration_chapter_access,
+)
 from app.utils.llm_usage_utils import public_llm_http_error_message
 from app.utils.logging.errors import public_error_message
 
@@ -67,6 +72,12 @@ async def voice_consistency_review(
     book, collaborator, _access = await get_book_with_ai_scan_access(
         db, book_id, current_user, require_owner_plan=False
     )
+    if body.chapter_num is not None:
+        require_collaboration_chapter_access(collaborator, body.chapter_num)
+    allowed_chapter_range = None
+    if collaboration_is_chapter_restricted(collaborator):
+        scope = collaboration_scope_payload(collaborator)
+        allowed_chapter_range = (scope.get("chapter_start"), scope.get("chapter_end"))
     billing_user = current_user if collaborator is None else await db.get(User, book.user_id)
     if billing_user is None:
         raise HTTPException(404, "Book owner not found.")
@@ -83,6 +94,7 @@ async def voice_consistency_review(
         current_user=current_user,
         cache_version=cache_version,
         billing_user=billing_user,
+        allowed_chapter_range=allowed_chapter_range,
     )
 
 

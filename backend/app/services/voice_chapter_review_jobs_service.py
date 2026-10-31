@@ -73,6 +73,14 @@ def voice_job_state(job: AdvisorJob) -> dict[str, Any]:
     return dict(job.result_json or {})
 
 
+def voice_chapter_job_matches_scope(
+    job: AdvisorJob, allowed_chapter_range: tuple[int | None, int | None] | None
+) -> bool:
+    """Invalidate saved reviews when the viewer's chapter access changes."""
+    expected = list(allowed_chapter_range) if allowed_chapter_range is not None else None
+    return voice_job_state(job).get("access_scope") == expected
+
+
 async def find_latest_voice_chapter_job(
     db: AsyncSession,
     *,
@@ -103,6 +111,7 @@ async def start_voice_chapter_job(
     user_id: uuid.UUID,
     chapter_number: int,
     source_fingerprint: str,
+    allowed_chapter_range: tuple[int | None, int | None] | None = None,
     retry_paused: bool = False,
     force_refresh: bool = False,
 ) -> tuple[AdvisorJob, bool]:
@@ -115,6 +124,7 @@ async def start_voice_chapter_job(
         state = voice_job_state(current)
         if (
             state.get("source_fingerprint") == source_fingerprint
+            and voice_chapter_job_matches_scope(current, allowed_chapter_range)
             and current.status
             in {
                 "queued",
@@ -144,6 +154,9 @@ async def start_voice_chapter_job(
         result_json={
             "chapter_number": chapter_number,
             "source_fingerprint": source_fingerprint,
+            "access_scope": (
+                list(allowed_chapter_range) if allowed_chapter_range is not None else None
+            ),
             "completed": {},
         },
         expires_at=datetime.now(UTC) + VOICE_CHAPTER_RETENTION,

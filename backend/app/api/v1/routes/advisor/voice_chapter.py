@@ -22,9 +22,12 @@ from app.services.voice_chapter_review_jobs_service import (
     public_voice_chapter_job,
     serialize_voice_chapter_job,
     start_voice_chapter_job,
+    voice_chapter_job_matches_scope,
     voice_job_state,
 )
+from app.utils.books.collaboration import collaboration_scope_payload
 from app.utils.books.collaboration_access import (
+    collaboration_is_chapter_restricted,
     get_book_with_ai_scan_access,
     require_collaboration_chapter_access,
 )
@@ -47,6 +50,10 @@ async def start_voice_chapter_review(
         db, book_id, current_user, require_owner_plan=False
     )
     require_collaboration_chapter_access(collaborator, body.chapter_number)
+    allowed_chapter_range = None
+    if collaboration_is_chapter_restricted(collaborator):
+        scope = collaboration_scope_payload(collaborator)
+        allowed_chapter_range = (scope.get("chapter_start"), scope.get("chapter_end"))
     billing_user = current_user if collaborator is None else await db.get(User, book.user_id)
     if billing_user is None:
         raise HTTPException(404, detail="Book owner not found.")
@@ -64,6 +71,7 @@ async def start_voice_chapter_review(
     )
     if (
         existing is None
+        or not voice_chapter_job_matches_scope(existing, allowed_chapter_range)
         or voice_job_state(existing).get("source_fingerprint") != fingerprint
         or (body.force_refresh and existing.status == "complete")
     ):
@@ -74,6 +82,7 @@ async def start_voice_chapter_review(
         user_id=current_user.id,
         chapter_number=body.chapter_number,
         source_fingerprint=fingerprint,
+        allowed_chapter_range=allowed_chapter_range,
         retry_paused=body.retry_paused,
         force_refresh=body.force_refresh,
     )
@@ -106,10 +115,14 @@ async def latest_voice_chapter_review(
         db, book_id, current_user, require_owner_plan=False
     )
     require_collaboration_chapter_access(collaborator, chapter_number)
+    allowed_chapter_range = None
+    if collaboration_is_chapter_restricted(collaborator):
+        scope = collaboration_scope_payload(collaborator)
+        allowed_chapter_range = (scope.get("chapter_start"), scope.get("chapter_end"))
     job = await find_latest_voice_chapter_job(
         db, book_id=book_id, user_id=current_user.id, chapter_number=chapter_number
     )
-    if job is None:
+    if job is None or not voice_chapter_job_matches_scope(job, allowed_chapter_range):
         return None
     return await public_voice_chapter_job(db, book_id=book_id, job=job)
 
@@ -137,4 +150,10 @@ async def voice_chapter_review_status(
     ):
         raise HTTPException(404, detail="Voice review job not found.")
     require_collaboration_chapter_access(collaborator, int(voice_job_state(job)["chapter_number"]))
+    allowed_chapter_range = None
+    if collaboration_is_chapter_restricted(collaborator):
+        scope = collaboration_scope_payload(collaborator)
+        allowed_chapter_range = (scope.get("chapter_start"), scope.get("chapter_end"))
+    if not voice_chapter_job_matches_scope(job, allowed_chapter_range):
+        raise HTTPException(404, detail="Voice review job not found.")
     return await public_voice_chapter_job(db, book_id=book_id, job=job)

@@ -125,6 +125,7 @@ async def load_voice_baseline_samples(
     max_samples: int = 128,
     source_cache: dict[str, str] | None = None,
     known_character_names: Sequence[str] = (),
+    allowed_chapter_range: tuple[int | None, int | None] | None = None,
 ) -> list[dict[str, Any]]:
     """Retrieve voice samples from current manuscript sources, never stale derived chunks."""
     if max_samples < 1:
@@ -132,6 +133,12 @@ async def load_voice_baseline_samples(
     statement = select(Chapter.number, Chapter.s3_key).where(Chapter.book_id == book_id)
     if submitted_chapter is not None:
         statement = statement.where(Chapter.number < submitted_chapter)
+    if allowed_chapter_range is not None:
+        chapter_start, chapter_end = allowed_chapter_range
+        if chapter_start is not None:
+            statement = statement.where(Chapter.number >= chapter_start)
+        if chapter_end is not None:
+            statement = statement.where(Chapter.number <= chapter_end)
     statement = statement.order_by(Chapter.number)
     source_rows = (await db.execute(statement)).all()
     # Release the read transaction before object-storage calls.

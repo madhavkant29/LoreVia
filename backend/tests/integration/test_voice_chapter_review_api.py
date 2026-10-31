@@ -690,3 +690,48 @@ async def test_manual_capacity_pause_does_not_starve_due_resume(db, client, auth
     await db.commit()
     rows = (await db.scalars(voice_chapter_resume_candidates(now, limit=1))).all()
     assert [item.id for item in rows] == [due.id]
+
+
+@pytest.mark.asyncio
+async def test_changed_collaborator_scope_hides_old_chapter_review(
+    db, client, auth_headers, monkeypatch
+):
+    me = await client.get("/api/v1/auth/me", headers=auth_headers)
+    user_id = uuid.UUID(me.json()["id"])
+    book = Book(
+        user_id=user_id,
+        title="Scope-bound review",
+        format="manual",
+        work_type="novel",
+        s3_key="books/scope-bound.txt",
+        status="ready",
+        mode="author",
+    )
+    db.add(book)
+    await db.commit()
+    job, _ = await start_voice_chapter_job(
+        db,
+        book_id=book.id,
+        user_id=user_id,
+        chapter_number=2,
+        source_fingerprint="a" * 64,
+        allowed_chapter_range=(2, 3),
+    )
+    collaborator = SimpleNamespace(
+        role="editor",
+        scope={"chapter_start": 2, "chapter_end": 4},
+        scope_chapter_start=2,
+        scope_chapter_end=4,
+        permissions={"can_view_selected_chapters_only": True},
+        permission_can_view_selected_chapters_only=True,
+    )
+
+    async def access(*_args, **_kwargs):
+        return book, collaborator, None
+
+    monkeypatch.setattr(voice_chapter, "get_book_with_ai_scan_access", access)
+    path = f"/api/v1/intelligence/{book.id}/advisor/voice-chapters"
+    latest = await client.get(f"{path}/latest?chapter_number=2", headers=auth_headers)
+    assert latest.status_code == 200 and latest.json() is None
+    status = await client.get(f"{path}/jobs/{job.id}", headers=auth_headers)
+    assert status.status_code == 404

@@ -10,7 +10,7 @@ from sqlalchemy import select
 
 from app.api.v1.routes.advisor import voice
 from app.core.security import create_access_token
-from app.models.book import Book
+from app.models.book import Book, BookCollaborator, Chapter
 from app.models.character import Character, CharacterVoiceProfile, VoiceReviewDecision
 from app.models.user import User
 from app.services.data_generation_service import (
@@ -20,9 +20,91 @@ from app.services.data_generation_service import (
 from app.services.extraction_voice_profile_service import refresh_chapter_voice_profiles
 from app.services.voice_consistency_review_service import (
     VoiceBaselineSourceError,
+    load_voice_baseline_samples,
     load_voice_review_characters,
 )
 from app.utils.request_context import get_request_id
+
+
+@pytest.mark.asyncio
+async def test_restricted_collaborator_cannot_review_an_unshared_chapter(client, db, auth_headers):
+    me = await client.get("/api/v1/auth/me", headers=auth_headers)
+    reviewer = User(email=f"restricted-voice-{uuid.uuid4()}@example.test", password_hash="test")
+    db.add(reviewer)
+    book = Book(
+        user_id=uuid.UUID(me.json()["id"]),
+        title="Restricted voice",
+        format="manual",
+        work_type="novel",
+        s3_key="books/restricted-voice.txt",
+        status="ready",
+        mode="author",
+    )
+    db.add(book)
+    await db.flush()
+    db.add(
+        BookCollaborator(
+            book_id=book.id,
+            invited_user_id=reviewer.id,
+            email=reviewer.email,
+            role="editor",
+            invite_status="active",
+            scope={"chapter_start": 3, "chapter_end": 4},
+            permissions={"can_run_ai_scans": True, "can_view_selected_chapters_only": True},
+            scope_chapter_start=3,
+            scope_chapter_end=4,
+            permission_can_run_ai_scans=True,
+            permission_can_view_selected_chapters_only=True,
+        )
+    )
+    await db.commit()
+    headers = {"Authorization": f"Bearer {create_access_token(str(reviewer.id))}"}
+    denied = await client.post(
+        f"/api/v1/intelligence/{book.id}/advisor/voice-consistency",
+        headers=headers,
+        json={"text": "A short revision", "chapter_num": 2},
+    )
+    assert denied.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_voice_baseline_loads_only_shared_chapters(db, monkeypatch):
+    book = Book(
+        user_id=uuid.uuid4(),
+        title="Shared baseline",
+        format="manual",
+        work_type="novel",
+        s3_key="books/shared-baseline.txt",
+        status="ready",
+        mode="author",
+    )
+    owner = User(
+        id=book.user_id, email=f"baseline-{uuid.uuid4()}@example.test", password_hash="test"
+    )
+    db.add(owner)
+    db.add(book)
+    await db.flush()
+    for number in range(1, 5):
+        db.add(Chapter(book_id=book.id, number=number, s3_key=f"chapters/voice-{number}"))
+    await db.commit()
+    loaded = []
+
+    def download(key):
+        loaded.append(key)
+        return f'Mara said, "The lantern is lit in {key}."'
+
+    monkeypatch.setattr("app.services.voice_consistency_review_service.download_book", download)
+    samples = await load_voice_baseline_samples(
+        db,
+        book_id=book.id,
+        character_name="Mara",
+        aliases=[],
+        submitted_text="A revised passage",
+        submitted_chapter=4,
+        allowed_chapter_range=(3, 4),
+    )
+    assert loaded == ["chapters/voice-3"]
+    assert {sample["chapter_number"] for sample in samples} == {3}
 
 
 @pytest.mark.asyncio
