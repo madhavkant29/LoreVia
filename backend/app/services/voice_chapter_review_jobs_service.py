@@ -104,6 +104,7 @@ async def start_voice_chapter_job(
     chapter_number: int,
     source_fingerprint: str,
     retry_paused: bool = False,
+    force_refresh: bool = False,
 ) -> tuple[AdvisorJob, bool]:
     """Serialize starts for a book and reuse live work or a matching result."""
     await db.execute(select(Book.id).where(Book.id == book_id).with_for_update())
@@ -118,7 +119,7 @@ async def start_voice_chapter_job(
             "paused",
             "complete",
             "failed",
-        }:
+        } and not (force_refresh and current.status == "complete"):
             if current.status == "failed" or (current.status == "paused" and retry_paused):
                 current.status = "queued"
                 current.result_json = {**state, "next_resume_at": None}

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime, timedelta
+from time import monotonic
 from typing import Any
 
 from fastapi import HTTPException
@@ -47,6 +48,8 @@ def voice_chapter_pause(exc: HTTPException, attempts: int) -> tuple[str, str | N
 
 async def process_voice_chapter_job(db: AsyncSession, *, job: Any, execution_id: str) -> str:
     """Run every planned character-section pair and checkpoint each success."""
+    # Include source loading and planning in the task's time budget.
+    deadline = monotonic() + 12 * 60
     state = voice_job_state(job)
     job_id = job.id
     book_id = job.book_id
@@ -108,9 +111,24 @@ async def process_voice_chapter_job(db: AsyncSession, *, job: Any, execution_id:
     completed = dict(state.get("completed") or {})
     attempts = int(state.get("attempts") or 0)
     cache_version = await get_book_cache_version(str(book_id))
+    # Leave room before Celery's soft limit so a long chapter can checkpoint
+    # and continue in another task instead of losing the current section.
     for item in plan["work"]:
         if item["key"] in completed:
             continue
+        if monotonic() >= deadline:
+            await update_voice_chapter_job(
+                db,
+                job_id=job_id,
+                execution_id=execution_id,
+                status="paused",
+                state_changes={
+                    "next_resume_at": (datetime.now(UTC) + timedelta(minutes=1)).isoformat()
+                },
+                error_code="continuing",
+                error_detail="Reviewing the remaining voice sections shortly.",
+            )
+            return "paused"
         body = VoiceConsistencyRequest(
             text=source[item["start"] : item["end"]],
             chapter_num=chapter_number,

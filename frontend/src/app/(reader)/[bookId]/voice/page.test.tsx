@@ -194,7 +194,7 @@ describe("VoiceConsistencyPage", () => {
     const start = Array.from(container?.querySelectorAll("button") ?? []).find((button) => button.textContent === "Review chapter")
     await act(async () => { start?.click(); await new Promise((resolve) => setTimeout(resolve, 10)) })
     await waitForContent("Chapter review queued")
-    expect(startVoiceChapterReviewMock).toHaveBeenCalledWith("book-1", 1, false)
+    expect(startVoiceChapterReviewMock).toHaveBeenCalledWith("book-1", 1, false, false)
     expect(voiceConsistencyReviewMock).not.toHaveBeenCalled()
   })
 
@@ -209,7 +209,34 @@ describe("VoiceConsistencyPage", () => {
     expect(container?.textContent).toContain("2 of 5 voice sections reviewed")
     const retry = Array.from(container?.querySelectorAll("button") ?? []).find((button) => button.textContent === "Retry chapter review")
     await act(async () => { retry?.click(); await new Promise((resolve) => setTimeout(resolve, 10)) })
-    expect(startVoiceChapterReviewMock).toHaveBeenCalledWith("book-1", 1, true)
+    expect(startVoiceChapterReviewMock).toHaveBeenCalledWith("book-1", 1, true, false)
+  })
+
+  it("starts a fresh review when the saved chapter already has a complete result", async () => {
+    latestVoiceChapterReviewMock.mockResolvedValue({
+      job_id: "completed-job", status: "complete", chapter_number: 1,
+      progress: { completed: 1, total: 1 }, next_resume_at: null,
+      result: { status: "insufficient_evidence", voices: [], coverage: { processed_ranges: [], total_characters: 100, unattributed_quoted_ranges: [] }, narrator_identified: false, unreviewed_ranges: [] },
+      error: null,
+    })
+    renderPage()
+    await waitForContent("Chapter review finished with limitations")
+    const again = Array.from(container?.querySelectorAll("button") ?? []).find((button) => button.textContent === "Review chapter again")
+    await act(async () => { again?.click(); await new Promise((resolve) => setTimeout(resolve, 10)) })
+    expect(startVoiceChapterReviewMock).toHaveBeenCalledWith("book-1", 1, false, true)
+  })
+
+  it("waits for an automatic retry instead of offering an immediate retry", async () => {
+    latestVoiceChapterReviewMock.mockResolvedValue({
+      job_id: "paused-job", status: "paused", chapter_number: 1,
+      progress: { completed: 1, total: 3 }, next_resume_at: new Date(Date.now() + 3600_000).toISOString(),
+      result: null, error: "AI processing is temporarily busy.",
+    })
+    renderPage()
+    await waitForContent("Chapter review paused")
+    const retry = Array.from(container?.querySelectorAll("button") ?? []).find((button) => button.textContent === "Automatic retry scheduled")
+    expect(retry?.disabled).toBe(true)
+    expect(startVoiceChapterReviewMock).not.toHaveBeenCalled()
   })
 
   it("explains the voice comparison when the info button is clicked", async () => {

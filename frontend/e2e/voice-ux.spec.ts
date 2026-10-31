@@ -31,6 +31,42 @@ test("saved chapter review resumes after reload and shows separate voices", asyn
   await expect(page.getByLabel("Character focus")).toHaveValue("char-gregor")
 })
 
+test("completed chapter review starts a fresh job when requested", async ({ page }) => {
+  await page.route((url) => url.pathname === "/api/v1/intelligence/book-1/advisor/voice-chapters/latest", (route) => route.fulfill({
+    json: {
+      job_id: "completed-job", status: "complete", chapter_number: 2,
+      progress: { completed: 1, total: 1 }, next_resume_at: null, error: null,
+      result: {
+        status: "insufficient_evidence", voices: [],
+        coverage: { processed_ranges: [], unattributed_ranges: [{ start: 0, end: 50 }], unattributed_quoted_ranges: [], total_characters: 50 },
+        narrator_identified: false, unreviewed_ranges: [],
+      },
+    },
+  }))
+  let requestBody: Record<string, unknown> | null = null
+  await page.route((url) => url.pathname === "/api/v1/intelligence/book-1/advisor/voice-chapters" && url.search === "", (route) => {
+    requestBody = route.request().postDataJSON()
+    return route.fulfill({ status: 202, json: { job_id: "fresh-job", status: "queued", chapter_number: 2, progress: { completed: 0, total: 0 }, next_resume_at: null, result: null, error: null } })
+  })
+  await page.goto(path)
+  await expect(page.getByText("Chapter review finished with limitations")).toBeVisible()
+  await page.getByRole("button", { name: "Review chapter again" }).click()
+  expect(requestBody).toMatchObject({ chapter_number: 2, force_refresh: true })
+})
+
+test("scheduled chapter review retry cannot be triggered early", async ({ page }) => {
+  await page.route((url) => url.pathname === "/api/v1/intelligence/book-1/advisor/voice-chapters/latest", (route) => route.fulfill({
+    json: {
+      job_id: "paused-job", status: "paused", chapter_number: 2,
+      progress: { completed: 1, total: 3 }, next_resume_at: new Date(Date.now() + 3600_000).toISOString(),
+      result: null, error: "AI processing is temporarily busy.",
+    },
+  }))
+  await page.goto(path)
+  await expect(page.getByText("Chapter review paused")).toBeVisible()
+  await expect(page.getByRole("button", { name: "Automatic retry scheduled" })).toBeDisabled()
+})
+
 test("failed chapter review stays actionable on mobile in light and dark themes", async ({ page }) => {
   await page.route((url) => url.pathname === "/api/v1/intelligence/book-1/advisor/voice-chapters/latest", (route) => route.fulfill({
     json: { job_id: "failed-voice-job", status: "failed", chapter_number: 2, progress: { completed: 1, total: 2 }, next_resume_at: null, result: null, error: "A voice section could not be reviewed. Retry the chapter." },

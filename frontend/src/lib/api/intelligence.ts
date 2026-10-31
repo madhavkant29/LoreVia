@@ -311,10 +311,11 @@ export const intelligenceApi = {
         ...(options?.voiceMode ? { voice_mode: options.voiceMode } : {}),
       },
     }, handlers),
-  startVoiceChapterReview: (bookId: string, chapterNumber: number, retryPaused = false) =>
+  startVoiceChapterReview: (bookId: string, chapterNumber: number, retryPaused = false, forceRefresh = false) =>
     apiClient.post<VoiceChapterReviewJob>(intelligencePath(bookId, "/advisor/voice-chapters"), {
       chapter_number: chapterNumber,
       retry_paused: retryPaused,
+      force_refresh: forceRefresh,
     }).then((response) => response.data),
   latestVoiceChapterReview: (bookId: string, chapterNumber: number) =>
     apiClient.get<VoiceChapterReviewJob | null>(intelligencePath(bookId, "/advisor/voice-chapters/latest"), {

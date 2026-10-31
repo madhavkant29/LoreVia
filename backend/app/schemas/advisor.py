@@ -120,6 +120,7 @@ class VoiceConsistencyRequest(BaseModel):
 class VoiceChapterReviewRequest(BaseModel):
     chapter_number: int = Field(ge=1)
     retry_paused: bool = False
+    force_refresh: bool = False
 
 
 class VoiceChapterReviewJobResponse(BaseModel):

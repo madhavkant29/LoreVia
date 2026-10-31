@@ -22,17 +22,23 @@ export function ChapterVoiceReview({
     queryFn: () => intelligenceApi.latestVoiceChapterReview(bookId, chapterNumber!),
     enabled: chapterNumber !== null,
     retry: false,
-    refetchInterval: (query) => ["queued", "running", "paused"].includes(query.state.data?.status ?? "") ? 5000 : false,
+    refetchInterval: (query) => {
+      const latest = query.state.data
+      return latest?.status === "queued" || latest?.status === "running" || (latest?.status === "paused" && !!latest.next_resume_at) ? 5000 : false
+    },
   })
   const job = reviewQuery.data
   const result = job?.result
   const active = job?.status === "queued" || job?.status === "running"
+  const awaitingAutomaticRetry = job?.status === "paused" && !!job.next_resume_at && Date.parse(job.next_resume_at) > Date.now()
   const reviewChapter = async () => {
-    if (chapterNumber === null || starting || active) return
+    if (chapterNumber === null || starting || active || awaitingAutomaticRetry) return
     setStarting(true)
     setStartError(null)
     try {
-      await intelligenceApi.startVoiceChapterReview(bookId, chapterNumber, job?.status === "paused")
+      await intelligenceApi.startVoiceChapterReview(
+        bookId, chapterNumber, job?.status === "paused", job?.status === "complete" || job?.status === "failed",
+      )
       await reviewQuery.refetch()
     } catch (error) {
       setStartError(getApiErrorDetail(error) ?? "Could not start the chapter review. Try again.")
@@ -48,8 +54,8 @@ export function ChapterVoiceReview({
           <h2 className="text-xl font-semibold">Review saved chapter</h2>
           <p className="mt-1 text-sm text-[rgb(var(--muted-foreground))]">Checks identifiable dialogue and first-person narration across the entire saved chapter. Passage review below is for unsaved edits or a focused check.</p>
         </div>
-        <button type="button" className="app-button-primary" disabled={chapterNumber === null || starting || active} onClick={() => void reviewChapter()}>
-          {starting ? "Starting…" : job?.status === "paused" ? "Retry chapter review" : job?.status === "failed" ? "Review chapter again" : "Review chapter"}
+        <button type="button" className="app-button-primary" disabled={chapterNumber === null || starting || active || awaitingAutomaticRetry} onClick={() => void reviewChapter()}>
+          {starting ? "Starting…" : awaitingAutomaticRetry ? "Automatic retry scheduled" : job?.status === "paused" ? "Retry chapter review" : job?.status === "failed" || job?.status === "complete" ? "Review chapter again" : "Review chapter"}
         </button>
       </div>
       {chapterNumber === null ? <p className="mt-3 text-sm">Select a saved chapter to start.</p> : null}

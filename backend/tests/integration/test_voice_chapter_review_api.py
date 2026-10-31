@@ -151,6 +151,63 @@ async def test_completed_voice_review_is_hidden_after_source_changes(
 
 
 @pytest.mark.asyncio
+async def test_explicit_refresh_creates_one_new_job_after_completed_review(
+    client, db, auth_headers, monkeypatch
+):
+    me = await client.get("/api/v1/auth/me", headers=auth_headers)
+    user_id = uuid.UUID(me.json()["id"])
+    book = Book(
+        user_id=user_id,
+        title="Review again",
+        format="manual",
+        work_type="novel",
+        s3_key="books/review-again.txt",
+        status="ready",
+        mode="author",
+    )
+    db.add(book)
+    await db.flush()
+    chapter = Chapter(book_id=book.id, number=1, s3_key="chapters/review-again-1")
+    db.add(chapter)
+    await db.commit()
+    source = 'Mara said, "I remember the harbor."'
+
+    async def load(_db, *, book_id, chapter_number):
+        return chapter, source, voice_chapter_fingerprint(source)
+
+    monkeypatch.setattr(voice_chapter, "load_saved_voice_chapter", load)
+    enqueued = []
+    monkeypatch.setattr(
+        voice_chapter.review_voice_chapter_task,
+        "apply_async",
+        lambda **kwargs: enqueued.append(kwargs),
+    )
+    path = f"/api/v1/intelligence/{book.id}/advisor/voice-chapters"
+    initial = await client.post(path, json={"chapter_number": 1}, headers=auth_headers)
+    assert initial.status_code == 202
+    first_id = uuid.UUID(initial.json()["job_id"])
+    first_job = await db.get(AdvisorJob, first_id)
+    first_job.status = "complete"
+    first_job.result_json = {**first_job.result_json, "result": {"status": "complete"}}
+    await db.commit()
+
+    reused = await client.post(path, json={"chapter_number": 1}, headers=auth_headers)
+    assert reused.status_code == 200
+    assert reused.json()["job_id"] == str(first_id)
+
+    refreshed = await client.post(
+        path, json={"chapter_number": 1, "force_refresh": True}, headers=auth_headers
+    )
+    assert refreshed.status_code == 202
+    assert refreshed.json()["job_id"] != str(first_id)
+    duplicate = await client.post(
+        path, json={"chapter_number": 1, "force_refresh": True}, headers=auth_headers
+    )
+    assert duplicate.json()["job_id"] == refreshed.json()["job_id"]
+    assert len(enqueued) == 2
+
+
+@pytest.mark.asyncio
 async def test_capacity_pause_resumes_only_unfinished_voice_sections(
     client, db, auth_headers, monkeypatch
 ):
@@ -255,6 +312,106 @@ async def test_capacity_pause_resumes_only_unfinished_voice_sections(
     assert job.expires_at > datetime.now(UTC) + timedelta(days=6)
     assert len(job.result_json["completed"]) == 2
     assert calls == [mara_id, lina_id, lina_id]
+
+
+@pytest.mark.asyncio
+async def test_long_voice_review_yields_and_resumes_from_checkpoint(
+    client, db, auth_headers, monkeypatch
+):
+    me = await client.get("/api/v1/auth/me", headers=auth_headers)
+    user_id = uuid.UUID(me.json()["id"])
+    book = Book(
+        user_id=user_id,
+        title="Long voice review",
+        format="manual",
+        work_type="novel",
+        s3_key="books/long-voice.txt",
+        status="ready",
+        mode="author",
+    )
+    db.add(book)
+    await db.flush()
+    chapter = Chapter(book_id=book.id, number=2, s3_key="chapters/long-voice-2")
+    db.add(chapter)
+    await db.commit()
+    source = 'Mara said, "Take the north road." Lina said, "I will take the south road."'
+    fingerprint = voice_chapter_fingerprint(source)
+    job, _ = await start_voice_chapter_job(
+        db, book_id=book.id, user_id=user_id, chapter_number=2, source_fingerprint=fingerprint
+    )
+    mara_id, lina_id = uuid.uuid4(), uuid.uuid4()
+
+    async def access(*_args, **_kwargs):
+        return book, None, None
+
+    async def load(*_args, **_kwargs):
+        return chapter, source, fingerprint
+
+    async def characters(*_args, **_kwargs):
+        return [
+            {"id": mara_id, "name": "Mara", "aliases": []},
+            {"id": lina_id, "name": "Lina", "aliases": []},
+        ]
+
+    async def version(*_args, **_kwargs):
+        return 1
+
+    clock = [0.0]
+    calls = []
+
+    async def review(*, body, **_kwargs):
+        calls.append(body.character_id)
+        if len(calls) == 1:
+            clock[0] = 721.0
+        return {
+            "review": {"status": "complete", "issues": []},
+            "warnings": [],
+            "coverage": {
+                "total_characters": len(body.text),
+                "processed_ranges": [{"start": 0, "end": len(body.text)}],
+                "compared_ranges": [{"start": 0, "end": len(body.text)}],
+            },
+        }
+
+    monkeypatch.setattr(voice_chapter_review_service, "get_book_with_ai_scan_access", access)
+    monkeypatch.setattr(voice_chapter_review_service, "load_saved_voice_chapter", load)
+    monkeypatch.setattr(voice_chapter_review_service, "load_voice_review_characters", characters)
+    monkeypatch.setattr(voice_chapter_review_service, "get_book_cache_version", version)
+    monkeypatch.setattr(voice_chapter_review_service, "run_voice_consistency_review", review)
+    monkeypatch.setattr(voice_chapter_review_service, "monotonic", lambda: clock[0])
+
+    claimed = await claim_voice_chapter_job(db, job_id=job.id, execution_id="slice-one")
+    assert claimed is not None
+    assert (
+        await voice_chapter_review_service.process_voice_chapter_job(
+            db, job=claimed, execution_id="slice-one"
+        )
+        == "paused"
+    )
+    await db.refresh(job)
+    assert job.error_code == "continuing"
+    assert len(job.result_json["completed"]) == 1
+    assert job.result_json["next_resume_at"]
+
+    clock[0] = 0.0
+    retried, enqueue = await start_voice_chapter_job(
+        db,
+        book_id=book.id,
+        user_id=user_id,
+        chapter_number=2,
+        source_fingerprint=fingerprint,
+        retry_paused=True,
+    )
+    assert enqueue and retried.id == job.id
+    claimed = await claim_voice_chapter_job(db, job_id=job.id, execution_id="slice-two")
+    assert claimed is not None
+    assert (
+        await voice_chapter_review_service.process_voice_chapter_job(
+            db, job=claimed, execution_id="slice-two"
+        )
+        == "complete"
+    )
+    assert calls == [mara_id, lina_id]
 
 
 @pytest.mark.asyncio

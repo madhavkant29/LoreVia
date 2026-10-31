@@ -62,7 +62,11 @@ async def start_voice_chapter_review(
         user_id=current_user.id,
         chapter_number=body.chapter_number,
     )
-    if existing is None or voice_job_state(existing).get("source_fingerprint") != fingerprint:
+    if (
+        existing is None
+        or voice_job_state(existing).get("source_fingerprint") != fingerprint
+        or (body.force_refresh and existing.status == "complete")
+    ):
         await enforce_continuity_rate_limit(db, billing_user)
     job, enqueue = await start_voice_chapter_job(
         db,
@@ -71,6 +75,7 @@ async def start_voice_chapter_review(
         chapter_number=body.chapter_number,
         source_fingerprint=fingerprint,
         retry_paused=body.retry_paused,
+        force_refresh=body.force_refresh,
     )
     if enqueue:
         try:
