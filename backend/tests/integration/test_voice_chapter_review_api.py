@@ -242,8 +242,9 @@ async def test_chapter_review_context_tracks_only_shared_baseline_chapters(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("source_kind", ["editor", "restored"])
 async def test_chapter_review_rejects_missing_immutable_saved_source(
-    client, db, auth_headers, monkeypatch
+    client, db, auth_headers, monkeypatch, source_kind
 ):
     me = await client.get("/api/v1/auth/me", headers=auth_headers)
     book = Book(
@@ -257,7 +258,11 @@ async def test_chapter_review_rejects_missing_immutable_saved_source(
     )
     db.add(book)
     await db.flush()
-    current_key = f"chapters/{book.id}/2/{uuid.uuid4().hex}.txt"
+    current_key = (
+        f"chapters/{book.id}/2/{uuid.uuid4().hex}.txt"
+        if source_kind == "editor"
+        else f"books/{book.user_id}/{book.id}/chapters/2/{uuid.uuid4()}.txt"
+    )
     db.add(Chapter(book_id=book.id, number=2, s3_key=current_key, content_version=2))
     await db.commit()
     requested: list[str] = []

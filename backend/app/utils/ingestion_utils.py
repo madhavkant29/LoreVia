@@ -52,13 +52,28 @@ def build_chapter_storage_key(book_id: uuid.UUID, chapter_number: int) -> str:
     return f"chapters/{book_id}/{chapter_number}.txt"
 
 
-def is_immutable_editor_chapter_key(
-    book_id: uuid.UUID, chapter_number: int, storage_key: str
-) -> bool:
-    """Recognize editor saves whose recorded key is the sole current source."""
-    return storage_key.startswith(f"chapters/{book_id}/{chapter_number}/") and storage_key.endswith(
-        ".txt"
-    )
+def is_immutable_editor_chapter_key(book_id: uuid.UUID, storage_key: str) -> bool:
+    """Recognize versioned editor saves and restored chapters as exact sources."""
+    parts = storage_key.split("/")
+    if len(parts) == 4:
+        return (
+            parts[0] == "chapters"
+            and parts[1] == str(book_id)
+            and parts[2].isdigit()
+            and len(parts[3]) > 4
+            and parts[3].endswith(".txt")
+        )
+    if len(parts) == 6:
+        return (
+            parts[0] == "books"
+            and bool(parts[1])
+            and parts[2] == str(book_id)
+            and parts[3] == "chapters"
+            and parts[4].isdigit()
+            and len(parts[5]) > 4
+            and parts[5].endswith(".txt")
+        )
+    return False
 
 
 def build_chapter_dispatch_plan(
@@ -114,7 +129,6 @@ async def load_staged_chapter_payload(
     chapter_number: int,
     *,
     chapter_s3_key: str | None = None,
-    allow_fallback: bool = True,
 ) -> dict[str, str | None] | None:
     candidate_keys: list[str] = []
     stored_key = str(chapter_s3_key or "")
@@ -124,7 +138,10 @@ async def load_staged_chapter_payload(
         candidate_keys.append(stored_key)
 
     fallback_key = build_chapter_storage_key(book_id, chapter_number)
-    if allow_fallback and fallback_key not in candidate_keys:
+    if (
+        not is_immutable_editor_chapter_key(book_id, stored_key)
+        and fallback_key not in candidate_keys
+    ):
         candidate_keys.append(fallback_key)
 
     for storage_key in candidate_keys:
@@ -149,10 +166,6 @@ async def load_processing_chapter_payload(
         book_id,
         chapter_number,
         chapter_s3_key=chapter_s3_key,
-        allow_fallback=not bool(
-            chapter_s3_key
-            and is_immutable_editor_chapter_key(book_id, chapter_number, chapter_s3_key)
-        ),
     )
     if not stored_payload:
         return None

@@ -299,9 +299,16 @@ async def test_baseline_retrieval_uses_standard_chapter_key_when_recorded_key_is
 
 
 @pytest.mark.asyncio
-async def test_missing_immutable_baseline_never_uses_older_standard_chapter(monkeypatch):
+@pytest.mark.parametrize("source_kind", ["editor", "restored"])
+async def test_missing_immutable_baseline_never_uses_older_standard_chapter(
+    monkeypatch, source_kind
+):
     book_id = uuid.uuid4()
-    current_key = f"chapters/{book_id}/1/{uuid.uuid4().hex}.txt"
+    current_key = (
+        f"chapters/{book_id}/1/{uuid.uuid4().hex}.txt"
+        if source_kind == "editor"
+        else f"books/{uuid.uuid4()}/{book_id}/chapters/1/{uuid.uuid4()}.txt"
+    )
     calls: list[str] = []
 
     def load(key):

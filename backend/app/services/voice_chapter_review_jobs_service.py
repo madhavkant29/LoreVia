@@ -14,10 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.book import Book, Chapter
 from app.models.intelligence import AdvisorJob
 from app.services.voice_consistency_review_service import load_voice_review_characters
-from app.utils.ingestion_utils import (
-    is_immutable_editor_chapter_key,
-    load_staged_chapter_payload,
-)
+from app.utils.ingestion_utils import load_staged_chapter_payload
 from app.utils.voice_chapter_review_utils import voice_chapter_fingerprint
 
 VOICE_CHAPTER_SCOPE = "book_voice_chapter"
@@ -113,7 +110,6 @@ async def load_saved_voice_chapter(
         book_id,
         chapter_number,
         chapter_s3_key=chapter.s3_key,
-        allow_fallback=not is_immutable_editor_chapter_key(book_id, chapter_number, chapter.s3_key),
     )
     text = str((payload or {}).get("text") or "")
     if not text.strip():

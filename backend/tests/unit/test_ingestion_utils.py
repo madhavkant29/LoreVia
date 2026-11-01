@@ -434,14 +434,9 @@ async def test_strict_immutable_chapter_load_never_returns_older_standard_source
         return serialize_manuscript_content("Old chapter").encode()
 
     monkeypatch.setattr("app.utils.ingestion_utils.download_book", load)
-    assert is_immutable_editor_chapter_key(book_id, 3, current_key)
-    assert not is_immutable_editor_chapter_key(book_id, 3, standard_key)
-    assert (
-        await load_staged_chapter_payload(
-            book_id, 3, chapter_s3_key=current_key, allow_fallback=False
-        )
-        is None
-    )
+    assert is_immutable_editor_chapter_key(book_id, current_key)
+    assert not is_immutable_editor_chapter_key(book_id, standard_key)
+    assert await load_staged_chapter_payload(book_id, 3, chapter_s3_key=current_key) is None
     assert calls == [current_key]
 
 
@@ -509,9 +504,14 @@ async def test_processing_preserves_exact_saved_text_and_rejects_blank_source(mo
 
 
 @pytest.mark.asyncio
-async def test_processing_rejects_stale_fallback_after_editor_save(monkeypatch):
+@pytest.mark.parametrize("source_kind", ["editor", "renumbered_editor", "restored"])
+async def test_processing_rejects_stale_fallback_after_immutable_save(monkeypatch, source_kind):
     book_id = uuid.uuid4()
-    saved_key = f"chapters/{book_id}/5/{uuid.uuid4().hex}.txt"
+    saved_key = {
+        "editor": f"chapters/{book_id}/5/{uuid.uuid4().hex}.txt",
+        "renumbered_editor": f"chapters/{book_id}/4/{uuid.uuid4().hex}.txt",
+        "restored": f"books/{uuid.uuid4()}/{book_id}/chapters/5/{uuid.uuid4()}.txt",
+    }[source_kind]
     requested: list[str] = []
 
     def load(key: str) -> bytes:
@@ -521,6 +521,7 @@ async def test_processing_rejects_stale_fallback_after_editor_save(monkeypatch):
         return serialize_manuscript_content("Old chapter").encode()
 
     monkeypatch.setattr("app.utils.ingestion_utils.download_book", load)
+    assert is_immutable_editor_chapter_key(book_id, saved_key)
     assert (
         await load_processing_chapter_payload(
             book_id, 5, chapter_s3_key=saved_key, chapter_title="Five"

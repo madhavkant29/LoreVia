@@ -6,10 +6,10 @@
 
 ## Current PR status, 2026-11-01 (updated after local verification)
 
-- The latest local candidate is commit `acb5fa1b` on `author`. It contains the
-  saved Voice Review source/context checks, exact editor source-key loading,
-  distinct citation deduplication, and bounded focused follow-up. PR #66
-  remains unmerged as last observed; verify its live head before deployment.
+- The reviewed `author` changes contain saved Voice Review source/context
+  checks, exact chapter-key loading, distinct citation deduplication, and
+  bounded focused follow-up. PR #66 remains unmerged as last observed; verify
+  its live head before deployment.
 - The user rebuilt the disposable Docker Compose Local API image and reported
   3,276 backend tests passed with one skip. The full frontend Vitest suite
   passed 1,543 tests across 281 files. Frontend lint, type checking, and the
@@ -19,6 +19,19 @@
   108 tests each, plus the authenticated and public launch audits. The local
   browser and Node environment is Windows/Node 25; GitHub uses Ubuntu/Node 24,
   so these results do not guarantee a hosted run.
+- A later review found that chapter-version restore keys use a second immutable
+  storage path. The shared loader now recognizes both editor-save and restored
+  keys, including keys whose embedded chapter number differs from the current
+  chapter number, and refuses stale standard-key fallback for either. The
+  rebuilt disposable API passed 3,280 tests with one skip; Ruff lint and format
+  checks passed.
+- Read-only VPS evidence reports Alembic revision
+  `20261018_reconcile_reported_indexes` and only the source-aware Vault Note
+  unique constraint. The Alembic safety guard now treats the upcoming path-only
+  constraint removal as a no-op when that constraint is absent. Two fresh
+  Alembic processes against a uniquely named disposable local database proved
+  that the guard blocks the drop when the old constraint exists and upgrades to
+  head without a destructive override when it does not. No VPS migration was run.
 
 ### Historical audit notes (recorded before commit `acb5fa1b`)
 

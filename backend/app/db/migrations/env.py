@@ -136,6 +136,16 @@ def _destructive_upgrade_still_has_runtime_impact(path: Path) -> bool:
                 indexes = _index_names(inspector, "subscription_events")
                 return "ix_subscription_events_source_event_id" in indexes
 
+            if path.name == "20261028_vault_source_unique.py":
+                if "book_vault_notes" not in tables:
+                    return False
+                unique_constraints = {
+                    name
+                    for constraint in inspector.get_unique_constraints("book_vault_notes")
+                    if isinstance(name := constraint.get("name"), str)
+                }
+                return "uq_book_vault_notes_user_book_path" in unique_constraints
+
             if path.name == "20260529_drop_users_login_activity_dates.py":
                 if "users" not in tables:
                     return False

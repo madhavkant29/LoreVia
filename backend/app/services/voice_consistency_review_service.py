@@ -166,7 +166,7 @@ async def load_voice_baseline_samples(
                     raw = await asyncio.to_thread(download_book, storage_key)
                     stored_payload = deserialize_manuscript_content(raw)
                 except STORAGE_IO_EXCEPTIONS:
-                    if is_immutable_editor_chapter_key(book_id, chapter_number, storage_key):
+                    if is_immutable_editor_chapter_key(book_id, storage_key):
                         raise VoiceBaselineSourceError(
                             "voice_baseline_source_unavailable"
                         ) from None
