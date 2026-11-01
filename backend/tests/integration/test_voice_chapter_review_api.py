@@ -9,12 +9,14 @@ from fastapi import HTTPException
 
 from app.api.v1.routes.advisor import voice_chapter
 from app.models.book import Book, Chapter
+from app.models.character import Character
 from app.models.intelligence import AdvisorJob
 from app.models.user import User
 from app.services import voice_chapter_review_jobs_service, voice_chapter_review_service
 from app.services.voice_chapter_review_jobs_service import (
     claim_voice_chapter_job,
     find_latest_voice_chapter_job,
+    load_voice_chapter_context_fingerprint,
     start_voice_chapter_job,
     update_voice_chapter_job,
     voice_chapter_resume_candidates,
@@ -77,6 +79,15 @@ async def test_chapter_review_start_reuses_job_and_reports_progress(
     ).status_code == 404
     assert (await client.get(f"{path}/jobs/{job_id}")).status_code == 401
 
+    chapter.content_version += 1
+    await db.commit()
+    stale_before_results = await client.get(f"{path}/jobs/{job_id}", headers=auth_headers)
+    assert stale_before_results.json()["status"] == "failed"
+    assert stale_before_results.json()["result"] is None
+    assert "changed" in stale_before_results.json()["error"].lower()
+    chapter.content_version -= 1
+    await db.commit()
+
     job = await find_latest_voice_chapter_job(
         db, book_id=book.id, user_id=user_id, chapter_number=2
     )
@@ -121,6 +132,148 @@ async def test_chapter_review_start_reuses_job_and_reports_progress(
     assert (await client.get(f"{path}/jobs/{job_id}", headers=auth_headers)).status_code == 404
     job.expires_at = datetime.now(UTC) + timedelta(days=7)
     await db.commit()
+
+
+@pytest.mark.asyncio
+async def test_chapter_review_rejects_changed_cast_and_prior_baseline(
+    client, db, auth_headers, monkeypatch
+):
+    me = await client.get("/api/v1/auth/me", headers=auth_headers)
+    user_id = uuid.UUID(me.json()["id"])
+    book = Book(
+        user_id=user_id,
+        title="Harbor voices",
+        format="manual",
+        work_type="novel",
+        s3_key="books/harbor-voices.txt",
+        status="ready",
+        mode="author",
+    )
+    db.add(book)
+    await db.flush()
+    earlier = Chapter(book_id=book.id, number=1, s3_key="chapters/harbor-voices-1")
+    current = Chapter(book_id=book.id, number=2, s3_key="chapters/harbor-voices-2")
+    db.add_all([earlier, current])
+    await db.commit()
+    source = 'Mara said, "Bring the lantern."'
+
+    async def load(_db, *, book_id, chapter_number):
+        assert book_id == book.id and chapter_number == 2
+        return current, source, voice_chapter_fingerprint(source)
+
+    monkeypatch.setattr(voice_chapter, "load_saved_voice_chapter", load)
+    monkeypatch.setattr(voice_chapter_review_jobs_service, "load_saved_voice_chapter", load)
+    monkeypatch.setattr(voice_chapter.review_voice_chapter_task, "apply_async", lambda **_: None)
+    path = f"/api/v1/intelligence/{book.id}/advisor/voice-chapters"
+    first = await client.post(path, json={"chapter_number": 2}, headers=auth_headers)
+    assert first.status_code == 202
+    job = await db.get(AdvisorJob, uuid.UUID(first.json()["job_id"]))
+    assert job.result_json["context_fingerprint"]
+    job.status = "complete"
+    job.result_json = {**job.result_json, "result": {"status": "complete", "voices": []}}
+    await db.commit()
+
+    earlier.content_version += 1
+    await db.commit()
+    stale = await client.get(f"{path}/jobs/{job.id}", headers=auth_headers)
+    assert stale.json()["status"] == "failed"
+    assert stale.json()["result"] is None
+    second = await client.post(path, json={"chapter_number": 2}, headers=auth_headers)
+    assert second.status_code == 202
+    assert second.json()["job_id"] != str(job.id)
+
+    current_context = await load_voice_chapter_context_fingerprint(
+        db, book_id=book.id, chapter_number=2
+    )
+    db.add(Character(book_id=book.id, name="Mara", first_chapter=2))
+    await db.commit()
+    cast_context = await load_voice_chapter_context_fingerprint(
+        db, book_id=book.id, chapter_number=2
+    )
+    assert cast_context != current_context
+    third = await client.post(path, json={"chapter_number": 2}, headers=auth_headers)
+    assert third.status_code == 202
+    assert third.json()["job_id"] != second.json()["job_id"]
+    before_current_edit = await load_voice_chapter_context_fingerprint(
+        db, book_id=book.id, chapter_number=2
+    )
+    current.content_version += 1
+    await db.commit()
+    assert (
+        await load_voice_chapter_context_fingerprint(db, book_id=book.id, chapter_number=2)
+        != before_current_edit
+    )
+
+
+@pytest.mark.asyncio
+async def test_chapter_review_context_tracks_only_shared_baseline_chapters(
+    client, db, auth_headers
+):
+    me = await client.get("/api/v1/auth/me", headers=auth_headers)
+    book = Book(
+        user_id=uuid.UUID(me.json()["id"]),
+        title="Scoped voices",
+        format="manual",
+        work_type="novel",
+        s3_key="books/scoped-voices.txt",
+        status="ready",
+        mode="author",
+    )
+    db.add(book)
+    await db.flush()
+    outside = Chapter(book_id=book.id, number=1, s3_key="chapters/scoped-voices-1")
+    inside = Chapter(book_id=book.id, number=2, s3_key="chapters/scoped-voices-2")
+    current = Chapter(book_id=book.id, number=3, s3_key="chapters/scoped-voices-3")
+    db.add_all([outside, inside, current])
+    await db.commit()
+
+    async def fingerprint():
+        return await load_voice_chapter_context_fingerprint(
+            db, book_id=book.id, chapter_number=3, allowed_chapter_range=(2, 3)
+        )
+
+    original = await fingerprint()
+    outside.content_version += 1
+    await db.commit()
+    assert await fingerprint() == original
+    inside.content_version += 1
+    await db.commit()
+    assert await fingerprint() != original
+
+
+@pytest.mark.asyncio
+async def test_chapter_review_rejects_missing_immutable_saved_source(
+    client, db, auth_headers, monkeypatch
+):
+    me = await client.get("/api/v1/auth/me", headers=auth_headers)
+    book = Book(
+        user_id=uuid.UUID(me.json()["id"]),
+        title="Missing current source",
+        format="manual",
+        work_type="novel",
+        s3_key="books/missing-current.txt",
+        status="ready",
+        mode="author",
+    )
+    db.add(book)
+    await db.flush()
+    current_key = f"chapters/{book.id}/2/{uuid.uuid4().hex}.txt"
+    db.add(Chapter(book_id=book.id, number=2, s3_key=current_key, content_version=2))
+    await db.commit()
+    requested: list[str] = []
+
+    def load(key: str) -> bytes:
+        requested.append(key)
+        if key == current_key:
+            raise FileNotFoundError(key)
+        return b"Stale standard chapter"
+
+    monkeypatch.setattr("app.utils.ingestion_utils.download_book", load)
+    with pytest.raises(voice_chapter_review_jobs_service.VoiceChapterSourceError):
+        await voice_chapter_review_jobs_service.load_saved_voice_chapter(
+            db, book_id=book.id, chapter_number=2
+        )
+    assert requested == [current_key]
 
 
 @pytest.mark.asyncio

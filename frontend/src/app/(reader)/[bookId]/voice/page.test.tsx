@@ -231,6 +231,58 @@ describe("VoiceConsistencyPage", () => {
     expect(container?.textContent).toContain("This is not a clean verdict")
   })
 
+  it("opens a reviewable focused excerpt from a chapter longer than the passage limit", async () => {
+    const source = "Intro ".repeat(2_500) + 'Gregor said, "The late signal is here."' + " Epilogue".repeat(500)
+    const quoteStart = Array.from(source.slice(0, source.indexOf("The late signal"))).length
+    getChapterMock.mockResolvedValue({ chapter_title: "The Ember Gate", text_content: source })
+    latestVoiceChapterReviewMock.mockResolvedValue({
+      job_id: "complete-job", status: "complete", chapter_number: 1,
+      progress: { completed: 1, total: 1 }, next_resume_at: null, error: null,
+      result: {
+        status: "complete", voices: [{ character_id: "char-gregor", character_name: "Gregor", voice_mode: "dialogue", status: "complete", issues: [], warnings: [], coverage: { processed_ranges: [{ start: quoteStart, end: quoteStart + 15 }], compared_ranges: [{ start: quoteStart, end: quoteStart + 15 }] } }],
+        coverage: { processed_ranges: [{ start: quoteStart, end: quoteStart + 15 }], unattributed_ranges: [], unattributed_quoted_ranges: [], total_characters: Array.from(source).length },
+        narrator_identified: false, narration_present: false, unreviewed_ranges: [],
+      },
+    })
+    renderPage()
+    await waitForContent("Gregor · Dialogue")
+    await waitForContent(`${Array.from(source).length.toLocaleString()} / 12,000`)
+    const focus = Array.from(container?.querySelectorAll("button") ?? []).find((button) => button.textContent === "Review focused passage")
+    await act(async () => { focus?.click() })
+    const editor = container?.querySelector('textarea[aria-label="Dialogue or chapter text for voice review"]') as HTMLTextAreaElement
+    expect(editor.value).toContain("The late signal is here")
+    expect(Array.from(editor.value).length).toBeLessThanOrEqual(12_000)
+    expect((container?.querySelector("#voice-character") as HTMLSelectElement).value).toBe("char-gregor")
+    const run = Array.from(container?.querySelectorAll("button") ?? []).find((button) => button.textContent === "Run voice review")
+    expect(run?.disabled).toBe(false)
+  })
+
+  it("preserves hand-edited passage text when choosing another voice excerpt", async () => {
+    const source = "Intro ".repeat(2_500) + 'Gregor said, "The late signal is here."'
+    getChapterMock.mockResolvedValue({ chapter_title: "The Ember Gate", text_content: source })
+    latestVoiceChapterReviewMock.mockResolvedValue({
+      job_id: "complete-job", status: "complete", chapter_number: 1,
+      progress: { completed: 1, total: 1 }, next_resume_at: null, error: null,
+      result: {
+        status: "partial_evidence", voices: [{ character_id: "char-gregor", character_name: "Gregor", voice_mode: "dialogue", status: "complete", issues: [], warnings: [], coverage: { processed_ranges: [{ start: 0, end: 20 }], compared_ranges: [{ start: 0, end: 20 }] } }],
+        coverage: { processed_ranges: [{ start: 0, end: 20 }], unattributed_ranges: [], unattributed_quoted_ranges: [], total_characters: Array.from(source).length },
+        narrator_identified: false, narration_present: false, unreviewed_ranges: [],
+      },
+    })
+    renderPage()
+    await waitForContent("Gregor · Dialogue")
+    await waitForContent(`${Array.from(source).length.toLocaleString()} / 12,000`)
+    const editor = container?.querySelector('textarea[aria-label="Dialogue or chapter text for voice review"]') as HTMLTextAreaElement
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(editor, "My unsaved revision")
+      editor.dispatchEvent(new Event("input", { bubbles: true }))
+    })
+    const focus = Array.from(container?.querySelectorAll("button") ?? []).find((button) => button.textContent === "Review focused passage")
+    await act(async () => { focus?.click() })
+    expect(editor.value).toBe("My unsaved revision")
+    expect(container?.textContent).toContain("Your unsaved passage edits are preserved")
+  })
+
   it("starts a fresh review when the saved chapter already has a complete result", async () => {
     latestVoiceChapterReviewMock.mockResolvedValue({
       job_id: "completed-job", status: "complete", chapter_number: 1,

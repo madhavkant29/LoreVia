@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -11,7 +13,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.book import Book, Chapter
 from app.models.intelligence import AdvisorJob
-from app.utils.ingestion_utils import load_staged_chapter_payload
+from app.services.voice_consistency_review_service import load_voice_review_characters
+from app.utils.ingestion_utils import (
+    is_immutable_editor_chapter_key,
+    load_staged_chapter_payload,
+)
 from app.utils.voice_chapter_review_utils import voice_chapter_fingerprint
 
 VOICE_CHAPTER_SCOPE = "book_voice_chapter"
@@ -48,12 +54,55 @@ class VoiceChapterSourceError(ValueError):
     """The saved chapter cannot be used for a reliable review."""
 
 
+async def load_voice_chapter_context_fingerprint(
+    db: AsyncSession,
+    *,
+    book_id: uuid.UUID,
+    chapter_number: int,
+    allowed_chapter_range: tuple[int | None, int | None] | None = None,
+) -> str:
+    """Bind a review to its cast, book prompt, and earlier baseline source revisions."""
+    book_prompt = (
+        await db.execute(select(Book.title, Book.language).where(Book.id == book_id))
+    ).one_or_none()
+    if book_prompt is None:
+        raise VoiceChapterSourceError("Book not found.")
+    chapter_source = select(Chapter.number, Chapter.content_version, Chapter.s3_key)
+    current_chapter = (
+        await db.execute(
+            chapter_source.where(Chapter.book_id == book_id, Chapter.number == chapter_number)
+        )
+    ).one_or_none()
+    if current_chapter is None:
+        raise VoiceChapterSourceError("Chapter not found.")
+    statement = chapter_source.where(Chapter.book_id == book_id, Chapter.number < chapter_number)
+    if allowed_chapter_range is not None:
+        chapter_start, chapter_end = allowed_chapter_range
+        if chapter_start is not None:
+            statement = statement.where(Chapter.number >= chapter_start)
+        if chapter_end is not None:
+            statement = statement.where(Chapter.number <= chapter_end)
+    chapters = (await db.execute(statement.order_by(Chapter.number))).all()
+    characters = await load_voice_review_characters(db, book_id=book_id)
+    payload = {
+        "title": book_prompt.title,
+        "language": book_prompt.language,
+        "chapters": [list(row) for row in chapters],
+        "current_chapter": list(current_chapter),
+        "characters": characters,
+    }
+    encoded = json.dumps(payload, sort_keys=True, default=str, ensure_ascii=False).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
 async def load_saved_voice_chapter(
     db: AsyncSession, *, book_id: uuid.UUID, chapter_number: int
 ) -> tuple[Chapter, str, str]:
     chapter = (
         await db.execute(
-            select(Chapter).where(Chapter.book_id == book_id, Chapter.number == chapter_number)
+            select(Chapter)
+            .where(Chapter.book_id == book_id, Chapter.number == chapter_number)
+            .execution_options(populate_existing=True)
         )
     ).scalar_one_or_none()
     if chapter is None:
@@ -61,7 +110,10 @@ async def load_saved_voice_chapter(
     # Object storage may be slow; do not hold a read transaction while it responds.
     await db.commit()
     payload = await load_staged_chapter_payload(
-        book_id, chapter_number, chapter_s3_key=chapter.s3_key
+        book_id,
+        chapter_number,
+        chapter_s3_key=chapter.s3_key,
+        allow_fallback=not is_immutable_editor_chapter_key(book_id, chapter_number, chapter.s3_key),
     )
     text = str((payload or {}).get("text") or "")
     if not text.strip():
@@ -111,6 +163,7 @@ async def start_voice_chapter_job(
     user_id: uuid.UUID,
     chapter_number: int,
     source_fingerprint: str,
+    context_fingerprint: str | None = None,
     allowed_chapter_range: tuple[int | None, int | None] | None = None,
     retry_paused: bool = False,
     force_refresh: bool = False,
@@ -124,6 +177,7 @@ async def start_voice_chapter_job(
         state = voice_job_state(current)
         if (
             state.get("source_fingerprint") == source_fingerprint
+            and state.get("context_fingerprint") == context_fingerprint
             and voice_chapter_job_matches_scope(current, allowed_chapter_range)
             and current.status
             in {
@@ -154,6 +208,7 @@ async def start_voice_chapter_job(
         result_json={
             "chapter_number": chapter_number,
             "source_fingerprint": source_fingerprint,
+            "context_fingerprint": context_fingerprint,
             "access_scope": (
                 list(allowed_chapter_range) if allowed_chapter_range is not None else None
             ),
@@ -247,19 +302,39 @@ def serialize_voice_chapter_job(job: AdvisorJob) -> dict[str, Any]:
 async def public_voice_chapter_job(
     db: AsyncSession, *, book_id: uuid.UUID, job: AdvisorJob
 ) -> dict[str, Any]:
-    """Hide saved findings when the chapter source has since changed."""
+    """Expose stale work promptly and hide findings from changed sources."""
     payload = serialize_voice_chapter_job(job)
+    state = voice_job_state(job)
+    context_fingerprint = state.get("context_fingerprint")
+    if context_fingerprint is not None:
+        scope = state.get("access_scope")
+        try:
+            expected_context = await load_voice_chapter_context_fingerprint(
+                db,
+                book_id=book_id,
+                chapter_number=int(state["chapter_number"]),
+                allowed_chapter_range=tuple(scope) if scope is not None else None,
+            )
+        except VoiceChapterSourceError:
+            expected_context = ""
+        if expected_context != context_fingerprint:
+            payload.update(
+                status="failed",
+                result=None,
+                error="The manuscript or cast changed. Start a fresh review.",
+            )
+            return payload
     if payload["result"] is None:
         return payload
     try:
         _chapter, _source, fingerprint = await load_saved_voice_chapter(
             db,
             book_id=book_id,
-            chapter_number=int(voice_job_state(job)["chapter_number"]),
+            chapter_number=int(state["chapter_number"]),
         )
     except VoiceChapterSourceError:
         fingerprint = ""
-    if fingerprint != voice_job_state(job)["source_fingerprint"]:
+    if fingerprint != state["source_fingerprint"]:
         payload.update(
             status="failed", result=None, error="The chapter changed. Start a fresh review."
         )

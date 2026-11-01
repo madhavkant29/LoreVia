@@ -18,7 +18,7 @@ export default function VoiceConsistencyPage() {
 function VoiceWorkspace({ bookId }: { bookId: string }) {
   const workspace = useVoiceWorkspace(bookId)
   const { bookQuery, chaptersQuery, charactersQuery, chapterQuery, selectedChapter, selectChapter, selectedCharacterId, setSelectedCharacterId, selectedCharacter, characters, sceneContext, setSceneContext, voiceMode, setVoiceMode,
-    text, setText, chapterTitle, chapterAvailable, draft, resetDraft, result, contextChanged, overLimit, canReview, runReview, reviewLoading, reviewStage, reviewError, saving, saveStatus, saveError, save, decideFinding, decisionSavingKey, decisionError } = workspace
+    text, setText, chapterTitle, chapterAvailable, draft, resetDraft, focusChapterVoice, focusStatus, result, contextChanged, overLimit, canReview, runReview, reviewLoading, reviewStage, reviewError, saving, saveStatus, saveError, save, decideFinding, decisionSavingKey, decisionError } = workspace
   const book = bookQuery.data
   const chapterOptions = chaptersQuery.data?.chapters ?? []
   const review = result?.review
@@ -50,10 +50,9 @@ function VoiceWorkspace({ bookId }: { bookId: string }) {
 
         {bookQuery.isLoading ? <p className="mt-5" role="status">Loading book context…</p> : bookQuery.isError || !book ? <div className="mt-5 border-l-2 border-[rgb(var(--border))] pl-4" role="alert"><p>Book context could not be loaded. Your passage stays here; reviewing is unavailable until it loads.</p><button type="button" className="app-button-secondary mt-2" disabled={bookQuery.isFetching} onClick={() => void bookQuery.refetch()}>Retry book context</button></div> : null}
 
-        <ChapterVoiceReview bookId={bookId} chapterNumber={selectedChapter} onFocusCharacter={(characterId, mode) => {
-          setSelectedCharacterId(characterId)
-          setVoiceMode(mode)
-          document.getElementById("voice-passage-review")?.scrollIntoView({ behavior: "smooth" })
+        <ChapterVoiceReview bookId={bookId} chapterNumber={selectedChapter} onFocusCharacter={(characterId, mode, range) => {
+          focusChapterVoice(characterId, mode, range)
+          document.getElementById("voice-passage-review")?.scrollIntoView?.({ behavior: "smooth" })
         }} />
 
         <section id="voice-passage-review" className="mt-6 border-y border-[rgb(var(--border))]">
@@ -103,6 +102,7 @@ function VoiceWorkspace({ bookId }: { bookId: string }) {
                 <textarea value={text} onChange={(event) => setText(event.target.value)} aria-label="Dialogue or chapter text for voice review" aria-describedby="voice-passage-help voice-passage-count" aria-invalid={overLimit} className="app-input mt-5 min-h-[18rem] w-full resize-y px-4 py-3 text-base leading-7 lg:min-h-[26rem]" />
               )}
               <p id="voice-passage-count" className="mt-2 text-sm">{countVoiceSourceCharacters(text).toLocaleString()} / 12,000 characters{overLimit ? " — shorten the passage before reviewing. Your full text is preserved." : ""}</p>
+              {focusStatus ? <p className="mt-2 text-sm" role="status">{focusStatus}</p> : null}
               <p id="voice-passage-help" className="mt-2 text-sm text-[rgb(var(--muted-foreground))]">Edits stay on this page while you switch chapters. They do not change your manuscript. Save a snapshot to keep the reviewed passage in Scenes.</p>
               {draft && draft.text !== draft.original ? <button type="button" className="app-button-secondary mt-3" onClick={resetDraft}>Discard passage edits</button> : null}
               <label htmlFor="voice-scene-context" className="mt-5 block text-sm font-semibold">Scene context (optional)</label>

@@ -31,6 +31,32 @@ test("saved chapter review resumes after reload and shows separate voices", asyn
   await expect(page.getByLabel("Character focus")).toHaveValue("char-gregor")
 })
 
+test("focused follow-up selects an attributable excerpt from a long saved chapter", async ({ page }) => {
+  const source = "Opening scene. ".repeat(1_100) + 'Gregor said, "The lantern must stay lit."'
+  const quoteStart = Array.from(source.slice(0, source.indexOf("The lantern must stay lit."))).length
+  await page.route((url) => url.pathname === "/api/v1/reader/book-1/chapter/2", (route) => route.fulfill({
+    json: { chapter_number: 2, chapter_title: "The Ember Gate", total_chapters: 3, text_content: source, text_url: null, html_content: null, characters: [], media: [] },
+  }))
+  await page.route((url) => url.pathname === "/api/v1/intelligence/book-1/advisor/voice-chapters/latest", (route) => route.fulfill({
+    json: {
+      job_id: "long-chapter-job", status: "complete", chapter_number: 2,
+      progress: { completed: 1, total: 1 }, next_resume_at: null, error: null,
+      result: {
+        status: "complete", work_total: 1, work_completed: 1, narrator_identified: false, unreviewed_ranges: [],
+        coverage: { processed_ranges: [{ start: quoteStart, end: quoteStart + 26 }], unattributed_ranges: [], unattributed_quoted_ranges: [], total_characters: Array.from(source).length },
+        voices: [{ character_id: "char-gregor", character_name: "Gregor", voice_mode: "dialogue", status: "complete", issues: [], warnings: [], coverage: { processed_ranges: [{ start: quoteStart, end: quoteStart + 26 }], compared_ranges: [{ start: quoteStart, end: quoteStart + 26 }], total_characters: Array.from(source).length } }],
+      },
+    },
+  }))
+  await page.goto(path)
+  await expect(input(page)).toHaveValue(source)
+  await page.getByRole("button", { name: "Review focused passage" }).click()
+  await expect(input(page)).toHaveValue(/The lantern must stay lit\./)
+  expect(Array.from(await input(page).inputValue()).length).toBeLessThanOrEqual(12_000)
+  await expect(page.getByLabel("Character focus")).toHaveValue("char-gregor")
+  await expect(run(page)).toBeEnabled()
+})
+
 test("completed chapter review starts a fresh job when requested", async ({ page }) => {
   await page.route((url) => url.pathname === "/api/v1/intelligence/book-1/advisor/voice-chapters/latest", (route) => route.fulfill({
     json: {

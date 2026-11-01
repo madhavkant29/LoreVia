@@ -7,6 +7,23 @@ export function countVoiceSourceCharacters(text: string): number {
   return Array.from(text).length
 }
 
+export function focusedVoicePassage(
+  source: string,
+  range: { start: number; end: number } | undefined,
+  maxCharacters: number,
+): string | null {
+  if (!Number.isInteger(maxCharacters) || maxCharacters < 1) return null
+  const characters = Array.from(source)
+  if (!characters.length) return null
+  if (range && (!Number.isInteger(range.start) || !Number.isInteger(range.end) || range.start < 0 || range.start >= range.end || range.end > characters.length)) return null
+  if (characters.length <= maxCharacters) return source
+  const anchor = range?.start ?? 0
+  const anchorLength = range ? Math.min(range.end - range.start, maxCharacters) : 0
+  const contextBefore = Math.min(2_000, Math.floor((maxCharacters - anchorLength) / 2))
+  const start = Math.max(0, Math.min(anchor - contextBefore, characters.length - maxCharacters))
+  return characters.slice(start, start + maxCharacters).join("")
+}
+
 export function voiceReviewErrorMessage(error: unknown): string {
   const detail = getApiErrorDetail(error)
   if (detail) return detail

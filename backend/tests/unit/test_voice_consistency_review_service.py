@@ -20,6 +20,7 @@ from app.utils.ingestion_utils import build_chapter_storage_key
 from app.utils.llm_usage_utils import LLMIncompleteResponseError
 from app.utils.voice_review_utils import (
     VoiceReviewFormatError,
+    attributed_voice_samples,
     first_person_narration_samples,
     voice_baseline_sufficient,
     voice_ranges_cover_text,
@@ -295,6 +296,34 @@ async def test_baseline_retrieval_uses_standard_chapter_key_when_recorded_key_is
     assert [sample["excerpt"] for sample in samples] == ["I shall wait by the bridge."]
     assert calls == ([stored_key, fallback_key] if stored_key else [fallback_key])
     assert db.committed
+
+
+@pytest.mark.asyncio
+async def test_missing_immutable_baseline_never_uses_older_standard_chapter(monkeypatch):
+    book_id = uuid.uuid4()
+    current_key = f"chapters/{book_id}/1/{uuid.uuid4().hex}.txt"
+    calls: list[str] = []
+
+    def load(key):
+        calls.append(key)
+        if key == current_key:
+            raise FileNotFoundError(key)
+        return b'Mara said, "Old baseline."'
+
+    monkeypatch.setattr("app.services.voice_consistency_review_service.download_book", load)
+    monkeypatch.setattr("app.utils.ingestion_utils.download_book", load)
+    db = _DB([], source_rows=[(1, current_key)])
+
+    with pytest.raises(VoiceBaselineSourceError, match="voice_baseline_source_unavailable"):
+        await load_voice_baseline_samples(
+            db,
+            book_id=book_id,
+            character_name="Mara",
+            aliases=[],
+            submitted_text='Mara said, "New text."',
+            submitted_chapter=2,
+        )
+    assert calls == [current_key]
 
 
 @pytest.mark.asyncio
@@ -1084,6 +1113,54 @@ async def test_finding_decision_key_survives_unrelated_edits_but_isolated_by_cha
     assert first == await review('Mara said, "No way, dude." The door opened.', 2)
     assert first == await review('Mara said, "No way, dude." The door closed.', 2)
     assert first != await review('Mara said, "No way, dude." The door opened.', 3)
+
+
+@pytest.mark.asyncio
+async def test_repeated_quote_in_distant_sections_keeps_two_distinct_findings():
+    quote = "No way, dude."
+    passage = f'Mara said, "{quote}".' + (" The corridor was quiet." * 220)
+    passage += f' Mara said, "{quote}".'
+    baseline = [{"chapter_number": 1, "excerpt": "I shall return before dawn."}]
+
+    async def model_call(section):
+        issue = {
+            "character_name": "Mara",
+            "classification": "possible",
+            "severity": "moderate",
+            "title": "Register shift",
+            "description": "The register changed.",
+            "submitted_excerpt": quote,
+            "baseline_excerpt": baseline[0]["excerpt"],
+            "baseline_chapter_number": 1,
+            "confidence": 0.7,
+            "revision_direction": "Check the register.",
+            "intentionality_prompt": "Is this intentional?",
+        }
+        return json.dumps(
+            {
+                "issues": [issue] if quote in section["text"] else [],
+                "overall_verdict": "Section reviewed.",
+            }
+        )
+
+    async def finding_keys(text):
+        submitted = attributed_voice_samples(
+            text, character_name="Mara", chapter_number=2, include_offsets=True
+        )
+        result = await review_voice_sections(
+            text,
+            character_name="Mara",
+            baseline_samples=baseline,
+            submitted_samples=submitted,
+            model_call=model_call,
+            source_chapter=2,
+        )
+        return [issue["finding_key"] for issue in result["issues"]]
+
+    original_keys = await finding_keys(passage)
+    assert len(original_keys) == 2
+    assert original_keys[0] != original_keys[1]
+    assert await finding_keys("The morning was still. " + passage) == original_keys
 
 
 @pytest.mark.asyncio

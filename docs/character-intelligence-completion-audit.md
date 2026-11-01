@@ -1,5 +1,73 @@
 # Character intelligence completion audit
 
+> Historical audit: the evidence below was recorded on 2026-10-29. Its test counts,
+> uncommitted-work statement, and release decision are not current. Do not use this
+> document alone to approve PR #66 or a production deployment.
+
+## Current PR status, 2026-11-01
+
+- PR #66 was last confirmed open and unmerged; its live GitHub state has not
+  been rechecked in this audit. The `author` branch was pushed through commit
+  `84fe78ea56f6117c84f15dcddd0e86965b1a6b62`; the local worktree was clean
+  after that push. Current `main` was merged into `author` in `77e343f1`.
+- The latest local backend Docker run on that commit passed 3,266 tests with one
+  skip. Ruff lint and formatting passed. Frontend Vitest passed 1,540 tests in
+  281 files; frontend type checking, lint, and a production build passed. The
+  frontend E2E jobs and cached security scans were verified in earlier passes;
+  they have not been rerun after the latest commit.
+- Voice Review now bounds collaborator baselines to shared chapters, rejects
+  requests for unshared chapters, binds saved jobs to the access scope, and
+  exposes incomplete per-voice progress without a clean verdict. These paths
+  have local regression tests; they have not been observed in production.
+- A subsequent unpublished review found that saved Voice Review jobs could
+  outlive changes to the approved cast or earlier baseline chapters. The local
+  fix binds jobs to those inputs and the reviewed chapter's saved version,
+  checks them before and after worker execution, and hides stale findings.
+  Immutable editor-saved chapter keys must now load exactly for Voice Review,
+  extraction, and analysis; a missing current key cannot silently fall back to
+  an older standard chapter.
+  Processing also preserves leading and trailing whitespace in the deserialized
+  chapter source, so extraction coverage and reprocess hashes cover that source
+  without trimming it in the loader.
+  Separate findings survive when the same quotation appears at distinct chapter
+  positions while overlapping citations are deduplicated. The new regression
+  tests and full backend suite were subsequently run by the user on the
+  rebuilt disposable local API image and passed. This work is not in the
+  pushed PR head above.
+- A further local UI review found that the Voice Review card's focused action
+  selected a character but left a long chapter over the 12,000-character
+  passage limit, making the follow-up impossible. It now selects a bounded
+  source excerpt around the cited voice range, counts Unicode characters like
+  the backend, and preserves manual edits. The two affected Vitest files pass
+  (32 tests); type checking, lint, and the surface size check pass. The new
+  Playwright smoke test could not complete because its local Next server did
+  not open a port during startup. The full frontend suite was stopped while
+  the user rebuilt Docker locally. These edits are also uncommitted and
+  absent from the pushed PR head.
+- The saved Voice Review status endpoint now detects changed chapter versions,
+  baseline revisions, and cast state even before the first partial result is
+  checkpointed. A database-backed API regression was added. The user rebuilt
+  the disposable local API image and reported the full backend suite passing:
+  3,276 passed, one skipped in 181.85 seconds. The full frontend Vitest suite
+  also passed: 1,543 tests across 281 files. Frontend lint and type checking
+  passed. Browser smoke testing remains unverified because this session could
+  not reach the local Next server from Playwright. The Next production build
+  was blocked by Windows sandbox EPERM errors while creating generated route
+  directories; that is not a reported TypeScript or webpack compilation error.
+- The disposable `lorevia_test` database reported Alembic head while its
+  pytest-managed schema was incomplete, so its `alembic check` failure is not
+  a valid fresh-migration result. The separate disposable `lorevia` database
+  also reported head and showed three older schema differences: one missing
+  subscription-email status index and two UI-preference unique objects
+  reflected as indexes rather than constraints. Their remote state is unknown.
+- A new inspection of the disposable local migration database was not run:
+  automatic approval review rejected the Docker command because its usage
+  limit was reached. This was an approval-review failure, not a safety finding.
+- Production readiness remains unproven. The VPS migration revision and Vault
+  constraint prerequisite have not been checked, the matching frontend and
+  backend rollout has not occurred, and live extraction/Voice Review quality
+  cannot be measured under the user's offline-only provider constraint.
+
 Status: **incomplete**. This audit covers the local checkout on 2026-10-29. It does not claim that the new extractor improves the Meta project's live cast. The user has asked to keep provider evaluation offline and to defer VPS deployment until the goal is verified.
 
 Evidence is classified as **verified locally**, **partial**, or **missing**. Passing unit tests prove the behavior tested, not live model accuracy or the state of production data.

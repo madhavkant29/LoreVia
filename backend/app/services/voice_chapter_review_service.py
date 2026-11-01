@@ -16,6 +16,7 @@ from app.schemas.advisor import VoiceConsistencyRequest
 from app.services.voice_chapter_review_jobs_service import (
     VoiceChapterSourceError,
     load_saved_voice_chapter,
+    load_voice_chapter_context_fingerprint,
     update_voice_chapter_job,
     voice_chapter_job_matches_scope,
     voice_job_state,
@@ -138,6 +139,25 @@ async def process_voice_chapter_job(db: AsyncSession, *, job: Any, execution_id:
             error_detail="The chapter changed. Start a fresh review.",
         )
         return "failed"
+    context_fingerprint = state.get("context_fingerprint")
+    if context_fingerprint is not None and (
+        await load_voice_chapter_context_fingerprint(
+            db,
+            book_id=book_id,
+            chapter_number=chapter_number,
+            allowed_chapter_range=allowed_chapter_range,
+        )
+        != context_fingerprint
+    ):
+        await update_voice_chapter_job(
+            db,
+            job_id=job_id,
+            execution_id=execution_id,
+            status="failed",
+            error_code="stale_context",
+            error_detail="The manuscript or cast changed. Start a fresh review.",
+        )
+        return "failed"
     plan = state.get("plan")
     if plan is None:
         characters = await load_voice_review_characters(db, book_id=book_id)
@@ -253,6 +273,24 @@ async def process_voice_chapter_job(db: AsyncSession, *, job: Any, execution_id:
             status="failed",
             error_code="stale_source",
             error_detail="The chapter changed. Start a fresh review.",
+        )
+        return "failed"
+    if context_fingerprint is not None and (
+        await load_voice_chapter_context_fingerprint(
+            db,
+            book_id=book_id,
+            chapter_number=chapter_number,
+            allowed_chapter_range=allowed_chapter_range,
+        )
+        != context_fingerprint
+    ):
+        await update_voice_chapter_job(
+            db,
+            job_id=job_id,
+            execution_id=execution_id,
+            status="failed",
+            error_code="stale_context",
+            error_detail="The manuscript or cast changed. Start a fresh review.",
         )
         return "failed"
     aggregate = aggregate_voice_chapter_results(source_text=source, plan=plan, completed=completed)

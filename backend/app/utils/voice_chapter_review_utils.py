@@ -146,6 +146,7 @@ def aggregate_voice_chapter_results(
     total_characters = len(source_text)
     grouped: dict[tuple[str, str], dict[str, Any]] = {}
     seen: set[str] = set()
+    seen_passages: dict[tuple[str, str, str, str, str], set[int]] = {}
     for item in plan["work"]:
         result = completed.get(item["key"])
         if result is None:
@@ -170,9 +171,32 @@ def aggregate_voice_chapter_results(
             group["status"] = "partial_evidence"
         for issue in review.get("issues") or []:
             key = str(issue.get("finding_key") or "")
+            excerpt = str(issue.get("submitted_excerpt") or "")
+            positions: set[int] = set()
+            if excerpt:
+                cursor = item["start"]
+                while (position := source_text.find(excerpt, cursor, item["end"])) >= 0:
+                    positions.add(position)
+                    cursor = position + 1
+            claim = (
+                item["character_id"],
+                item["voice_mode"],
+                excerpt,
+                str(issue.get("baseline_excerpt") or ""),
+                str(issue.get("baseline_chapter_number") or ""),
+            )
+            if positions and positions & seen_passages.get(claim, set()):
+                continue
+            if positions:
+                seen_passages.setdefault(claim, set()).update(positions)
+                if key in seen:
+                    # Repeated source text can give separate passages the same
+                    # section key. Keep both findings distinct in the chapter.
+                    occurrence = source_text.count(excerpt, 0, min(positions)) + 1
+                    key = hashlib.sha256(f"{key}:occurrence:{occurrence}".encode()).hexdigest()
             if key and key not in seen:
                 seen.add(key)
-                group["issues"].append(issue)
+                group["issues"].append({**issue, "finding_key": key})
         group["warnings"].extend(result.get("warnings") or [])
         coverage = result.get("coverage") or {}
         group["coverage"].append(

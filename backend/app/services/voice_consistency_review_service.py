@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import uuid
 from collections.abc import Awaitable, Callable, Sequence
 from typing import Any
@@ -23,7 +24,11 @@ from app.utils.characters.narrator import (
     first_person_addressed_name,
     first_person_self_identification,
 )
-from app.utils.ingestion_utils import build_chapter_storage_key, load_staged_chapter_payload
+from app.utils.ingestion_utils import (
+    build_chapter_storage_key,
+    is_immutable_editor_chapter_key,
+    load_staged_chapter_payload,
+)
 from app.utils.llm_usage_utils import (
     LLMIncompleteResponseError,
     is_transient_llm_provider_error,
@@ -60,6 +65,7 @@ async def load_voice_review_characters(
             select(Character)
             .where(Character.book_id == book_id)
             .order_by(Character.mention_count.desc(), Character.first_chapter, Character.name)
+            .execution_options(populate_existing=True)
             .options(
                 load_only(
                     Character.id,
@@ -160,6 +166,10 @@ async def load_voice_baseline_samples(
                     raw = await asyncio.to_thread(download_book, storage_key)
                     stored_payload = deserialize_manuscript_content(raw)
                 except STORAGE_IO_EXCEPTIONS:
+                    if is_immutable_editor_chapter_key(book_id, chapter_number, storage_key):
+                        raise VoiceBaselineSourceError(
+                            "voice_baseline_source_unavailable"
+                        ) from None
                     stored_payload = await load_staged_chapter_payload(book_id, chapter_number)
             else:
                 stored_payload = await load_staged_chapter_payload(book_id, chapter_number)
@@ -377,7 +387,8 @@ async def review_voice_sections(
     unattributed: list[dict[str, int]] = []
     issues: list[dict[str, Any]] = []
     verdicts: list[str] = []
-    seen_issues: set[tuple[str, str, int]] = set()
+    seen_issues: dict[tuple[str, str, int], set[int]] = {}
+    finding_keys: set[str] = set()
     # Scope decisions to the source chapter, not the entire editable passage.
     # Unrelated passage edits must not resurrect an unchanged cited finding.
     source_fingerprint = f"chapter:{source_chapter}" if source_chapter is not None else "custom"
@@ -432,16 +443,22 @@ async def review_voice_sections(
                 issue["baseline_excerpt"],
                 issue["baseline_chapter_number"],
             )
-            if key not in seen_issues:
-                seen_issues.add(key)
-                issues.append(
-                    {
-                        **issue,
-                        "finding_key": voice_finding_key(
-                            issue, source_fingerprint=source_fingerprint
-                        ),
-                    }
-                )
+            positions: set[int] = set()
+            cursor = 0
+            while (position := section["text"].find(key[0], cursor)) >= 0:
+                positions.add(section["start"] + position)
+                cursor = position + 1
+            if positions & seen_issues.get(key, set()):
+                continue
+            seen_issues.setdefault(key, set()).update(positions)
+            finding_key = voice_finding_key(issue, source_fingerprint=source_fingerprint)
+            if finding_key in finding_keys:
+                occurrence = passage.count(key[0], 0, min(positions)) + 1
+                finding_key = hashlib.sha256(
+                    f"{finding_key}:occurrence:{occurrence}".encode()
+                ).hexdigest()
+            finding_keys.add(finding_key)
+            issues.append({**issue, "finding_key": finding_key})
     if not completed:
         raise VoiceReviewFormatError("voice_review_no_attributable_sections")
     compared_coverage = aggregate_voice_review_coverage(

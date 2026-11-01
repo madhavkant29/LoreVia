@@ -21,6 +21,7 @@ from app.utils.ingestion_utils import (
     build_ingestion_progress_state,
     extract_queue_wait_ms,
     is_book_hidden,
+    is_immutable_editor_chapter_key,
     is_llm_usage_limit_error,
     is_retryable_processing_error,
     load_analysis_chapter_payload,
@@ -420,6 +421,31 @@ async def test_load_staged_chapter_payload_falls_back_to_deterministic_key(monke
 
 
 @pytest.mark.asyncio
+async def test_strict_immutable_chapter_load_never_returns_older_standard_source(monkeypatch):
+    book_id = uuid.uuid4()
+    current_key = f"chapters/{book_id}/3/{uuid.uuid4().hex}.txt"
+    standard_key = f"chapters/{book_id}/3.txt"
+    calls: list[str] = []
+
+    def load(key: str) -> bytes:
+        calls.append(key)
+        if key == current_key:
+            raise FileNotFoundError(key)
+        return serialize_manuscript_content("Old chapter").encode()
+
+    monkeypatch.setattr("app.utils.ingestion_utils.download_book", load)
+    assert is_immutable_editor_chapter_key(book_id, 3, current_key)
+    assert not is_immutable_editor_chapter_key(book_id, 3, standard_key)
+    assert (
+        await load_staged_chapter_payload(
+            book_id, 3, chapter_s3_key=current_key, allow_fallback=False
+        )
+        is None
+    )
+    assert calls == [current_key]
+
+
+@pytest.mark.asyncio
 async def test_load_staged_chapter_payload_propagates_deserializer_bugs(monkeypatch):
     book_id = uuid.uuid4()
 
@@ -462,6 +488,46 @@ async def test_load_processing_chapter_payload_returns_chapter_only_payload(monk
         "text": "Chapter body",
         "html": "<p>Chapter body</p>",
     }
+
+
+@pytest.mark.asyncio
+async def test_processing_preserves_exact_saved_text_and_rejects_blank_source(monkeypatch):
+    book_id = uuid.uuid4()
+
+    async def saved(*_args, **_kwargs):
+        return {"text": "\n  Chapter body  \n", "html": None}
+
+    monkeypatch.setattr("app.utils.ingestion_utils.load_staged_chapter_payload", saved)
+    result = await load_processing_chapter_payload(book_id, 5)
+    assert result is not None and result["text"] == "\n  Chapter body  \n"
+
+    async def blank(*_args, **_kwargs):
+        return {"text": " \n\t ", "html": None}
+
+    monkeypatch.setattr("app.utils.ingestion_utils.load_staged_chapter_payload", blank)
+    assert await load_processing_chapter_payload(book_id, 5) is None
+
+
+@pytest.mark.asyncio
+async def test_processing_rejects_stale_fallback_after_editor_save(monkeypatch):
+    book_id = uuid.uuid4()
+    saved_key = f"chapters/{book_id}/5/{uuid.uuid4().hex}.txt"
+    requested: list[str] = []
+
+    def load(key: str) -> bytes:
+        requested.append(key)
+        if key == saved_key:
+            raise FileNotFoundError(key)
+        return serialize_manuscript_content("Old chapter").encode()
+
+    monkeypatch.setattr("app.utils.ingestion_utils.download_book", load)
+    assert (
+        await load_processing_chapter_payload(
+            book_id, 5, chapter_s3_key=saved_key, chapter_title="Five"
+        )
+        is None
+    )
+    assert requested == [saved_key]
 
 
 @pytest.mark.asyncio

@@ -6,6 +6,7 @@ import {
   buildVoiceReviewNote,
   buildVoiceReviewSceneDraft,
   countVoiceSourceCharacters,
+  focusedVoicePassage,
   defaultVoiceSceneFolder,
   voiceReviewErrorMessage,
 } from "./voiceWorkspace"
@@ -16,6 +17,16 @@ describe("voice workspace utilities", () => {
     expect(countVoiceSourceCharacters("")).toBe(0)
     expect(countVoiceSourceCharacters("A😀B")).toBe(3)
     expect(countVoiceSourceCharacters("😀".repeat(12_000))).toBe(12_000)
+  })
+  it("selects a bounded passage around Python codepoint offsets without splitting emoji", () => {
+    const source = "😀".repeat(10) + "before ".repeat(100) + "target quote" + " after".repeat(100)
+    const start = Array.from(source.slice(0, source.indexOf("target quote"))).length
+    const passage = focusedVoicePassage(source, { start, end: start + 12 }, 100)
+    expect(passage).toContain("target quote")
+    expect(countVoiceSourceCharacters(passage!)).toBe(100)
+    expect(focusedVoicePassage(source, { start: -1, end: 2 }, 100)).toBeNull()
+    expect(focusedVoicePassage(source, undefined, 0)).toBeNull()
+    expect(focusedVoicePassage("short", undefined, 100)).toBe("short")
   })
   it("shows public stream errors and explains incomplete responses", () => {
     expect(voiceReviewErrorMessage(new Error("503: Advisor stream failed — Review temporarily unavailable."))).toBe("Review temporarily unavailable.")

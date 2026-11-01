@@ -19,6 +19,7 @@ from app.services.voice_chapter_review_jobs_service import (
     VoiceChapterSourceError,
     find_latest_voice_chapter_job,
     load_saved_voice_chapter,
+    load_voice_chapter_context_fingerprint,
     public_voice_chapter_job,
     serialize_voice_chapter_job,
     start_voice_chapter_job,
@@ -63,6 +64,12 @@ async def start_voice_chapter_review(
         )
     except VoiceChapterSourceError as exc:
         raise HTTPException(404, detail=str(exc)) from exc
+    context_fingerprint = await load_voice_chapter_context_fingerprint(
+        db,
+        book_id=book_id,
+        chapter_number=body.chapter_number,
+        allowed_chapter_range=allowed_chapter_range,
+    )
     existing = await find_latest_voice_chapter_job(
         db,
         book_id=book_id,
@@ -73,6 +80,7 @@ async def start_voice_chapter_review(
         existing is None
         or not voice_chapter_job_matches_scope(existing, allowed_chapter_range)
         or voice_job_state(existing).get("source_fingerprint") != fingerprint
+        or voice_job_state(existing).get("context_fingerprint") != context_fingerprint
         or (body.force_refresh and existing.status == "complete")
     ):
         await enforce_continuity_rate_limit(db, billing_user)
@@ -82,6 +90,7 @@ async def start_voice_chapter_review(
         user_id=current_user.id,
         chapter_number=body.chapter_number,
         source_fingerprint=fingerprint,
+        context_fingerprint=context_fingerprint,
         allowed_chapter_range=allowed_chapter_range,
         retry_paused=body.retry_paused,
         force_refresh=body.force_refresh,

@@ -136,6 +136,105 @@ def test_aggregate_deduplicates_overlap_and_keeps_global_offsets():
     ]
 
 
+def test_aggregate_deduplicates_same_cited_passage_across_different_section_keys():
+    source = "abcdefghquoteijklmnop"
+    character_id = str(uuid.uuid4())
+    work = [
+        {
+            "key": "first",
+            "character_id": character_id,
+            "character_name": "Mara",
+            "voice_mode": "dialogue",
+            "start": 0,
+            "end": 14,
+        },
+        {
+            "key": "second",
+            "character_id": character_id,
+            "character_name": "Mara",
+            "voice_mode": "dialogue",
+            "start": 8,
+            "end": len(source),
+        },
+    ]
+    issue = {
+        "submitted_excerpt": "quote",
+        "baseline_excerpt": "earlier quote",
+        "baseline_chapter_number": 1,
+        "title": "Register shift",
+    }
+    completed = {
+        item["key"]: {
+            "review": {
+                "status": "complete",
+                "issues": [{**issue, "finding_key": f"section-{item['key']}"}],
+            },
+            "warnings": [],
+            "coverage": {
+                "processed_ranges": [{"start": 0, "end": item["end"] - item["start"]}],
+                "compared_ranges": [],
+            },
+        }
+        for item in work
+    }
+    result = aggregate_voice_chapter_results(
+        source_text=source,
+        plan={"work": work, "narrator_identified": False},
+        completed=completed,
+    )
+    assert len(result["voices"][0]["issues"]) == 1
+    assert result["voices"][0]["issues"][0]["finding_key"] == "section-first"
+
+
+def test_aggregate_keeps_repeated_citation_at_distinct_chapter_positions():
+    source = "quote abcdef quote"
+    character_id = str(uuid.uuid4())
+    work = [
+        {
+            "key": "first",
+            "character_id": character_id,
+            "character_name": "Mara",
+            "voice_mode": "dialogue",
+            "start": 0,
+            "end": 5,
+        },
+        {
+            "key": "second",
+            "character_id": character_id,
+            "character_name": "Mara",
+            "voice_mode": "dialogue",
+            "start": 12,
+            "end": len(source),
+        },
+    ]
+    completed = {
+        item["key"]: {
+            "review": {
+                "status": "complete",
+                "issues": [
+                    {
+                        "finding_key": "section-key",
+                        "submitted_excerpt": "quote",
+                        "baseline_excerpt": "earlier quote",
+                        "baseline_chapter_number": 1,
+                    }
+                ],
+            },
+            "warnings": [],
+            "coverage": {"processed_ranges": [], "compared_ranges": []},
+        }
+        for item in work
+    }
+    result = aggregate_voice_chapter_results(
+        source_text=source,
+        plan={"work": work, "narrator_identified": False},
+        completed=completed,
+    )
+    issues = result["voices"][0]["issues"]
+    assert len(issues) == 2
+    assert issues[0]["finding_key"] != issues[1]["finding_key"]
+
+
 def test_source_fingerprint_changes_with_edits():
     assert voice_chapter_fingerprint("a") != voice_chapter_fingerprint("a ")
 

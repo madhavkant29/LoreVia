@@ -13,7 +13,7 @@ export function ChapterVoiceReview({
 }: {
   bookId: string
   chapterNumber: number | null
-  onFocusCharacter: (characterId: string | null, mode: "dialogue" | "first_person_narration") => void
+  onFocusCharacter: (characterId: string | null, mode: "dialogue" | "first_person_narration", range?: { start: number; end: number }) => void
 }) {
   const [starting, setStarting] = useState(false)
   const [startError, setStartError] = useState<string | null>(null)
@@ -73,13 +73,13 @@ export function ChapterVoiceReview({
         {result.narration_present && !result.narrator_identified ? <p className="border-l-2 border-amber-500 pl-3 text-sm">First-person narration was found, but its speaker could not be identified confidently. Choose a narrator in the passage review below.</p> : null}
         {result.voices.length === 0 ? <p className="text-sm">No attributable character voice had enough evidence for a verdict. Use a focused passage review if you know the speaker.</p> : null}
         {result.voices.map((voice) => <article key={`${voice.character_id}:${voice.voice_mode}`} className="border-t border-[rgb(var(--border))] pt-4 text-sm">
-          <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="font-semibold">{voice.character_name} · {voice.voice_mode === "dialogue" ? "Dialogue" : "Narration"}</h3><button type="button" className="app-button-secondary" onClick={() => onFocusCharacter(voice.character_id, voice.voice_mode)}>Review focused passage</button></div>
+          <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="font-semibold">{voice.character_name} · {voice.voice_mode === "dialogue" ? "Dialogue" : "Narration"}</h3><button type="button" className="app-button-secondary" onClick={() => onFocusCharacter(voice.character_id, voice.voice_mode, voice.coverage.compared_ranges?.[0] ?? voice.coverage.processed_ranges?.[0])}>{voice.coverage.compared_ranges?.length || voice.coverage.processed_ranges?.length ? "Review focused passage" : "Choose a passage"}</button></div>
           <p className="mt-1">{voice.status === "complete" ? "Reviewed" : voice.status === "insufficient_evidence" ? "Insufficient evidence" : "Partial evidence"} · {voice.coverage.compared_ranges?.length ?? 0} compared source range{voice.coverage.compared_ranges?.length === 1 ? "" : "s"}</p>
           {voice.issues.length ? <div className="mt-2 space-y-3">{voice.issues.map((issue, index) => <div key={issue.finding_key ?? index} className="border-l-2 border-amber-500 pl-3"><p className="font-medium">{issue.title}</p><p>{issue.description}</p>{issue.submitted_excerpt ? <p className="mt-1">Current: {issue.submitted_excerpt}</p> : null}{issue.baseline_excerpt ? <p>Baseline, chapter {issue.baseline_chapter_number}: {issue.baseline_excerpt}</p> : null}</div>)}</div> : <p className="mt-1">{voice.status === "complete" ? "No supported voice shifts found in the compared speech." : "There is not enough supported evidence for a clean voice verdict."}</p>}
           {voice.warnings.length ? <details className="mt-2"><summary className="cursor-pointer">Review limitations ({voice.warnings.length})</summary><ul className="mt-1 list-disc pl-5">{voice.warnings.map((warning, index) => <li key={`${warning}-${index}`}>{warning}</li>)}</ul></details> : null}
         </article>)}
         {result.status !== "complete" ? <p className="border-l-2 border-amber-500 pl-3 text-sm">This is not a clean verdict: {result.unreviewed_ranges.length} work range{result.unreviewed_ranges.length === 1 ? "" : "s"} unfinished and {result.coverage.unattributed_quoted_ranges?.length ?? 0} quoted range{result.coverage.unattributed_quoted_ranges?.length === 1 ? "" : "s"} without a supported speaker comparison. Voice and narrator evidence may also be insufficient.</p> : null}
-        {(result.coverage.unattributed_quoted_ranges?.length ?? 0) > 0 ? <button type="button" className="app-button-secondary" onClick={() => onFocusCharacter(null, "dialogue")}>Choose a speaker in passage review</button> : null}
+        {(result.coverage.unattributed_quoted_ranges?.length ?? 0) > 0 ? <button type="button" className="app-button-secondary" onClick={() => onFocusCharacter(null, "dialogue", result.coverage.unattributed_quoted_ranges?.[0])}>Choose a speaker in passage review</button> : null}
       </div> : null}
     </section>
   )
