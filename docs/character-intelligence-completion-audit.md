@@ -4,7 +4,23 @@
 > uncommitted-work statement, and release decision are not current. Do not use this
 > document alone to approve PR #66 or a production deployment.
 
-## Current PR status, 2026-11-01
+## Current PR status, 2026-11-01 (updated after local verification)
+
+- The latest local candidate is commit `acb5fa1b` on `author`. It contains the
+  saved Voice Review source/context checks, exact editor source-key loading,
+  distinct citation deduplication, and bounded focused follow-up. PR #66
+  remains unmerged as last observed; verify its live head before deployment.
+- The user rebuilt the disposable Docker Compose Local API image and reported
+  3,276 backend tests passed with one skip. The full frontend Vitest suite
+  passed 1,543 tests across 281 files. Frontend lint, type checking, and the
+  production Next build passed. All 23 Voice Review Playwright tests passed,
+  including long-chapter focused follow-up, reload, mobile, and light/dark UI.
+  All six GitHub E2E equivalents passed locally with `CI=true`: four shards of
+  108 tests each, plus the authenticated and public launch audits. The local
+  browser and Node environment is Windows/Node 25; GitHub uses Ubuntu/Node 24,
+  so these results do not guarantee a hosted run.
+
+### Historical audit notes (recorded before commit `acb5fa1b`)
 
 - PR #66 was last confirmed open and unmerged; its live GitHub state has not
   been rechecked in this audit. The `author` branch was pushed through commit
