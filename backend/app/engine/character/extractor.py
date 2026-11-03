@@ -646,6 +646,7 @@ ACTION_VERB_CONTEXT = {
     "followed",
     "glanced",
     "noticed",
+    "examined",
     "saw",
     "heard",
     "felt",
@@ -2008,9 +2009,9 @@ def _clean_character_entries(
             if not name_shape_supported
             else None
         )
-        contextual_person = contextual_band == "accept" or (
-            contextual_band == "review" and confidence >= 0.7
-        )
+        contextual_person = (
+            contextual_band == "accept" and confidence >= MIN_BORDERLINE_CONFIDENCE
+        ) or (contextual_band == "review" and confidence >= 0.7)
         if normalized not in candidate_norms and not name_shape_supported and not contextual_person:
             _record_rejected_character(
                 rejected_characters,

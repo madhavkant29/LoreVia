@@ -683,8 +683,13 @@ def test_candidate_hints_rescue_contextual_surname_ending_in_s_without_noun_phra
     assert "Cracked" not in names
 
 
-def test_candidate_hints_do_not_treat_chapter_heading_fragments_as_people():
+def test_candidate_hints_do_not_treat_chapter_heading_fragments_as_people(monkeypatch):
     text = "In Chapter 3, Detective Bell examined the locked room."
+    monkeypatch.setattr(
+        extractor,
+        "contextual_ner_entity_label",
+        lambda _text, name: "ORG" if name == "Detective Bell" else None,
+    )
 
     names = _candidate_names(text)
 
@@ -715,8 +720,13 @@ def test_cleaner_keeps_short_person_name_and_supported_nickname_from_model():
     assert cleaned[0]["aliases"] == ["Lex"]
 
 
-def test_cleaner_sends_confident_contextual_single_names_to_verifier():
+def test_cleaner_sends_confident_contextual_single_names_to_verifier(monkeypatch):
     text = "In Chapter 2, June and Mateo agreed they were colleagues. Later Aya entered the code."
+    monkeypatch.setattr(
+        extractor,
+        "contextual_ner_entity_label",
+        lambda _text, name: "PERSON" if name == "Aya" else None,
+    )
     cleaned = _clean_character_entries(
         [
             {"name": "June", "entity_type": "person", "confidence": 0.9},
