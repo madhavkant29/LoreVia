@@ -40,6 +40,11 @@ from app.utils.books.normalization import (
     resolve_upload_format_and_work_type,
     story_unit_name,
 )
+from app.utils.logging.errors import (
+    public_error_message,
+    public_stored_error_message,
+    report_caught_failure,
+)
 from app.utils.storage_utils import (
     STORAGE_IO_EXCEPTIONS,
     delete_storage_keys_best_effort,
@@ -75,7 +80,9 @@ def manuscript_import_job_out(job: ManuscriptImportJob) -> ManuscriptImportJobOu
         progress_total=int(job.progress_total or 0),
         cancel_requested=bool(job.cancel_requested),
         result=result,
-        error=job.error_detail,
+        error=public_stored_error_message(job.error_detail)
+        if job.status == "failed"
+        else job.error_detail,
         created_at=job.created_at,
         updated_at=job.updated_at,
     )
@@ -261,8 +268,9 @@ async def dispatch_manuscript_import_job(
             task_id=task_id,
             queue="extraction",
         )
-    except Exception:
+    except Exception as exc:
         log.exception("manuscript_import_job_dispatch_failed", extra={"job_id": str(job.id)})
+        report_caught_failure("manuscript_import_job_dispatch_failed", exc)
         return False
     job.celery_task_id = task_id
     await db.commit()
@@ -685,7 +693,9 @@ async def process_manuscript_import_job(db: AsyncSession, job_id: uuid.UUID) -> 
         job = await db.get(ManuscriptImportJob, job_id)
         if job is not None:
             job.status = "failed"
-            job.error_detail = str(exc)[:2000] or exc.__class__.__name__
+            job.error_detail = public_error_message(
+                exc.status_code if isinstance(exc, HTTPException) else 500
+            )
             job.completed_at = datetime.now(UTC)
             request_state = dict(job.request_json or {})
             request_state["retry_blocked"] = (
@@ -697,23 +707,16 @@ async def process_manuscript_import_job(db: AsyncSession, job_id: uuid.UUID) -> 
         try:
             import sentry_sdk
 
-            sentry_sdk.set_tag("job_id", str(job_id))
-            if job is not None:
-                sentry_sdk.set_tag("book_id", str(job.book_id))
-                sentry_sdk.set_tag("user_id", str(job.user_id))
-            sentry_sdk.set_context(
-                "manuscript_import_job",
-                {
-                    "job_id": str(job_id),
-                    "file_count": len(job.source_files_json or []) if job is not None else 0,
-                    "failure_category": (
-                        "validation"
-                        if isinstance(exc, HTTPException) and 400 <= int(exc.status_code) < 500
-                        else "processing"
-                    ),
-                },
-            )
-            sentry_sdk.capture_exception(exc)
+            with sentry_sdk.new_scope() as scope:
+                scope.set_tag("job_id", str(job_id))
+                scope.set_tag("failure_type", type(exc).__name__)
+                scope.set_tag(
+                    "failure_category",
+                    "validation"
+                    if isinstance(exc, HTTPException) and 400 <= int(exc.status_code) < 500
+                    else "processing",
+                )
+                sentry_sdk.capture_message("manuscript_import_job_failed", level="error")
         except Exception:
             log.warning("import_job_sentry_report_failed job_id=%s", job_id, exc_info=True)
         return {"status": "failed", "job_id": str(job_id)}

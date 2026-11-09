@@ -1,7 +1,5 @@
 import logging
-import ssl
 import time
-from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import sentry_sdk
 from celery import Celery, Task, signals
@@ -11,6 +9,7 @@ from sentry_sdk.integrations.celery import CeleryIntegration
 from app.core.config import settings
 from app.core.database import engine
 from app.core.redis import close_all_redis_clients
+from app.utils.celery_broker_utils import normalize_celery_redis_url
 from app.utils.exception_boundaries import BEST_EFFORT_CLEANUP_EXCEPTIONS
 from app.utils.logging.errors import scrub_sentry_event
 from app.utils.release_utils import normalize_release_sha
@@ -22,26 +21,6 @@ from app.workers.queues.queues import TASK_QUEUES
 logger = logging.getLogger(__name__)
 
 
-def _normalize_celery_redis_url(raw_url: str) -> tuple[str, dict]:
-    if not raw_url.startswith("rediss://"):
-        return raw_url, {}
-
-    parts = urlsplit(raw_url)
-    query = dict(parse_qsl(parts.query, keep_blank_values=True))
-    cert_reqs = (query.pop("ssl_cert_reqs", "required") or "required").lower()
-    normalized_url = urlunsplit(parts._replace(query=urlencode(query)))
-
-    ssl_options = {
-        "required": ssl.CERT_REQUIRED,
-        "optional": ssl.CERT_OPTIONAL,
-        "none": ssl.CERT_NONE,
-        "cert_required": ssl.CERT_REQUIRED,
-        "cert_optional": ssl.CERT_OPTIONAL,
-        "cert_none": ssl.CERT_NONE,
-    }
-    return normalized_url, {"ssl_cert_reqs": ssl_options.get(cert_reqs, ssl.CERT_REQUIRED)}
-
-
 def _coerce_optional_url(raw_url: str | None) -> str | None:
     if raw_url is None:
         return None
@@ -51,14 +30,14 @@ def _coerce_optional_url(raw_url: str | None) -> str | None:
 
 def _resolve_celery_redis_settings() -> tuple[str, dict, str | None, dict]:
     broker_source = _coerce_optional_url(settings.CELERY_BROKER_URL) or settings.REDIS_URL
-    broker_url, broker_ssl_options = _normalize_celery_redis_url(broker_source)
+    broker_url, broker_ssl_options = normalize_celery_redis_url(broker_source)
 
     configured_backend = _coerce_optional_url(settings.CELERY_RESULT_BACKEND)
     if configured_backend is None:
         return broker_url, broker_ssl_options, None, {}
 
     backend_source = configured_backend
-    backend_url, backend_ssl_options = _normalize_celery_redis_url(backend_source)
+    backend_url, backend_ssl_options = normalize_celery_redis_url(backend_source)
     return broker_url, broker_ssl_options, backend_url, backend_ssl_options
 
 
@@ -113,15 +92,10 @@ celery_app = Celery(
     broker=redis_url,
     backend=result_backend_url,
     task_cls=RequestContextTask,
-    include=[
-        "app.workers.tasks.extraction_tasks",
-        "app.workers.tasks.analysis_tasks",
-        "app.workers.tasks.embedding_tasks",
-        "app.workers.tasks.export_tasks",
-        "app.workers.tasks.intelligence_tasks",
-        "app.workers.tasks.voice_chapter_tasks",
-        "app.workers.tasks.maintenance_tasks",
-    ],
+    # Beat schedules maintenance tasks. Keep those registered so Beat retains
+    # RequestContextTask publishing behavior; the role launcher replaces this
+    # default with the modules needed by each worker queue.
+    include=["app.workers.tasks.maintenance_tasks"],
 )
 
 celery_app.conf.update(

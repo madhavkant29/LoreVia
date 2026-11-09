@@ -125,6 +125,13 @@ async def test_queue_initial_extraction_chapters_pauses_on_processing_allowance(
     assert processing_run.pause_reason == "processing_allowance"
     assert processing_run.next_chapter_number == 3
     assert processing_run.resume_blockers == [
-        {"kind": "monthly_processed_words", "detail": "monthly limit reached"}
+        {
+            "kind": "monthly_processed_words",
+            "detail": "Monthly processed-word allowance reached. Continue after your plan window resets.",
+        }
     ]
+    assert (
+        book.writer_workspace["processing"]["last_error"]
+        == (processing_run.resume_blockers[0]["detail"])
+    )
     assert book.writer_workspace["processing"]["resume_available"] is True

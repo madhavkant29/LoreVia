@@ -146,6 +146,11 @@ async def test_manuscript_workspace_scene_annotation_and_version_workflow(
     ):
         monkeypatch.setattr(f"{target}.download_book", download, raising=False)
         monkeypatch.setattr(f"{target}.upload_binary", upload, raising=False)
+    monkeypatch.setattr(
+        "app.utils.books.scene_sync.upload_text",
+        lambda key, content: upload(key, content.encode()),
+    )
+    monkeypatch.setattr("app.utils.books.revision_analysis.download_book", download)
 
     book = Book(
         user_id=user_id,

@@ -7,6 +7,7 @@ import { CharacterProfileRightRail, type SidebarTab } from "@/components/reader/
 import type { CharacterProfileTab } from "@/components/reader/CharacterProfileTabs"
 import { CharacterWorkspaceHeader } from "@/components/reader/CharacterWorkspaceHeader"
 import { AuthorToolsNav } from "@/components/layout/AuthorToolsNav"
+import { ProfileEnrichmentNotice } from "@/components/reader/ProfileEnrichmentNotice"
 import { CharacterWorkspaceSidebarHeader } from "@/components/reader/CharacterWorkspaceSidebarHeader"
 import { WorkspaceSidePanel } from "@/components/ui/WorkspaceSidePanel"
 import type { Book } from "@/types/book"
@@ -338,6 +339,7 @@ export function CharactersPageLayout({
           )}
         />
 
+        <ProfileEnrichmentNotice processing={book?.processing} bookId={bookId} isDark={isDark} onReview={onOpenReviewQueue} />
         {mergeError ? <p className="mt-3 text-sm text-amber-400">{mergeError}</p> : null}
         {actionError && workspaceMode !== "profile" ? <p role="alert" className={`mt-3 text-sm ${isDark ? "text-rose-300" : "text-rose-700"}`}>{actionError}</p> : null}
         {queryIssues.map((issue) => <div key={issue.label} role="alert" className="mt-3 flex flex-wrap items-center gap-3 border border-amber-600/40 px-4 py-3 text-sm">

@@ -8,6 +8,16 @@ import pytest
 from app.utils.books import chapter_versions
 
 
+def test_failed_restore_hides_old_exception_text_but_keeps_other_statuses():
+    failed = SimpleNamespace(
+        restore_status="failed", restore_error="SQL parameters included private manuscript text"
+    )
+    cancelled = SimpleNamespace(restore_status="cancelled", restore_error="Book was removed.")
+
+    assert chapter_versions.public_restore_error(failed) == chapter_versions.RESTORE_FAILED_MESSAGE
+    assert chapter_versions.public_restore_error(cancelled) == "Book was removed."
+
+
 @pytest.mark.asyncio
 async def test_snapshot_chapter_version_swallows_storage_io_but_propagates_unexpected_errors(
     monkeypatch,

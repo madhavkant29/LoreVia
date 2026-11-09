@@ -33,6 +33,7 @@ from app.utils.books import (
     collaboration_access,
     normalization,
 )
+from app.utils.logging.errors import report_caught_failure
 from app.utils.storage_utils import (
     STORAGE_IO_EXCEPTIONS,
     bounded_storage_map,
@@ -115,7 +116,8 @@ async def load_chapter_texts(chapters: list[Chapter]) -> dict[int, str]:
             continue
         try:
             raw = await asyncio.to_thread(download_book, chapter.s3_key)
-        except STORAGE_IO_EXCEPTIONS:
+        except STORAGE_IO_EXCEPTIONS as exc:
+            report_caught_failure("chapter_text_batch_storage_failed", exc)
             loaded[chapter.number] = ""
             continue
         payload = deserialize_manuscript_content(raw)
@@ -398,15 +400,16 @@ async def load_novel_export_chapters(
             media for media in media_rows if getattr(media, "asset_type", "image") == "image"
         ]
 
-        async def load_media(media: ChapterMedia) -> tuple[ChapterMedia, bytes | None]:
+        async def load_media(media: ChapterMedia) -> tuple[ChapterMedia, bytes]:
             try:
                 return media, await asyncio.to_thread(download_book, media.storage_key)
-            except STORAGE_IO_EXCEPTIONS:
-                return media, None
+            except STORAGE_IO_EXCEPTIONS as exc:
+                report_caught_failure("novel_export_media_storage_failed", exc)
+                raise HTTPException(
+                    503, "A chapter image could not be loaded. Retry the export."
+                ) from exc
 
         for media, raw in await bounded_storage_map(image_media, load_media):
-            if raw is None:
-                continue
             media_by_chapter_id.setdefault(media.chapter_id, []).append(
                 {
                     "raw": raw,
@@ -420,15 +423,15 @@ async def load_novel_export_chapters(
 
     async def load_chapter(row: Any) -> dict[str, Any]:
         chapter_id, number, chapter_title, s3_key = row
-        chapter_text = ""
-        if s3_key:
-            try:
-                raw = await asyncio.to_thread(download_book, s3_key)
-            except STORAGE_IO_EXCEPTIONS:
-                chapter_text = ""
-            else:
-                stored = deserialize_manuscript_content(raw)
-                chapter_text = str(stored.get("text") or "")
+        if not s3_key:
+            raise HTTPException(409, "A chapter is missing its saved source. Contact support.")
+        try:
+            raw = await asyncio.to_thread(download_book, s3_key)
+        except STORAGE_IO_EXCEPTIONS as exc:
+            report_caught_failure("novel_export_chapter_storage_failed", exc)
+            raise HTTPException(503, "A chapter could not be loaded. Retry the export.") from exc
+        stored = deserialize_manuscript_content(raw)
+        chapter_text = str(stored.get("text") or "")
         return {
             "number": number,
             "title": chapter_title,
@@ -444,8 +447,9 @@ async def load_novel_cover_image(book: Book) -> dict[str, Any] | None:
         return None
     try:
         raw = await asyncio.to_thread(download_book, book.cover_s3_key)
-    except STORAGE_IO_EXCEPTIONS:
-        return None
+    except STORAGE_IO_EXCEPTIONS as exc:
+        report_caught_failure("novel_export_cover_storage_failed", exc)
+        raise HTTPException(503, "The cover could not be loaded. Retry the export.") from exc
     return {
         "raw": raw,
         "content_type": mimetypes.guess_type(book.cover_s3_key)[0] or "image/png",

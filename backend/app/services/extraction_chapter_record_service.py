@@ -7,7 +7,7 @@ import uuid
 from sqlalchemy import delete, func, or_, select
 
 from app.core.storage import upload_text
-from app.models.book import Book, Chapter
+from app.models.book import Book, Chapter, ChapterMedia
 from app.models.character import (
     Character,
     CharacterCandidate,
@@ -33,7 +33,7 @@ from app.utils.ingestion_utils import (
 
 
 async def stage_chapter_for_extraction(
-    db, book: Book, ch_data: dict, chapter_number: int
+    db, book: Book, ch_data: dict, chapter_number: int, *, rebuild_existing_chapter: bool = False
 ) -> Chapter:
     chapter = (
         await db.execute(
@@ -42,7 +42,9 @@ async def stage_chapter_for_extraction(
     ).scalar()
 
     s3_key = chapter.s3_key if chapter is not None else ""
-    if ch_data.get("_lorevia_persist_rich_content"):
+    if chapter is None and rebuild_existing_chapter:
+        raise RuntimeError("rebuild_chapter_missing")
+    if ch_data.get("_lorevia_persist_rich_content") and not rebuild_existing_chapter:
         storage_key = s3_key or build_chapter_storage_key(book.id, chapter_number)
         payload = serialize_manuscript_content(
             str(ch_data.get("text") or ""),
@@ -69,38 +71,52 @@ async def stage_chapter_for_extraction(
         await _sync_chapter_media(db, book, chapter, ch_data)
     else:
         chapter_changed = False
-        if ch_data.get("title") and chapter.title != ch_data["title"]:
-            chapter.title = ch_data["title"]
-            chapter_changed = True
-        if ch_data.get("description") and chapter.description != ch_data["description"]:
-            chapter.description = ch_data["description"]
-            chapter_changed = True
-        next_chapter_kind = normalize_chapter_kind(
-            ch_data.get("chapter_kind") or ch_data.get("section_type")
-        )
-        if next_chapter_kind != chapter.chapter_kind:
-            chapter.chapter_kind = next_chapter_kind
-            chapter_changed = True
+        if not rebuild_existing_chapter:
+            if ch_data.get("title") and chapter.title != ch_data["title"]:
+                chapter.title = ch_data["title"]
+                chapter_changed = True
+            if ch_data.get("description") and chapter.description != ch_data["description"]:
+                chapter.description = ch_data["description"]
+                chapter_changed = True
+            next_chapter_kind = normalize_chapter_kind(
+                ch_data.get("chapter_kind") or ch_data.get("section_type")
+            )
+            if next_chapter_kind != chapter.chapter_kind:
+                chapter.chapter_kind = next_chapter_kind
+                chapter_changed = True
+            next_word_count = _count_words(ch_data.get("text", ""))
+            if next_word_count and chapter.word_count != next_word_count:
+                chapter.word_count = next_word_count
+                chapter_changed = True
+            next_content_version = ch_data.get("content_version")
+            if next_content_version is not None and int(chapter.content_version or 1) != int(
+                next_content_version
+            ):
+                chapter.content_version = int(next_content_version)
+                chapter_changed = True
+            if s3_key and chapter.s3_key != s3_key:
+                chapter.s3_key = s3_key
+                chapter_changed = True
         if chapter.processed:
             chapter.processed = False
             chapter_changed = True
-        next_word_count = _count_words(ch_data.get("text", ""))
-        if next_word_count and chapter.word_count != next_word_count:
-            chapter.word_count = next_word_count
-            chapter_changed = True
-        next_content_version = ch_data.get("content_version")
-        if next_content_version is not None and int(chapter.content_version or 1) != int(
-            next_content_version
-        ):
-            chapter.content_version = int(next_content_version)
-            chapter_changed = True
-        if s3_key and chapter.s3_key != s3_key:
-            chapter.s3_key = s3_key
-            chapter_changed = True
         if chapter_changed:
             await db.flush()
-        await _sync_chapter_media(db, book, chapter, ch_data)
+        if not rebuild_existing_chapter:
+            await _sync_chapter_media(db, book, chapter, ch_data)
 
+    stored_media_count = len(ch_data.get("images") or [])
+    if rebuild_existing_chapter:
+        stored_media_count = int(
+            (
+                await db.execute(
+                    select(func.count())
+                    .select_from(ChapterMedia)
+                    .where(ChapterMedia.chapter_id == chapter.id)
+                )
+            ).scalar()
+            or 0
+        )
     chapter.analysis_state = build_analysis_chapter_state(
         chapter.analysis_state if isinstance(chapter.analysis_state, dict) else None,
         status="pending",
@@ -109,7 +125,7 @@ async def stage_chapter_for_extraction(
             media_marker_count=len(
                 re.findall(r"\[\[IMAGE:[^\]]+\]\]", str(ch_data.get("text") or ""))
             ),
-            stored_media_count=len(ch_data.get("images") or []),
+            stored_media_count=stored_media_count,
             recovery_status="ok",
         ),
     )

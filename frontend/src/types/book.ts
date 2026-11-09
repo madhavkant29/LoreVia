@@ -1265,6 +1265,11 @@ export interface BookProcessing {
   started_at?: string | null
   updated_at?: string | null
   last_error?: string | null
+  parser_diagnostics?: {
+    character_extraction?: {
+      totals?: { invalid_profile_batches?: number }
+    }
+  } | null
   is_fully_ready?: boolean
   retry_actions?: string[]
   retry_available?: boolean

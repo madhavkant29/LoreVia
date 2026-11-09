@@ -109,6 +109,7 @@ jobs:
 
     - name: Run tests
       env:
+        RUN_CELERY_LIVE_TESTS: "1"
         DATABASE_URL: postgresql://postgres:postgres@localhost:5432/lorevia_test
         REDIS_URL: redis://localhost:6379/0
         S3_BUCKET: test-bucket
@@ -361,6 +362,76 @@ jobs:
         --security-opt no-new-privileges:true
         lorevia-worker-security:${{ github.sha }}
         python -c "import tiktoken; tiktoken.encoding_for_model('gpt-4o-mini')"
+
+    - name: Verify worker image registration and live health probe
+      shell: bash
+      run: |
+        set -euo pipefail
+        network="lorevia-worker-smoke-${{ github.run_id }}"
+        redis="lorevia-smoke-redis-${{ github.run_id }}"
+        worker="lorevia-smoke-worker-${{ github.run_id }}"
+        image="lorevia-worker-security:${{ github.sha }}"
+        trap 'docker rm -f "$worker" "$redis" >/dev/null 2>&1 || true; docker network rm "$network" >/dev/null 2>&1 || true' EXIT
+        docker network create "$network"
+        docker run -d --name "$redis" --network "$network" redis:7-alpine
+        docker run -d --name "$worker" --hostname smoke-worker --network "$network" \
+          --read-only --tmpfs /tmp:rw,noexec,nosuid,nodev \
+          --cap-drop ALL --security-opt no-new-privileges:true \
+          --health-cmd 'python -m app.workers.healthcheck extraction' \
+          --health-interval 5s --health-timeout 15s --health-retries 2 \
+          --health-start-period 5s \
+          -e DEPLOYMENT_ENV=test \
+          -e DATABASE_URL=postgresql://unused:unused@127.0.0.1:5432/unused \
+          -e REDIS_URL="redis://$redis:6379/15" \
+          -e CELERY_BROKER_URL="redis://$redis:6379/15" \
+          -e S3_BUCKET=test -e AWS_ACCESS_KEY_ID=test -e AWS_SECRET_ACCESS_KEY=test \
+          -e OPENAI_API_KEY=test -e JWT_SECRET=test-secret-key-for-ci \
+          -e RESEND_API_KEY=test \
+          "$image" python -m app.workers.worker_launcher extraction
+        healthy=0
+        for attempt in $(seq 1 30); do
+          if docker exec "$worker" \
+              python -m app.workers.healthcheck extraction; then
+            healthy=1
+            break
+          fi
+          sleep 2
+        done
+        test "$healthy" -eq 1
+        for attempt in $(seq 1 15); do
+          status="$(docker inspect --format '{{.State.Health.Status}}' "$worker")"
+          [ "$status" = healthy ] && break
+          sleep 2
+        done
+        test "$status" = healthy
+        docker exec "$worker" celery -A app.workers.celery_app inspect registered \
+          -d worker-extraction@smoke-worker --timeout=5 | grep -F extraction_tasks.process_book
+        if docker exec -e HOSTNAME=wrong-worker "$worker" \
+            python -m app.workers.healthcheck extraction; then
+          echo "Wrong worker identity was accepted" >&2
+          exit 1
+        fi
+        docker kill --signal=STOP "$worker" >/dev/null
+        for attempt in $(seq 1 20); do
+          status="$(docker inspect --format '{{.State.Health.Status}}' "$worker")"
+          [ "$status" = unhealthy ] && break
+          sleep 2
+        done
+        docker kill --signal=CONT "$worker" >/dev/null
+        test "$status" = unhealthy
+        for attempt in $(seq 1 20); do
+          status="$(docker inspect --format '{{.State.Health.Status}}' "$worker")"
+          [ "$status" = healthy ] && break
+          sleep 2
+        done
+        test "$status" = healthy
+        docker stop "$worker"
+        if docker run --rm --network "$network" -e HOSTNAME=smoke-worker \
+            -e CELERY_BROKER_URL="redis://$redis:6379/15" "$image" \
+            python -m app.workers.healthcheck extraction; then
+          echo "Stopped worker was reported healthy" >&2
+          exit 1
+        fi
 
     - name: Build Nginx release candidate
       uses: docker/build-push-action@v7

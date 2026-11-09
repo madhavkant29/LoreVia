@@ -54,6 +54,13 @@ export function captureApiFailure(error: {
   })
 }
 
+export function captureCaughtRenderError(error: unknown, area: "route" | "chat_panel"): void {
+  capture("browser_caught_render_error", {
+    area,
+    error_type: errorType(error),
+  })
+}
+
 export function captureWebVital(metric: {
   id: string
   name: string

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import re
 from collections.abc import Mapping, Sequence
 
@@ -8,6 +9,7 @@ from fastapi import Request
 from app.utils.request_context import get_request_id
 
 REDACTED_VALUE = "[REDACTED]"
+log = logging.getLogger("lorevia.caught_failures")
 SENSITIVE_KEY_PARTS = (
     "authorization",
     "cookie",
@@ -89,7 +91,10 @@ def scrub_sensitive_data(value: object, *, key: object | None = None) -> object:
 
 
 def scrub_sentry_event(event: dict[str, object], _hint: object | None = None) -> dict[str, object]:
-    return scrub_sensitive_data(event)  # type: ignore[return-value]
+    safe = scrub_sensitive_data(event)
+    if isinstance(safe, dict) and isinstance(safe.get("request"), dict):
+        safe["request"].pop("data", None)
+    return safe  # type: ignore[return-value]
 
 
 def public_error_message(status_code: int) -> str:
@@ -112,6 +117,24 @@ def public_error_message(status_code: int) -> str:
     if status_code >= 500:
         return "Something went wrong. Please try again."
     return "Request could not be completed."
+
+
+def public_stored_error_message(value: str | None) -> str:
+    """Keep known public job failures while masking legacy exception text."""
+    allowed = {public_error_message(code) for code in (400, 401, 403, 404, 409, 413, 422, 429, 500)}
+    return value if value in allowed else public_error_message(500)
+
+
+def report_caught_failure(event: str, error: BaseException) -> None:
+    """Report a swallowed operational failure with a static event name and error type."""
+    try:
+        import sentry_sdk
+
+        with sentry_sdk.new_scope() as scope:
+            scope.set_tag("failure_type", type(error).__name__)
+            sentry_sdk.capture_message(event, level="error")
+    except Exception:
+        log.warning("caught_failure_reporting_failed event=%s", event, exc_info=True)
 
 
 def request_log_context(request: Request, **extra: object) -> dict[str, object]:

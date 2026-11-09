@@ -164,7 +164,9 @@ def test_process_chapter_task_pauses_llm_usage_limit_without_replaying_paid_work
     assert retry_calls == []
     assert book.writer_workspace["processing"]["stage"] == "usage_limited"
     assert book.writer_workspace["processing"]["chapters_completed"] == 3
-    assert "token limit exceeded" in book.writer_workspace["processing"]["last_error"]
+    assert book.writer_workspace["processing"]["last_error"] == (
+        "Token allowance reached. Processing will resume when the window refreshes."
+    )
     assert fake_session.rollbacks == 1
     assert fake_session.commits == 1
 

@@ -235,6 +235,11 @@ async def test_scene_create_allowed_when_not_rebuilding(client, db, monkeypatch)
     )
     await db.commit()
 
+    source_key = chapter.s3_key
+    monkeypatch.setattr(
+        "app.utils.books.scene_sync.download_book",
+        lambda key: {source_key: b"Existing chapter source."}[key],
+    )
     response = await client.post(
         f"/api/v1/books/{book_id}/scenes",
         headers=headers,

@@ -47,6 +47,7 @@ describe("AuthBootstrap", () => {
       container.remove()
     }
     usePathnameMock.mockReset()
+    useRouterMock.mockReset()
     sessionMock.mockReset()
     shouldSkipAuthBootstrapMock.mockReset()
     useAuthStoreMock.mockReset()
@@ -101,6 +102,75 @@ describe("AuthBootstrap", () => {
 
     expect(sessionMock).toHaveBeenCalledTimes(1)
     expect(setUser).toHaveBeenCalledWith({ id: "user-2", username: "author" })
+  })
+
+  it("retains a cached user and offers a retry when the session service is unavailable", async () => {
+    const logout = vi.fn()
+    const setHydrated = vi.fn()
+    const setUser = vi.fn()
+    const replace = vi.fn()
+    usePathnameMock.mockReturnValue("/library")
+    useRouterMock.mockReturnValue({ replace, push: vi.fn() })
+    shouldSkipAuthBootstrapMock.mockReturnValue(false)
+    sessionMock.mockRejectedValueOnce(new Error("Network unavailable"))
+      .mockResolvedValueOnce({ id: "user-1", username: "reader" })
+    useAuthStoreMock.mockReturnValue({
+      user: { id: "user-1" }, setUser, setHydrated, logout,
+    })
+
+    renderAuthBootstrap()
+    await act(async () => { await Promise.resolve() })
+
+    expect(logout).not.toHaveBeenCalled()
+    expect(replace).not.toHaveBeenCalled()
+    expect(container?.textContent).toContain("Could not verify your session")
+
+    const retryButton = container?.querySelector("button")
+    expect(retryButton?.textContent).toContain("Retry session check")
+    await act(async () => { retryButton?.click(); await Promise.resolve() })
+
+    expect(sessionMock).toHaveBeenCalledTimes(2)
+    expect(setUser).toHaveBeenCalledWith({ id: "user-1", username: "reader" })
+    expect(container?.textContent).not.toContain("Could not verify your session")
+  })
+
+  it("clears a cached user only after the session endpoint confirms 401", async () => {
+    const logout = vi.fn()
+    const replace = vi.fn()
+    usePathnameMock.mockReturnValue("/library")
+    useRouterMock.mockReturnValue({ replace, push: vi.fn() })
+    shouldSkipAuthBootstrapMock.mockReturnValue(false)
+    sessionMock.mockRejectedValue(Object.assign(new Error("Unauthorized"), {
+      isAxiosError: true, response: { status: 401 },
+    }))
+    useAuthStoreMock.mockReturnValue({
+      user: { id: "user-1" }, setUser: vi.fn(), setHydrated: vi.fn(), logout,
+    })
+
+    renderAuthBootstrap()
+    await act(async () => { await Promise.resolve() })
+
+    expect(logout).toHaveBeenCalledTimes(1)
+    expect(replace).toHaveBeenCalledWith("/login?next=%2Flibrary")
+  })
+
+  it("does not claim a missing cache is a signed-out session during a server error", async () => {
+    const replace = vi.fn()
+    usePathnameMock.mockReturnValue("/library")
+    useRouterMock.mockReturnValue({ replace, push: vi.fn() })
+    shouldSkipAuthBootstrapMock.mockReturnValue(false)
+    sessionMock.mockRejectedValue(Object.assign(new Error("Server error"), {
+      isAxiosError: true, response: { status: 503 },
+    }))
+    useAuthStoreMock.mockReturnValue({
+      user: null, setUser: vi.fn(), setHydrated: vi.fn(), logout: vi.fn(),
+    })
+
+    renderAuthBootstrap()
+    await act(async () => { await Promise.resolve() })
+
+    expect(replace).not.toHaveBeenCalled()
+    expect(container?.textContent).toContain("Retry session check")
   })
 })
 

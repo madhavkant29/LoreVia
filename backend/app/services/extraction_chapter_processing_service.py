@@ -145,7 +145,13 @@ async def _process_chapter_in_generation(
     try:
         started_at = time.perf_counter()
         db_load_started = time.perf_counter()
-        chapter = await stage_chapter_for_extraction(db, book, ch_data, chapter_number)
+        chapter = await stage_chapter_for_extraction(
+            db,
+            book,
+            ch_data,
+            chapter_number,
+            rebuild_existing_chapter=bool(rebuild_run_id),
+        )
         # Stage/reset the chapter in a short transaction. Provider calls below
         # must not hold a checked-out connection or chapter locks.
         await db.commit()

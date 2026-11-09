@@ -1,4 +1,5 @@
 from app.services.chapter_recovery_service import repair_chapter_payload_from_source
+from app.utils.books.chapter_versions import RESTORE_FAILED_MESSAGE
 from app.utils.exception_boundaries import FATAL_TASK_BOUNDARY_EXCEPTIONS
 from app.utils.ingestion_utils import (
     extract_queue_wait_ms,
@@ -12,6 +13,7 @@ from app.utils.ingestion_utils import (
     update_book_processing_state,
 )
 from app.utils.llm_usage_utils import is_llm_call_error
+from app.utils.processing_error_utils import LLM_CAPACITY_MESSAGE, LLM_TOKEN_LIMIT_MESSAGE
 from app.utils.retry_utils import NON_LLM_MAX_RETRIES, exponential_backoff_seconds
 from app.utils.worker_async_utils import run_worker_coro
 from app.workers.celery_app import celery_app
@@ -322,7 +324,7 @@ def process_chapter_task(
                             if isinstance(chapter_payload, dict)
                             else None
                         ),
-                        last_error=str(getattr(exc, "detail", None) or exc),
+                        last_error=LLM_TOKEN_LIMIT_MESSAGE,
                     )
                     await db.commit()
                     raise
@@ -331,7 +333,7 @@ def process_chapter_task(
                     version = await db.get(ChapterVersion, version_uuid)
                     if version is not None:
                         version.restore_status = "failed"
-                        version.restore_error = str(exc)[:2000]
+                        version.restore_error = RESTORE_FAILED_MESSAGE
                         version.restore_completed_at = datetime.now(UTC)
                         await db.commit()
                 raise
@@ -357,7 +359,7 @@ def process_chapter_task(
             if execution_id:
 
                 async def _pause_capacity_execution(
-                    error_detail: str = str(exc),
+                    error_detail: str = LLM_CAPACITY_MESSAGE,
                 ) -> None:
                     from app.core.database import AsyncSessionLocal
                     from app.services.task_execution_service import pause_task_execution

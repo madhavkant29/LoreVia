@@ -26,6 +26,7 @@ from app.services.continuity.observation_service import (
     load_chapter_evidence,
 )
 from app.utils.books import writer_workspace
+from app.utils.logging.errors import public_error_message
 
 log = logging.getLogger("lorevia.continuity")
 
@@ -82,7 +83,7 @@ async def create_and_run_continuity_scan(
             raise
         failed_scan.status = "failed"
         failed_scan.continuity_status = "insufficient_evidence"
-        failed_scan.error_detail = str(exc)[:2000]
+        failed_scan.error_detail = public_error_message(500)
         failed_scan.started_at = failed_scan.started_at or datetime.now(UTC)
         failed_scan.completed_at = datetime.now(UTC)
         failed_scan.duration_ms = max(1, int((time.perf_counter() - started) * 1000))
@@ -92,6 +93,15 @@ async def create_and_run_continuity_scan(
         }
         await db.commit()
         log.exception("continuity_scan_failed scan_id=%s book_id=%s", scan_id, book_id)
+        try:
+            import sentry_sdk
+
+            with sentry_sdk.new_scope() as scope:
+                scope.set_tag("scan_id", str(scan_id))
+                scope.set_tag("failure_type", type(exc).__name__)
+                sentry_sdk.capture_message("continuity_scan_failed", level="error")
+        except Exception:
+            log.warning("continuity_scan_sentry_report_failed scan_id=%s", scan_id, exc_info=True)
     return await get_continuity_scan(db, book_id=book_id, scan_id=scan_id)
 
 
@@ -830,7 +840,13 @@ def continuity_scan_payload(scan: ContinuityScan) -> dict[str, Any]:
         "word_count": scan.word_count,
         "duration_ms": scan.duration_ms,
         "cost_usd": float(scan.cost_usd) if scan.cost_usd is not None else None,
-        "error_detail": scan.error_detail,
+        "error_detail": (
+            "Chapter content changed during the scan; derived evidence was discarded."
+            if scan.status == "failed" and scan.continuity_status == "stale"
+            else public_error_message(500)
+            if scan.status == "failed"
+            else scan.error_detail
+        ),
         "finding_count": len(findings),
         "stale_finding_count": sum(1 for finding in scan.findings if finding.is_stale),
         "findings": findings,

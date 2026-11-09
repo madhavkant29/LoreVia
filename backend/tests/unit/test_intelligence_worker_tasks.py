@@ -301,7 +301,9 @@ def test_generate_advisor_reply_task_surfaces_budget_limit_without_task_retry(mo
         is None
     )
     assert failed[-1]["error_code"] == "llm_budget"
-    assert failed[-1]["error_detail"] == "AI capacity resets on September 1."
+    assert failed[-1]["error_detail"] == (
+        "AI processing budget reached. Review your plan before continuing."
+    )
 
 
 def test_generate_advisor_reply_task_retries_failure_before_paid_work(monkeypatch):
@@ -612,7 +614,9 @@ def test_generate_advisor_suggestions_task_surfaces_budget_limit_without_retry(m
         is None
     )
     assert failed[-1]["error_code"] == "llm_budget"
-    assert failed[-1]["error_detail"] == "Monthly AI capacity is exhausted."
+    assert failed[-1]["error_detail"] == (
+        "AI processing budget reached. Review your plan before continuing."
+    )
 
 
 def test_update_character_embedding_task_filters_low_confidence_traits(monkeypatch):

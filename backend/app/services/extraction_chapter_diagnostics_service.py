@@ -67,6 +67,9 @@ async def build_chapter_character_extraction_diagnostics(
     chapter_character_diagnostics = {
         "total_batches": len(extraction_batch_texts),
         "source_coverage": source_coverage,
+        "invalid_profile_batches": int(
+            (source_coverage.get("profile_enrichment") or {}).get("invalid_response_batches") or 0
+        ),
         "failed_batches": extraction_failed_batches,
         "fallback_batches": extraction_fallback_batches,
         "fallback_character_count": extraction_fallback_character_count,
@@ -111,6 +114,8 @@ async def build_chapter_character_extraction_diagnostics(
     extraction_diagnostics["character_extraction"] = {
         **chapter_character_diagnostics,
         "totals": {
+            "invalid_profile_batches": int(previous_totals.get("invalid_profile_batches") or 0)
+            + chapter_character_diagnostics["invalid_profile_batches"],
             "saved_characters": int(previous_totals.get("saved_characters") or 0)
             + saved_character_count,
             "quarantined_candidates": int(previous_totals.get("quarantined_candidates") or 0)

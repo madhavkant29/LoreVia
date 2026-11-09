@@ -3,8 +3,10 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, Mock
 
 import pytest
+from fastapi import HTTPException
 
 from app.models.operations import ManuscriptExportJob
 from app.schemas.books import ManuscriptExportRequest
@@ -49,7 +51,9 @@ async def test_export_chapter_storage_reads_are_bounded_and_keep_query_order(mon
 
 
 @pytest.mark.asyncio
-async def test_export_chapter_storage_failure_keeps_empty_placeholder(monkeypatch):
+async def test_export_chapter_storage_failure_aborts_instead_of_exporting_empty_chapter(
+    monkeypatch,
+):
     def download(key: str) -> bytes:
         if key == "missing":
             raise OSError("object unavailable")
@@ -57,13 +61,52 @@ async def test_export_chapter_storage_failure_keeps_empty_placeholder(monkeypatc
 
     monkeypatch.setattr(manuscript_export_service.storage, "download_book", download)
 
-    chapters = await manuscript_export_service.load_manuscript_export_chapters(
-        [(1, "Missing", "missing"), (2, "Present", "present")],
-        include_scene_metadata=True,
-    )
+    report = Mock()
+    monkeypatch.setattr(manuscript_export_service, "report_caught_failure", report)
+    with pytest.raises(HTTPException) as failure:
+        await manuscript_export_service.load_manuscript_export_chapters(
+            [(1, "Missing", "missing"), (2, "Present", "present")],
+            include_scene_metadata=True,
+        )
 
-    assert chapters[0]["text"] == ""
-    assert chapters[1]["text"] == "plain text"
+    assert failure.value.status_code == 503
+    assert "object unavailable" not in str(failure.value.detail)
+    report.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_export_chapter_without_saved_source_aborts(monkeypatch):
+    download = Mock()
+    monkeypatch.setattr(manuscript_export_service.storage, "download_book", download)
+
+    with pytest.raises(HTTPException) as failure:
+        await manuscript_export_service.load_manuscript_export_chapters(
+            [(1, "Missing", "")], include_scene_metadata=True
+        )
+
+    assert failure.value.status_code == 409
+    download.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_export_dispatch_failure_is_reported_and_job_remains_queued(monkeypatch):
+    from app.workers.tasks.export_tasks import process_manuscript_export_job_task
+
+    job = SimpleNamespace(id=uuid.uuid4(), status="queued", celery_task_id=None)
+    db = SimpleNamespace(commit=AsyncMock())
+    report = Mock()
+    monkeypatch.setattr(
+        process_manuscript_export_job_task,
+        "apply_async",
+        Mock(side_effect=RuntimeError("broker unavailable")),
+    )
+    monkeypatch.setattr(manuscript_export_service, "report_caught_failure", report)
+
+    assert not await manuscript_export_service.dispatch_manuscript_export_job(db, job)
+    assert job.status == "queued"
+    assert job.celery_task_id is None
+    db.commit.assert_not_awaited()
+    assert report.call_args.args[0] == "manuscript_export_job_dispatch_failed"
 
 
 class _RowsResult:
@@ -255,6 +298,26 @@ def test_completed_export_job_exposes_only_authorized_api_download_path():
     assert payload.download_url == f"/api/v1/books/{job.book_id}/exports/{job.id}/download"
     assert "exports/private" not in payload.download_url
     assert payload.size_bytes == 42
+
+
+def test_failed_export_job_hides_legacy_exception_details():
+    now = datetime.now(UTC)
+    job = ManuscriptExportJob(
+        id=uuid.uuid4(),
+        user_id=uuid.uuid4(),
+        book_id=uuid.uuid4(),
+        status="failed",
+        export_kind="manuscript",
+        export_format="pdf",
+        options_json={},
+        error_detail="database query failed with private manuscript text",
+        created_at=now,
+        updated_at=now,
+    )
+
+    payload = manuscript_export_service.manuscript_export_job_out(job)
+
+    assert payload.error == "Something went wrong. Please try again."
 
 
 @pytest.mark.asyncio

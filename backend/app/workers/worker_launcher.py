@@ -11,14 +11,38 @@ from app.workers.celery_app import celery_app
 class WorkerRole:
     queues: str
     concurrency_setting: str
+    task_modules: tuple[str, ...]
 
 
 WORKER_ROLES = {
-    "extraction": WorkerRole("extraction,extraction_priority", "EXTRACTION_WORKER_CONCURRENCY"),
-    "analysis": WorkerRole("analysis,analysis_priority", "ANALYSIS_WORKER_CONCURRENCY"),
-    "embedding": WorkerRole("embedding", "EMBEDDING_WORKER_CONCURRENCY"),
-    "intelligence": WorkerRole("intelligence", "INTELLIGENCE_WORKER_CONCURRENCY"),
-    "maintenance": WorkerRole("maintenance", "MAINTENANCE_WORKER_CONCURRENCY"),
+    "extraction": WorkerRole(
+        "extraction,extraction_priority",
+        "EXTRACTION_WORKER_CONCURRENCY",
+        ("app.workers.tasks.extraction_tasks",),
+    ),
+    "analysis": WorkerRole(
+        "analysis,analysis_priority",
+        "ANALYSIS_WORKER_CONCURRENCY",
+        ("app.workers.tasks.analysis_tasks",),
+    ),
+    "embedding": WorkerRole(
+        "embedding", "EMBEDDING_WORKER_CONCURRENCY", ("app.workers.tasks.embedding_tasks",)
+    ),
+    "intelligence": WorkerRole(
+        "intelligence",
+        "INTELLIGENCE_WORKER_CONCURRENCY",
+        (
+            "app.workers.tasks.intelligence_tasks",
+            "app.workers.tasks.voice_chapter_tasks",
+            # pipeline_state_service dispatches repair_processing_books here.
+            "app.workers.tasks.maintenance_tasks",
+        ),
+    ),
+    "maintenance": WorkerRole(
+        "maintenance",
+        "MAINTENANCE_WORKER_CONCURRENCY",
+        ("app.workers.tasks.maintenance_tasks", "app.workers.tasks.export_tasks"),
+    ),
 }
 
 
@@ -47,7 +71,9 @@ def main(argv: list[str] | None = None) -> None:
     if len(arguments) != 1:
         raise SystemExit("Usage: python -m app.workers.worker_launcher <worker-role>")
     try:
-        celery_app.worker_main(worker_arguments(arguments[0]))
+        worker_args = worker_arguments(arguments[0])
+        celery_app.conf.include = WORKER_ROLES[arguments[0]].task_modules
+        celery_app.worker_main(worker_args)
     except ValueError as exc:
         raise SystemExit(str(exc)) from exc
 

@@ -796,6 +796,14 @@ async def test_continuity_scan_failure_is_persisted(
     auth_headers,
     monkeypatch,
 ):
+    import sentry_sdk
+
+    captured_failures = []
+    monkeypatch.setattr(
+        sentry_sdk,
+        "capture_message",
+        lambda message, **kwargs: captured_failures.append((message, kwargs)),
+    )
     me = await client.get("/api/v1/auth/me", headers=auth_headers)
     book = Book(
         user_id=uuid.UUID(me.json()["id"]),
@@ -822,7 +830,7 @@ async def test_continuity_scan_failure_is_persisted(
     book_id = book.id
 
     async def fail_observation_collection(*_args, **_kwargs):
-        raise RuntimeError("detector fixture failed")
+        raise RuntimeError("detector fixture failed with private manuscript text")
 
     monkeypatch.setattr(
         "app.services.continuity.scan_service.collect_observations",
@@ -838,7 +846,9 @@ async def test_continuity_scan_failure_is_persisted(
     assert response.status_code == 200
     assert response.json()["status"] == "failed"
     assert response.json()["continuity_status"] == "insufficient_evidence"
-    assert "detector fixture failed" in response.json()["error_detail"]
+    assert response.json()["error_detail"] == "Something went wrong. Please try again."
+    assert "private manuscript text" not in response.text
+    assert captured_failures == [("continuity_scan_failed", {"level": "error"})]
 
     findings_response = await client.get(
         f"/api/v1/books/{book_id}/continuity-findings",

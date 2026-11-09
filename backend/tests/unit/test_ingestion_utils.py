@@ -24,6 +24,7 @@ from app.utils.ingestion_utils import (
     is_immutable_editor_chapter_key,
     is_llm_usage_limit_error,
     is_retryable_processing_error,
+    llm_usage_limit_blocker,
     load_analysis_chapter_payload,
     load_processing_chapter_payload,
     load_staged_chapter_payload,
@@ -35,6 +36,25 @@ from app.utils.ingestion_utils import (
     regroup_prose_chapters_for_reading,
     update_book_processing_state,
 )
+
+
+def test_llm_usage_limit_blocker_keeps_resume_time_without_exposing_provider_text():
+    error = HTTPException(
+        429,
+        {
+            "kind": "llm_tokens",
+            "detail": "Private manuscript text and provider internals",
+            "next_resume_at": "2026-11-04T18:00:00+00:00",
+            "auto_resume": True,
+        },
+    )
+
+    blocker = llm_usage_limit_blocker(error)
+
+    assert blocker["kind"] == "llm_tokens"
+    assert blocker["next_resume_at"] == "2026-11-04T18:00:00+00:00"
+    assert blocker["auto_resume"] is True
+    assert "Private manuscript" not in str(blocker)
 
 
 def test_record_extraction_coverage_survives_analysis_state_update():

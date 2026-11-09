@@ -75,6 +75,41 @@ async def test_get_or_generate_summary_returns_pending_without_request_time_gene
 
 
 @pytest.mark.asyncio
+async def test_get_or_generate_summary_masks_legacy_analysis_error(db):
+    user = User(id=uuid.uuid4(), email="summary-error@example.com", password_hash="hashed")
+    book = Book(
+        id=uuid.uuid4(),
+        user_id=user.id,
+        title="Atlas",
+        format="pdf",
+        work_type="novel",
+        s3_key="books/atlas-error.pdf",
+        status="ready",
+        mode="reader",
+        source_kind="single_upload",
+    )
+    chapter = Chapter(
+        id=uuid.uuid4(),
+        book_id=book.id,
+        number=1,
+        title="One",
+        s3_key="chapters/atlas-error/1.txt",
+        processed=True,
+        analysis_state={
+            "status": "failed",
+            "last_error": "SQL parameters: private manuscript text",
+        },
+    )
+    db.add_all([user, book, chapter])
+    await db.commit()
+
+    payload = await get_or_generate_summary(db, book.id, 1, "short")
+
+    assert payload["status"] == "failed"
+    assert "private manuscript text" not in str(payload)
+
+
+@pytest.mark.asyncio
 async def test_persist_chapter_summary_payloads_updates_existing_and_inserts_missing(db):
     user = User(
         id=uuid.uuid4(),

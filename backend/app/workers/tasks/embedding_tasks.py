@@ -4,6 +4,7 @@ from app.utils.ingestion_utils import (
     is_llm_usage_limit_error,
     llm_usage_limit_blocker,
 )
+from app.utils.processing_error_utils import LLM_CAPACITY_MESSAGE
 from app.utils.retry_utils import NON_LLM_MAX_RETRIES, exponential_backoff_seconds
 from app.utils.worker_async_utils import run_worker_coro
 from app.workers.celery_app import celery_app
@@ -110,7 +111,9 @@ def update_character_embedding_task(self, character_id: str, execution_id: str |
         if is_llm_coordination_retry_error(exc):
             if execution_id:
 
-                async def _pause_capacity_execution(error_detail: str = str(exc)) -> None:
+                async def _pause_capacity_execution(
+                    error_detail: str = LLM_CAPACITY_MESSAGE,
+                ) -> None:
                     from app.core.database import AsyncSessionLocal
                     from app.services.task_execution_service import pause_task_execution
 

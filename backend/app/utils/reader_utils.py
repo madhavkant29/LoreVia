@@ -54,6 +54,7 @@ from app.utils.plot_thread_utils import (
     build_plot_thread_payload,
     normalize_plot_thread_status,
 )
+from app.utils.processing_error_utils import friendly_processing_error
 from app.utils.storage_utils import STORAGE_IO_EXCEPTIONS
 from app.utils.tag_utils import (
     ENTITY_TYPE_CHAPTER,
@@ -1059,7 +1060,11 @@ def chapter_analysis_status(chapter: Chapter | None) -> dict[str, Any] | None:
             str(mode).strip() for mode in (source.get("generated_modes") or []) if str(mode).strip()
         ],
         "attempt_count": int(source.get("attempt_count") or 0),
-        "last_error": " ".join(str(source.get("last_error") or "").split()).strip() or None,
+        "last_error": (
+            friendly_processing_error(str(source["last_error"]))
+            if source.get("last_error")
+            else None
+        ),
         "updated_at": source.get("updated_at"),
     }
     return payload

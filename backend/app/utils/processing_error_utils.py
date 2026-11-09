@@ -11,6 +11,15 @@ from __future__ import annotations
 import re
 from typing import Final
 
+LLM_CAPACITY_MESSAGE: Final = "AI processing capacity is temporarily busy. Retrying shortly."
+LLM_BUDGET_MESSAGE: Final = "AI processing budget reached. Review your plan before continuing."
+LLM_TOKEN_LIMIT_MESSAGE: Final = (
+    "Token allowance reached. Processing will resume when the window refreshes."
+)
+MONTHLY_PROCESSED_WORDS_MESSAGE: Final = (
+    "Monthly processed-word allowance reached. Continue after your plan window resets."
+)
+
 GENERIC_PROCESSING_FAILURE: Final = (
     "Processing stopped before it finished. Retry to continue, and contact "
     "support if it keeps failing."
@@ -31,6 +40,21 @@ _UNREADABLE_FILE_FAILURE: Final = (
 
 _EMPTY_TEXT_FAILURE: Final = (
     "We couldn't find readable text in this manuscript. Check the file contents and try again."
+)
+
+_SAFE_MESSAGES: Final = frozenset(
+    {
+        LLM_BUDGET_MESSAGE,
+        LLM_CAPACITY_MESSAGE,
+        LLM_TOKEN_LIMIT_MESSAGE,
+        MONTHLY_PROCESSED_WORDS_MESSAGE,
+        GENERIC_PROCESSING_FAILURE,
+        _BUDGET_FAILURE,
+        _LEGACY_DOC_FAILURE,
+        _UNREADABLE_FILE_FAILURE,
+        _EMPTY_TEXT_FAILURE,
+        "Something went wrong. Please try again.",
+    }
 )
 
 _PATTERNS: Final[tuple[tuple[re.Pattern[str], str], ...]] = (
@@ -67,6 +91,8 @@ def friendly_processing_error(error: str | None) -> str:
     text = " ".join(str(error or "").split())
     if not text:
         return GENERIC_PROCESSING_FAILURE
+    if text in _SAFE_MESSAGES:
+        return text
     for pattern, message in _PATTERNS:
         if pattern.search(text):
             return message

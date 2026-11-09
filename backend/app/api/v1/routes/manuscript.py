@@ -34,6 +34,7 @@ from app.utils.books.chapter_versions import (
     delete_chapter,
     get_chapter_version_content,
     list_chapter_versions,
+    public_restore_error,
     restore_chapter_version,
     snapshot_chapter_version,
 )
@@ -556,7 +557,7 @@ async def get_chapter_version_restore_status(
         id=str(version.id),
         chapter_number=version.chapter_number,
         restore_status=version.restore_status,
-        restore_error=version.restore_error,
+        restore_error=public_restore_error(version),
         restore_task_id=version.restore_task_id,
         restore_started_at=version.restore_started_at,
         restore_completed_at=version.restore_completed_at,

@@ -37,8 +37,19 @@ def review_voice_chapter_task(self, *, job_id: str):
                 return "already_claimed_or_done"
             try:
                 return await process_voice_chapter_job(db, job=job, execution_id=execution_id)
-            except FATAL_TASK_BOUNDARY_EXCEPTIONS:
+            except FATAL_TASK_BOUNDARY_EXCEPTIONS as exc:
                 log.exception("voice_chapter_review_failed job_id=%s", job_id)
+                try:
+                    import sentry_sdk
+
+                    with sentry_sdk.new_scope() as scope:
+                        scope.set_tag("job_id", job_id)
+                        scope.set_tag("failure_type", type(exc).__name__)
+                        sentry_sdk.capture_message("voice_chapter_review_failed", level="error")
+                except Exception:
+                    log.warning(
+                        "voice_chapter_sentry_report_failed job_id=%s", job_id, exc_info=True
+                    )
                 await db.rollback()
                 await update_voice_chapter_job(
                     db,

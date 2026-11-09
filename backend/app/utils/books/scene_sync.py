@@ -6,6 +6,8 @@ import asyncio
 import uuid
 from typing import Any, cast
 
+from botocore.exceptions import ClientError
+from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -26,6 +28,7 @@ from app.utils.books.scene_metadata import (
     build_workspace_chapter_text_from_scenes,
     strip_scene_metadata_from_manuscript_text,
 )
+from app.utils.logging.errors import report_caught_failure
 from app.utils.storage_utils import STORAGE_IO_EXCEPTIONS
 
 
@@ -111,35 +114,53 @@ async def sync_chapter_content_from_novel_scenes(
         else None
     )
     previous_payload = {"text": "", "html": None}
-    if chapter.s3_key:
+    source_missing = False
+    if chapter.s3_key and not chapter_created:
         try:
             previous_raw = await asyncio.to_thread(download_book, chapter.s3_key)
-        except STORAGE_IO_EXCEPTIONS:
-            previous_payload = {"text": "", "html": None}
+        except STORAGE_IO_EXCEPTIONS as exc:
+            missing_source = isinstance(exc, FileNotFoundError) or (
+                isinstance(exc, ClientError)
+                and exc.response.get("Error", {}).get("Code") in {"404", "NoSuchKey", "NotFound"}
+            )
+            new_scene_chapter = (
+                chapter.s3_key == _chapter_storage_key(book.id, chapter_number)
+                and not chapter.word_count
+                and int(chapter.content_version or 1) == 1
+                and not getattr(chapter, "processed", False)
+            )
+            if not (missing_source and new_scene_chapter):
+                report_caught_failure("scene_sync_source_storage_failed", exc)
+                raise HTTPException(
+                    503, "The chapter source could not be loaded. Retry the scene change."
+                ) from exc
+            source_missing = True
         else:
             previous_payload = manuscript.deserialize_manuscript_content(previous_raw)
-    stored_key = await asyncio.to_thread(
-        upload_text,
-        chapter.s3_key or _chapter_storage_key(book.id, chapter_number),
-        manuscript.serialize_manuscript_content(next_text, next_html),
-    )
-    chapter.s3_key = stored_key
-    chapter.word_count = _count_words(strip_scene_metadata_from_manuscript_text(next_text))
     previous_text = str(previous_payload.get("text") or "")
     previous_html = (
         manuscript.clean_manuscript_html(cast(str | None, previous_payload.get("html")))
         if previous_payload.get("html")
         else None
     )
-    if (
-        increment_content_version
-        and not chapter_created
-        and (previous_text != next_text or previous_html != next_html)
-    ):
+    content_changed = (
+        chapter_created
+        or source_missing
+        or previous_text != next_text
+        or previous_html != next_html
+    )
+    if content_changed:
+        stored_key = await asyncio.to_thread(
+            upload_text,
+            f"chapters/{book.id}/{chapter_number}/{uuid.uuid4().hex}.txt",
+            manuscript.serialize_manuscript_content(next_text, next_html),
+        )
+        chapter.s3_key = stored_key
+    chapter.word_count = _count_words(strip_scene_metadata_from_manuscript_text(next_text))
+    if increment_content_version and not chapter_created and content_changed:
         chapter.content_version = int(chapter.content_version or 1) + 1
     if not chapter.title:
         chapter.title = f"Chapter {chapter_number}"
-    content_changed = chapter_created or previous_text != next_text or previous_html != next_html
     if content_changed:
         writer_workspace.touch_public_book_updated_at(book)
     await db.flush()

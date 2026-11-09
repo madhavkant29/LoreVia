@@ -381,13 +381,59 @@ describe("api client", () => {
     const { captured } = await loadClientModule()
     const originalWindow = globalThis.window
     const replaceMock = vi.fn()
-    axiosPostMock.mockRejectedValue(new Error("refresh failed"))
+    axiosPostMock.mockRejectedValue({ response: { status: 401 } })
+    isAxiosErrorMock.mockReturnValue(true)
     const error = { config: { url: "/books/1" }, response: { status: 401 } }
     vi.stubGlobal("window", { location: { replace: replaceMock } })
 
     await expect(captured.responseError?.(error)).rejects.toBe(error)
     expect(replaceMock).toHaveBeenCalledWith("/login")
     vi.stubGlobal("window", originalWindow)
+  })
+
+  it("keeps auth cookies and stays on the page when refresh fails because the service is unavailable", async () => {
+    const { captured } = await loadClientModule()
+    const replace = vi.fn()
+    const originalWindow = globalThis.window
+    const originalDocument = globalThis.document
+    vi.stubGlobal("window", { location: { hostname: "localhost", replace } })
+    vi.stubGlobal("document", { cookie: "lorevia_csrf=csrf-token" })
+    isAxiosErrorMock.mockReturnValue(true)
+    const refreshError = { response: { status: 503 }, config: { url: "/auth/refresh" } }
+    axiosPostMock.mockRejectedValue(refreshError)
+    const error = { config: { url: "/books/1" }, response: { status: 401 } }
+
+    await expect(captured.responseError?.(error)).rejects.toBe(error)
+
+    expect(replace).not.toHaveBeenCalled()
+    expect(globalThis.document.cookie).toBe("lorevia_csrf=csrf-token")
+    expect(captureApiFailureMock).toHaveBeenCalledWith(refreshError)
+    vi.stubGlobal("window", originalWindow)
+    vi.stubGlobal("document", originalDocument)
+  })
+
+  it("repairs a stale CSRF cookie before treating refresh as unavailable", async () => {
+    const { captured, apiClientMock } = await loadClientModule()
+    const originalDocument = globalThis.document
+    vi.stubGlobal("document", { cookie: "lorevia_csrf=stale" })
+    axiosPostMock.mockRejectedValueOnce({ response: { status: 403, data: { detail: "Invalid CSRF token" } } })
+      .mockResolvedValueOnce({ data: {} })
+    axiosGetMock.mockImplementation(async () => {
+      globalThis.document.cookie = "lorevia_csrf=fresh"
+      return { status: 204 }
+    })
+    apiClientMock.mockResolvedValue({ data: { retried: true } })
+
+    const result = await captured.responseError?.({
+      config: { url: "/books/1" }, response: { status: 401 },
+    })
+
+    expect(axiosPostMock).toHaveBeenCalledTimes(2)
+    expect(axiosPostMock).toHaveBeenLastCalledWith("/api/v1/auth/refresh", null, {
+      withCredentials: true, headers: { "X-CSRF-Token": "fresh" }, timeout: 15_000,
+    })
+    expect(result).toEqual({ data: { retried: true } })
+    vi.stubGlobal("document", originalDocument)
   })
 
   it("does not redirect when window is unavailable", async () => {

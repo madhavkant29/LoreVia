@@ -29,6 +29,7 @@ from app.utils.books.writer_workspace import (
 from app.utils.db_utils import is_retryable_transaction_db_error
 from app.utils.llm_usage_utils import is_transient_llm_provider_error
 from app.utils.logging.errors import redact_sensitive_text
+from app.utils.processing_error_utils import LLM_BUDGET_MESSAGE, LLM_TOKEN_LIMIT_MESSAGE
 from app.utils.storage_utils import STORAGE_IO_EXCEPTIONS
 
 MEDIA_MARKER_RE = re.compile(r"\[\[IMAGE:[^\]]+\]\]")
@@ -886,10 +887,10 @@ def is_llm_usage_limit_error(exc: BaseException) -> bool:
 def llm_usage_limit_blocker(exc: BaseException) -> dict[str, Any]:
     detail = getattr(exc, "detail", None)
     if isinstance(detail, dict):
-        message = str(detail.get("detail") or detail.get("message") or exc)
+        kind = str(detail.get("kind") or "llm_tokens")
         return {
-            "kind": str(detail.get("kind") or "llm_tokens"),
-            "detail": message,
+            "kind": kind,
+            "detail": (LLM_BUDGET_MESSAGE if kind == "llm_budget" else LLM_TOKEN_LIMIT_MESSAGE),
             "window": detail.get("window"),
             "windows": detail.get("windows") or [],
             "next_resume_at": detail.get("next_resume_at"),
@@ -898,7 +899,7 @@ def llm_usage_limit_blocker(exc: BaseException) -> dict[str, Any]:
         }
     return {
         "kind": "llm_tokens",
-        "detail": str(detail if detail is not None else exc),
+        "detail": LLM_TOKEN_LIMIT_MESSAGE,
         "next_resume_at": None,
         "auto_resume": False,
         # Legacy string-only limit errors do not carry enough information to

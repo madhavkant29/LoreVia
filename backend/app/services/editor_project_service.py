@@ -48,6 +48,7 @@ from app.models.tag import CustomTag
 from app.services.book_section_service import filter_analysis_eligible_chapters
 from app.utils.advisor_utils import invalidate_advisor_caches_for_book
 from app.utils.ingestion_utils import build_chapter_dispatch_plan, merge_processing_pipeline
+from app.utils.processing_error_utils import friendly_processing_error
 
 log = logging.getLogger("lorevia.editor_project")
 
@@ -1008,7 +1009,7 @@ async def fail_rebuild_if_active(
     reprocess_metadata["last_failed_at"] = now.isoformat()
     reprocess_metadata["last_failed_rebuild_run_id"] = failed_rebuild_run_id
     if error:
-        reprocess_metadata["last_error"] = " ".join(str(error).split()).strip()
+        reprocess_metadata["last_error"] = friendly_processing_error(error)
     workspace["reprocess"] = reprocess_metadata
     processing.pop("rebuild_run_id", None)
     processing["status"] = "failed"

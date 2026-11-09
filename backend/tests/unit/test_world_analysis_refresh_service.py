@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
 import pytest
+import sentry_sdk
 
 from app.services import world_analysis_refresh_service
 
@@ -54,6 +55,8 @@ async def test_enqueue_world_analysis_refresh_dispatches_with_queue_metadata(mon
 @pytest.mark.asyncio
 async def test_enqueue_world_analysis_refresh_releases_lock_when_dispatch_fails(monkeypatch):
     release = AsyncMock(return_value=True)
+    reported = Mock()
+    monkeypatch.setattr(sentry_sdk, "capture_message", reported)
     monkeypatch.setattr(
         world_analysis_refresh_service,
         "cache_acquire_lock",
@@ -72,6 +75,7 @@ async def test_enqueue_world_analysis_refresh_releases_lock_when_dispatch_fails(
 
     assert job_id is None
     release.assert_awaited_once()
+    reported.assert_called_once_with("world_analysis_refresh_dispatch_failed", level="error")
 
 
 @pytest.mark.asyncio

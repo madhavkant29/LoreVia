@@ -14,7 +14,7 @@ export const apiClient = axios.create({
   withCredentials: true,
 })
 
-let refreshPromise: Promise<boolean> | null = null
+let refreshPromise: Promise<"refreshed" | "expired" | "unavailable"> | null = null
 let csrfBootstrapPromise: Promise<boolean> | null = null
 const AUTH_CSRF_COOKIE_NAME = "lorevia_csrf"
 const AUTH_CSRF_HEADER_NAME = "X-CSRF-Token"
@@ -78,22 +78,34 @@ export function getAuthCsrfHeaders(): Record<string, string> {
   return csrfToken ? { [AUTH_CSRF_HEADER_NAME]: csrfToken } : {}
 }
 
-async function refreshAccessToken(): Promise<boolean> {
-  const csrfHeaders = getAuthCsrfHeaders()
+async function refreshAccessToken(): Promise<"refreshed" | "expired" | "unavailable"> {
   if (!refreshPromise) {
-    refreshPromise = axios
-      .post(`${API_BASE}/auth/refresh`, null, {
+    const requestRefresh = () => {
+      const csrfHeaders = getAuthCsrfHeaders()
+      return axios.post(`${API_BASE}/auth/refresh`, null, {
         withCredentials: true,
         headers: Object.keys(csrfHeaders).length > 0 ? csrfHeaders : undefined,
         timeout: AUTH_REFRESH_TIMEOUT_MS,
       })
-      .then(() => {
+    }
+    refreshPromise = requestRefresh()
+      .catch(async (error) => {
+        if (isCsrfFailure(error) && await bootstrapAuthCsrfCookie()) {
+          return requestRefresh()
+        }
+        throw error
+      })
+      .then((): "refreshed" => {
         if (typeof document !== "undefined") {
           document.cookie = "lorevia_session_dead=; Max-Age=0; Path=/"
         }
-        return true
+        return "refreshed"
       })
-      .catch(() => false)
+      .catch((error): "expired" | "unavailable" => {
+        if (axios.isAxiosError(error) && error.response?.status === 401) return "expired"
+        if (axios.isAxiosError(error)) captureApiFailure(error)
+        return "unavailable"
+      })
       .finally(() => {
         refreshPromise = null
       })
@@ -170,13 +182,13 @@ apiClient.interceptors.response.use(
       requestPath === "/auth/login" ||
       requestPath === "/auth/register" ||
       requestPath.startsWith("/auth/oauth/")
-    if (error.response?.status === 401 && !originalRequest?._retry && !isAuthEndpoint) {
+    if (error.response?.status === 401 && originalRequest && !originalRequest._retry && !isAuthEndpoint) {
       originalRequest._retry = true
-      const refreshed = await refreshAccessToken()
-      if (refreshed) {
+      const refreshResult = await refreshAccessToken()
+      if (refreshResult === "refreshed") {
         return apiClient(originalRequest)
       }
-      if (typeof window !== "undefined") {
+      if (refreshResult === "expired" && typeof window !== "undefined") {
         clearAuthCookies()
         // Set a short-lived flag so the middleware knows these cookies are
         // dead and must not redirect /login → /library, preventing the loop.

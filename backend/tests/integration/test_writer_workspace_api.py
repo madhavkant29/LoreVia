@@ -3,12 +3,13 @@ import uuid
 import pytest
 from sqlalchemy import select
 
-from app.core.storage import download_book
+from app.core.storage import download_book, upload_text
 from app.models.book import Book, BookCollaborator, Chapter, NovelScene
 from app.models.intelligence import ChapterSummary
 from app.models.progress import ReadingProgress
 from app.utils.books.manuscript import (
     deserialize_manuscript_content,
+    serialize_manuscript_content,
 )
 
 
@@ -224,12 +225,17 @@ async def test_manuscript_import_syncs_chapter_scenes_and_reader_chapter_content
             )
         ).scalar_one_or_none()
         if chapter is None:
+            chapter_key = f"chapters/{_book.id}/{int(ch_data['number'])}.txt"
+            upload_text(
+                chapter_key,
+                serialize_manuscript_content(str(ch_data.get("text") or ""), ch_data.get("html")),
+            )
             _db.add(
                 Chapter(
                     book_id=_book.id,
                     number=int(ch_data["number"]),
                     title=ch_data.get("title"),
-                    s3_key=f"chapters/{_book.id}/{int(ch_data['number'])}.txt",
+                    s3_key=chapter_key,
                     processed=True,
                 )
             )
@@ -298,7 +304,9 @@ async def test_manuscript_import_syncs_chapter_scenes_and_reader_chapter_content
 
 
 @pytest.mark.asyncio
-async def test_reorder_chapter_scenes_persists_sort_order_and_structure_version(client, db):
+async def test_reorder_chapter_scenes_persists_sort_order_and_structure_version(
+    client, db, monkeypatch
+):
     headers, user_id = await _register_user(
         client, f"scene-order-{uuid.uuid4().hex[:8]}@lorevia.app"
     )
@@ -364,6 +372,11 @@ async def test_reorder_chapter_scenes_persists_sort_order_and_structure_version(
     db.add_all(scenes)
     await db.commit()
 
+    source_key = chapter.s3_key
+    monkeypatch.setattr(
+        "app.utils.books.scene_sync.download_book",
+        lambda key: {source_key: b"Original chapter source."}[key],
+    )
     response = await client.patch(
         f"/api/v1/books/{book.id}/chapters/2/scenes/order",
         headers=headers,

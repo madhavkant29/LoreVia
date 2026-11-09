@@ -14,6 +14,7 @@ from app.core.config import settings
 from app.core.redis import cache_get, cache_set, key_chapter_summary
 from app.models.book import Chapter
 from app.models.intelligence import ChapterSummary
+from app.utils.processing_error_utils import friendly_processing_error
 
 SUMMARY_MODES = ("short", "detailed", "key_points")
 PERSISTED_SUMMARY_MODES = (*SUMMARY_MODES, "editorial_note")
@@ -144,6 +145,10 @@ async def get_or_generate_summary(
         "diagnostics": {
             "analysis_status": status,
             "generated_modes": list(analysis_state.get("generated_modes") or []),
-            "last_error": analysis_state.get("last_error"),
+            "last_error": (
+                friendly_processing_error(str(analysis_state["last_error"]))
+                if analysis_state.get("last_error")
+                else None
+            ),
         },
     }

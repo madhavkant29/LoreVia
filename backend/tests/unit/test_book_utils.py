@@ -6,6 +6,7 @@ import uuid
 from contextlib import nullcontext
 from datetime import UTC, datetime
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 from fastapi import HTTPException
@@ -116,6 +117,7 @@ from app.utils.books.workspace_search import (
 )
 from app.utils.books.writer_workspace import (
     build_book_processing_payload,
+    build_writer_workspace_payload,
     normalize_writer_workspace,
 )
 
@@ -252,6 +254,8 @@ def test_scene_keyword_set_filters_common_revision_noise_but_keeps_story_terms()
 @pytest.mark.asyncio
 async def test_revision_analysis_chapter_text_loading_only_swallows_storage_io(monkeypatch):
     chapter = SimpleNamespace(number=3, s3_key="chapters/book/3.json")
+    report = Mock()
+    monkeypatch.setattr(manuscript, "report_caught_failure", report)
 
     def _storage_missing(_key: str) -> bytes:
         raise OSError("object unavailable")
@@ -259,6 +263,7 @@ async def test_revision_analysis_chapter_text_loading_only_swallows_storage_io(m
     monkeypatch.setattr(manuscript, "download_book", _storage_missing)
 
     assert await manuscript.load_chapter_texts([chapter]) == {3: ""}
+    report.assert_called_once()
 
     def _unexpected_bug(_key: str) -> bytes:
         raise RuntimeError("download wrapper bug")
@@ -267,6 +272,25 @@ async def test_revision_analysis_chapter_text_loading_only_swallows_storage_io(m
 
     with pytest.raises(RuntimeError, match="download wrapper bug"):
         await manuscript.load_chapter_texts([chapter])
+
+
+@pytest.mark.asyncio
+async def test_revision_version_storage_failure_stops_report_without_exposing_error(monkeypatch):
+    version = SimpleNamespace(s3_key="chapters/book/version.json")
+    report = Mock()
+    monkeypatch.setattr(revision_analysis_module, "report_caught_failure", report)
+
+    def _storage_unavailable(_key: str) -> bytes:
+        raise OSError("private storage endpoint")
+
+    monkeypatch.setattr(revision_analysis_module, "download_book", _storage_unavailable)
+
+    with pytest.raises(HTTPException) as failure:
+        await revision_analysis_module._load_version_text(version)
+
+    assert failure.value.status_code == 503
+    assert "private storage endpoint" not in failure.value.detail
+    report.assert_called_once()
 
 
 def test_build_revision_change_summary_falls_back_when_only_noise_terms_changed():
@@ -574,7 +598,7 @@ async def test_load_novel_export_chapters_includes_media_when_requested(monkeypa
 
 
 @pytest.mark.asyncio
-async def test_load_novel_export_chapters_only_swallows_storage_io(monkeypatch):
+async def test_load_novel_export_chapters_aborts_on_storage_io(monkeypatch):
     book = SimpleNamespace(id=uuid.uuid4())
     chapter_id = uuid.uuid4()
 
@@ -589,15 +613,82 @@ async def test_load_novel_export_chapters_only_swallows_storage_io(monkeypatch):
 
     monkeypatch.setattr("app.utils.books.manuscript.download_book", _storage_missing)
 
-    chapters = await load_novel_export_chapters(
-        db,
-        book=book,
-        collaborator=None,
-        include_images=False,
+    with pytest.raises(HTTPException) as failure:
+        await load_novel_export_chapters(
+            db,
+            book=book,
+            collaborator=None,
+            include_images=False,
+        )
+
+    assert failure.value.status_code == 503
+    assert "object unavailable" not in str(failure.value.detail)
+
+
+@pytest.mark.asyncio
+async def test_novel_export_aborts_when_requested_image_cannot_be_loaded(monkeypatch):
+    chapter_id = uuid.uuid4()
+    media = SimpleNamespace(chapter_id=chapter_id, asset_type="image", storage_key="missing")
+    db = _FakeExecuteDB(
+        execute_values=[
+            _AllResult([(chapter_id, 1, "Opening", "chapter-source")]),
+            _ScalarsResult([media]),
+        ]
     )
 
-    assert chapters[0]["text"] == ""
+    def _download(key):
+        if key == "missing":
+            raise OSError("private storage error")
+        return b"Chapter text"
 
+    monkeypatch.setattr("app.utils.books.manuscript.download_book", _download)
+    with pytest.raises(HTTPException) as failure:
+        await load_novel_export_chapters(
+            db,
+            book=SimpleNamespace(id=uuid.uuid4()),
+            collaborator=None,
+            include_images=True,
+        )
+
+    assert failure.value.status_code == 503
+    assert "private storage error" not in str(failure.value.detail)
+
+
+@pytest.mark.asyncio
+async def test_novel_export_aborts_when_chapter_has_no_saved_source(monkeypatch):
+    db = _FakeExecuteDB(execute_values=[_AllResult([(uuid.uuid4(), 1, "Opening", "")])])
+    download = Mock()
+    monkeypatch.setattr("app.utils.books.manuscript.download_book", download)
+
+    with pytest.raises(HTTPException) as failure:
+        await load_novel_export_chapters(
+            db,
+            book=SimpleNamespace(id=uuid.uuid4()),
+            collaborator=None,
+            include_images=False,
+        )
+
+    assert failure.value.status_code == 409
+    download.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_novel_export_cover_failure_does_not_silently_remove_cover(monkeypatch):
+    def _download(_key):
+        raise OSError("private storage error")
+
+    monkeypatch.setattr("app.utils.books.manuscript.download_book", _download)
+    with pytest.raises(HTTPException) as failure:
+        await manuscript.load_novel_cover_image(SimpleNamespace(cover_s3_key="covers/book.png"))
+
+    assert failure.value.status_code == 503
+    assert "private storage error" not in str(failure.value.detail)
+
+
+@pytest.mark.asyncio
+async def test_novel_export_propagates_unexpected_deserializer_errors(monkeypatch):
+    book = SimpleNamespace(id=uuid.uuid4())
+    chapter_id = uuid.uuid4()
     db = _FakeExecuteDB(
         execute_values=[
             _AllResult([(chapter_id, 1, "Opening", "chapters/book/1.json")]),
@@ -623,25 +714,27 @@ async def test_load_novel_export_chapters_only_swallows_storage_io(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_sync_chapter_content_from_novel_scenes_only_swallows_storage_io(monkeypatch):
+async def test_sync_chapter_content_from_novel_scenes_allows_missing_new_scene_source(monkeypatch):
     book = SimpleNamespace(id=uuid.uuid4(), title="Atlas")
     chapter = SimpleNamespace(
         id=uuid.uuid4(),
-        s3_key="chapters/book/1.json",
+        s3_key=f"chapters/{book.id}/1.txt",
         word_count=0,
         content_version=1,
         title="Opening",
     )
+    previous_key = chapter.s3_key
 
     def _upload_text(key: str, content: str) -> str:
-        assert key == "chapters/book/1.json"
+        assert key.startswith(f"chapters/{book.id}/1/")
+        assert key != previous_key
         assert isinstance(content, str)
         return key
 
     monkeypatch.setattr("app.utils.books.scene_sync.upload_text", _upload_text)
 
     def _storage_missing(_key: str) -> bytes:
-        raise OSError("object unavailable")
+        raise FileNotFoundError("new scene chapter has no stored source yet")
 
     monkeypatch.setattr("app.utils.books.scene_sync.download_book", _storage_missing)
     db = _FakeExecuteDB(execute_values=[_ScalarResult(chapter), _ScalarsResult([])])
@@ -653,7 +746,7 @@ async def test_sync_chapter_content_from_novel_scenes_only_swallows_storage_io(m
     )
 
     assert synced["chapter"] is chapter
-    assert chapter.s3_key == "chapters/book/1.json"
+    assert chapter.s3_key != previous_key
     assert db.executed[0]._for_update_arg is not None
 
     monkeypatch.setattr("app.utils.books.scene_sync.download_book", lambda _key: b"{}")
@@ -673,6 +766,68 @@ async def test_sync_chapter_content_from_novel_scenes_only_swallows_storage_io(m
             book=book,
             chapter_number=1,
         )
+
+
+@pytest.mark.asyncio
+async def test_sync_chapter_content_from_novel_scenes_rejects_transient_source_failure(
+    monkeypatch,
+):
+    book = SimpleNamespace(id=uuid.uuid4(), title="Atlas")
+    chapter = SimpleNamespace(
+        id=uuid.uuid4(),
+        s3_key=f"chapters/{book.id}/1.txt",
+        word_count=100,
+        content_version=2,
+        title="Opening",
+    )
+    upload = Mock()
+    report = Mock()
+    monkeypatch.setattr("app.utils.books.scene_sync.upload_text", upload)
+    monkeypatch.setattr("app.utils.books.scene_sync.report_caught_failure", report)
+
+    def _storage_unavailable(_key: str) -> bytes:
+        raise OSError("object store timeout")
+
+    monkeypatch.setattr("app.utils.books.scene_sync.download_book", _storage_unavailable)
+    db = _FakeExecuteDB(execute_values=[_ScalarResult(chapter), _ScalarsResult([])])
+
+    with pytest.raises(HTTPException) as failure:
+        await sync_chapter_content_from_novel_scenes(db, book=book, chapter_number=1)
+
+    assert failure.value.status_code == 503
+    assert "object store timeout" not in failure.value.detail
+    upload.assert_not_called()
+    report.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_sync_chapter_content_from_novel_scenes_preserves_previous_storage_object(
+    monkeypatch,
+):
+    book = SimpleNamespace(id=uuid.uuid4(), title="Atlas")
+    previous_key = f"chapters/{book.id}/1.txt"
+    stored = {previous_key: serialize_manuscript_content("Old chapter", None).encode()}
+    chapter = SimpleNamespace(
+        id=uuid.uuid4(),
+        s3_key=previous_key,
+        word_count=2,
+        content_version=1,
+        title="Opening",
+    )
+    monkeypatch.setattr("app.utils.books.scene_sync.download_book", stored.__getitem__)
+
+    def upload(key: str, content: str) -> str:
+        stored[key] = content.encode()
+        return key
+
+    monkeypatch.setattr("app.utils.books.scene_sync.upload_text", upload)
+    db = _FakeExecuteDB(execute_values=[_ScalarResult(chapter), _ScalarsResult([])])
+
+    await sync_chapter_content_from_novel_scenes(db, book=book, chapter_number=1)
+
+    assert stored[previous_key] == serialize_manuscript_content("Old chapter", None).encode()
+    assert chapter.s3_key != previous_key
+    assert chapter.s3_key in stored
 
 
 def test_build_blank_cover_image_renders_title_and_author_placeholder():
@@ -904,6 +1059,99 @@ def test_normalize_writer_workspace_preserves_defaults_and_sanitizes_cards():
         == 3
     )
     assert len(workspace["templates"]) >= 3
+
+
+def test_public_processing_payload_masks_legacy_error_details_without_mutating_storage():
+    processing = {
+        "status": "paused",
+        "stage": "usage_limited",
+        "pause_reason": "llm_capacity",
+        "last_error": "provider rejected private manuscript text",
+        "resume_blockers": [
+            {"kind": "llm_capacity", "detail": "provider rejected private manuscript text"}
+        ],
+        "pipeline": {
+            "analysis": {
+                "status": "failed",
+                "last_error": "SQL parameters: private manuscript text",
+            }
+        },
+    }
+    book = SimpleNamespace(
+        writer_workspace={"processing": processing}, title="Test", author="Writer"
+    )
+
+    book_payload = build_book_processing_payload(book)
+    workspace_payload = build_writer_workspace_payload(book)
+
+    assert (
+        book_payload["last_error"]
+        == "AI processing capacity is temporarily busy. Retrying shortly."
+    )
+    assert book_payload["resume_blockers"][0]["detail"] == book_payload["last_error"]
+    assert "private manuscript text" not in str(book_payload)
+    assert "private manuscript text" not in str(workspace_payload["processing"])
+    assert processing["resume_blockers"][0]["detail"] == "provider rejected private manuscript text"
+
+
+def test_public_processing_payload_distinguishes_budget_from_rolling_limit():
+    processing = {
+        "status": "paused",
+        "pause_reason": "llm_budget",
+        "last_error": "provider quota with private metadata",
+        "resume_blockers": [
+            {"kind": "llm_budget", "detail": "provider quota with private metadata"}
+        ],
+    }
+    book = SimpleNamespace(writer_workspace={"processing": processing})
+
+    payload = build_book_processing_payload(book)
+
+    assert (
+        payload["last_error"] == "AI processing budget reached. Review your plan before continuing."
+    )
+    assert payload["resume_blockers"][0]["detail"] == payload["last_error"]
+    assert "private metadata" not in str(payload)
+
+
+def test_writer_workspace_masks_legacy_reprocess_error():
+    book = SimpleNamespace(
+        writer_workspace={"reprocess": {"last_error": "SQL parameters: private manuscript text"}},
+        title="Test",
+        author="Writer",
+    )
+
+    payload = build_writer_workspace_payload(book)
+
+    assert "private manuscript text" not in str(payload["reprocess"])
+    assert "private manuscript text" in book.writer_workspace["reprocess"]["last_error"]
+
+
+def test_public_processing_payload_preserves_monthly_allowance_guidance():
+    book = SimpleNamespace(
+        writer_workspace={
+            "processing": {
+                "status": "processing",
+                "stage": "allowance_paused",
+                "pause_reason": "processing_allowance",
+                "last_error": "provider text with private metadata",
+                "resume_blockers": [
+                    {
+                        "kind": "monthly_processed_words",
+                        "detail": "provider text with private metadata",
+                    }
+                ],
+            }
+        }
+    )
+
+    payload = build_book_processing_payload(book)
+
+    assert payload["last_error"] == (
+        "Monthly processed-word allowance reached. Continue after your plan window resets."
+    )
+    assert payload["resume_blockers"][0]["detail"] == payload["last_error"]
+    assert "private metadata" not in str(payload)
 
 
 def test_build_book_processing_payload_normalizes_postgres_text_timestamps():
