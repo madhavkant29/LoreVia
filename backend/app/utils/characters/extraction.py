@@ -155,6 +155,26 @@ def _character_entity_matches_cluster(
         return normalize_character_name(candidate_name) == normalize_character_name(cluster_name)
     if is_role_only_character_name(candidate_name) or is_role_only_character_name(cluster_name):
         return normalize_character_name(candidate_name) == normalize_character_name(cluster_name)
+    if any(
+        re.search(r"\w['\u2019]s\s", name, flags=re.IGNORECASE)
+        for name in (candidate_name, cluster_name)
+    ):
+        return normalize_character_name(candidate_name) == normalize_character_name(cluster_name)
+    candidate_words = entity_words(candidate_name)
+    cluster_words = entity_words(cluster_name)
+    if len(candidate_words) == len(cluster_words) == 1 and normalize_character_name(
+        candidate_name
+    ) != normalize_character_name(cluster_name):
+        # Different one-word names may share a model-suggested alias. Keep
+        # their evidence separate until a reviewer establishes the link.
+        return False
+    if min(len(candidate_words), len(cluster_words)) == 1:
+        single = (candidate_words if len(candidate_words) == 1 else cluster_words)[0].casefold()
+        full = candidate_words if len(candidate_words) > 1 else cluster_words
+        if single not in {full[0].casefold(), full[-1].casefold()}:
+            # A suggested alias or nearby mention alone does not prove that
+            # two different names identify the same person.
+            return False
     if names_equivalent(candidate_name, candidate_aliases, cluster_name, cluster_aliases):
         return True
 
@@ -323,6 +343,18 @@ def cluster_character_entities(entities: Sequence[Mapping[str, Any]]) -> list[di
                     if isinstance(item_evidence.get("snippets"), list)
                     else []
                 )
+            )
+
+        for evidence_key in (
+            "has_dialogue_or_action",
+            "has_attributed_speech",
+            "has_direct_communication",
+            "has_human_self_action",
+            "has_physical_description",
+            "ambiguous_full_name_fragment",
+        ):
+            evidence[evidence_key] = any(
+                _mention_entity_evidence(item).get(evidence_key) is True for item in cluster
             )
 
         has_source_mentions = all(

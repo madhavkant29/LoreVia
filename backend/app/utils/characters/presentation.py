@@ -240,8 +240,8 @@ def build_character_dossier_summary(
         resolver_status in {"ambiguous", "matched_needs_review", "held_for_review"}
         or any(
             "conflict" in reason.casefold()
-            or "needs_review" in reason.casefold()
-            or reason.casefold() in {"ambiguous_identity_match", "ambiguous_roster_match"}
+            or "ambiguous" in reason.casefold()
+            or reason.casefold() == "embedding_match_requires_review"
             for reason in resolved_reason_codes
         )
     )

@@ -476,16 +476,21 @@ def _known_character_prompt_block(
     )
 
 
+NAME_WORD_RE = re.compile(r"[^\W\d_]+(?:[-'][^\W\d_]+)*")
+CAPITALIZED_NAME_WORD = r"[A-ZÀ-ÖØ-ÞŸ][a-zà-öø-ÿ]+(?:[-'][^\W\d_]+)?"
+# Extraction batches join separate source chunks with blank lines. A name must
+# not span those boundaries or the next chunk's first word becomes a surname.
+NAME_WORD_GAP = r"[ \t]+"
 HONORIFIC_RE = re.compile(
-    r"\b(?:Mr|Mrs|Ms|Miss|Madame|Monsieur|Dr|Lady|Lord|Sir)\.?\s+[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?\b"
+    rf"\b(?:Mr|Mrs|Ms|Miss|Madame|Mme|Monsieur|Dr|Lady|Lord|Sir)\.?{NAME_WORD_GAP}{CAPITALIZED_NAME_WORD}(?:{NAME_WORD_GAP}{CAPITALIZED_NAME_WORD})?\b"
 )
 FULL_NAME_RE = re.compile(
-    r"\b[A-Z][a-z]+(?:[-'][A-Za-z]+)?(?:\s+[A-Z][a-z]+(?:[-'][A-Za-z]+)?){1,2}\b"
+    rf"\b{CAPITALIZED_NAME_WORD}(?:{NAME_WORD_GAP}{CAPITALIZED_NAME_WORD}){{1,2}}\b"
 )
 PARTICLE_NAME_RE = re.compile(
-    r"\b(?:[Ll]e|[Ll]a|[Ll]es|[Dd]e|[Dd]u|[Dd]es|[Vv]an|[Vv]on)\s+[A-Z][a-z]+(?:[-'][A-Za-z]+)?(?:\s+[A-Z][a-z]+(?:[-'][A-Za-z]+)?){0,2}\b"
+    rf"\b(?:[Ll]e|[Ll]a|[Ll]es|[Dd]e|[Dd]u|[Dd]es|[Vv]an|[Vv]on){NAME_WORD_GAP}{CAPITALIZED_NAME_WORD}(?:{NAME_WORD_GAP}{CAPITALIZED_NAME_WORD}){{0,2}}\b"
 )
-SINGLE_NAME_RE = re.compile(r"\b[A-Z][a-z]{2,}\b")
+SINGLE_NAME_RE = re.compile(r"\b[A-ZÀ-ÖØ-ÞŸ][a-zà-öø-ÿ]{2,}\b")
 DIGIT_SUFFIX_NAME_RE = re.compile(r"\b[A-Z][a-z]+-\d+\b")
 NAME_STOPWORDS = {
     "Chapter",
@@ -681,7 +686,12 @@ FRAGMENT_PREFIXES = (
     "where",
     "with",
 )
-DISCOURSE_NAME_PREFIXES = {"presently", "so"}
+DISCOURSE_NAME_PREFIXES = {
+    *(word.casefold() for word in SINGLE_NAME_DISCOURSE_MARKERS),
+    "later",
+    "presently",
+    "so",
+}
 TITLE_ONLY_WORDS = {
     "doctor",
     "professor",
@@ -868,7 +878,7 @@ def _looks_like_interjection_clause(after: str) -> bool:
 
 
 def _single_token_starts_like_interjection(name: str, after: str) -> bool:
-    words = re.findall(r"[A-Za-z][A-Za-z'-]*", name)
+    words = NAME_WORD_RE.findall(name)
     if len(words) != 1:
         return False
     return _looks_like_interjection_clause(after)
@@ -959,7 +969,7 @@ def _local_mention_verifier(
             )
 
     mention_count = len(mention_windows)
-    words = re.findall(r"[A-Za-z][A-Za-z'-]*", name)
+    words = NAME_WORD_RE.findall(name)
     normalized = _normalize_name(name)
     has_description = any(
         isinstance(value, dict) and value.get("value") for value in (traits or {}).values()
@@ -1576,8 +1586,8 @@ def _appears_as_nonpossessive_apostrophe_fragment(text: str, token: str) -> bool
     escaped = re.escape(token)
     apostrophe = r"['\u2019]"
     return bool(
-        re.search(rf"(?<![A-Za-z]){escaped}{apostrophe}(?!s\b)[A-Za-z]", text)
-        or re.search(rf"[A-Za-z]{apostrophe}{escaped}(?![A-Za-z])", text)
+        re.search(rf"(?<![^\W\d_]){escaped}{apostrophe}(?!s\b)[^\W\d_]", text)
+        or re.search(rf"[^\W\d_]{apostrophe}{escaped}(?![^\W\d_])", text)
     )
 
 
@@ -1595,13 +1605,11 @@ def _candidate_names(text: str, *, allow_review_singletons: bool = False) -> lis
             masked_full_name_text,
         )
     full_name_last_tokens = {
-        words[-1]
-        for full_name in full_names
-        if (words := re.findall(r"[A-Za-z][A-Za-z'-]*", full_name))
+        words[-1] for full_name in full_names if (words := NAME_WORD_RE.findall(full_name))
     }
     surname_prefixes: dict[str, set[str]] = {}
     for full_name in full_names:
-        words = re.findall(r"[A-Za-z][A-Za-z'-]*", full_name)
+        words = NAME_WORD_RE.findall(full_name)
         if len(words) >= 2:
             surname_prefixes.setdefault(words[-1].casefold(), set()).add(
                 " ".join(words[:-1]).casefold()
@@ -1611,7 +1619,7 @@ def _candidate_names(text: str, *, allow_review_singletons: bool = False) -> lis
     }
     first_name_suffixes: dict[str, set[str]] = {}
     for full_name in full_names:
-        words = re.findall(r"[A-Za-z][A-Za-z'-]*", full_name)
+        words = NAME_WORD_RE.findall(full_name)
         if len(words) >= 2:
             first_name_suffixes.setdefault(words[0].casefold(), set()).add(
                 " ".join(words[1:]).casefold()
@@ -1653,7 +1661,7 @@ def _candidate_names(text: str, *, allow_review_singletons: bool = False) -> lis
     for name in candidates:
         cleaned = _clean_name_fragment(" ".join(name.split()).strip(" .,:;!?\"'"))
         normalized = _normalize_name(cleaned)
-        words = re.findall(r"[A-Za-z][A-Za-z'-]*", cleaned)
+        words = NAME_WORD_RE.findall(cleaned)
         viability_band = (
             _candidate_viability_band(text, cleaned, allow_review=allow_review_singletons)
             if len(words) == 1
@@ -1717,7 +1725,7 @@ def _split_titled_name(name: str, source_text: str) -> tuple[str, str | None]:
         if lowered.startswith(token):
             remainder = name[len(token) :].strip()
             if remainder:
-                remainder_tokens = re.findall(r"[A-Za-z][A-Za-z'-]*", remainder)
+                remainder_tokens = NAME_WORD_RE.findall(remainder)
                 if len(remainder_tokens) <= 1:
                     # Keep titled surname-only forms distinct. "Mr. Samsa" and
                     # "Mrs. Samsa" are often separate characters, while bare
@@ -1744,7 +1752,7 @@ def _contains_supported_subspan(raw_name: str, cleaned_name: str, source_text: s
 
 
 def _is_title_only_name(name: str) -> bool:
-    tokens = [token.casefold() for token in re.findall(r"[A-Za-z][A-Za-z'-]*", name)]
+    tokens = [token.casefold() for token in NAME_WORD_RE.findall(name)]
     return bool(tokens) and all(token in TITLE_ONLY_WORDS for token in tokens)
 
 
@@ -1834,7 +1842,7 @@ def _build_evidence(source_text: str, name: str, traits: dict, aliases: list[str
 
 def _ambiguous_full_name_fragment(source_text: str, name: str) -> bool:
     """Hold a shared first name or surname that could name several people."""
-    if len(re.findall(r"[A-Za-z][A-Za-z'-]*", name)) != 1:
+    if len(NAME_WORD_RE.findall(name)) != 1:
         return False
     return name.casefold() in ambiguous_full_name_fragments([source_text])
 
@@ -1845,7 +1853,7 @@ def ambiguous_full_name_fragments(source_texts: Sequence[str]) -> set[str]:
     suffixes_by_first_name: dict[str, set[str]] = {}
     for source_text in source_texts:
         for full_name in [*FULL_NAME_RE.findall(source_text), *HONORIFIC_RE.findall(source_text)]:
-            words = re.findall(r"[A-Za-z][A-Za-z'-]*", full_name)
+            words = NAME_WORD_RE.findall(full_name)
             if len(words) < 2 or words[0].casefold() in DISCOURSE_NAME_PREFIXES:
                 continue
             prefixes_by_surname.setdefault(words[-1].casefold(), set()).add(
@@ -1924,7 +1932,7 @@ def _looks_like_character_name(name: str, source_text: str) -> bool:
     if not looks_like_person_entity_name(cleaned):
         return False
 
-    words = re.findall(r"[A-Za-z][A-Za-z'-]*", cleaned)
+    words = NAME_WORD_RE.findall(cleaned)
     if not words:
         return False
     if len(words) == 1 and (
@@ -2127,7 +2135,7 @@ def _has_name_support(text: str, name: str) -> bool:
     if not mentions:
         return False
 
-    words = re.findall(r"[A-Za-z][A-Za-z'-]*", name)
+    words = NAME_WORD_RE.findall(name)
     multi_word = len(words) >= 2
     strong_mentions = 0
     non_sentence_start_mentions = 0
@@ -2166,8 +2174,8 @@ def _find_name_mentions(text: str, name: str) -> list[tuple[int, int]]:
         # A short canonical name is not evidence for a distinct person when
         # it occurs only as the prefix of a longer name (Alice Smith) or a
         # hyphenated name (Alice-Marie). Keep possessives such as Alice's.
-        rf"(?<![A-Za-z]){re.escape(name)}"
-        r"(?![A-Za-z]|-[A-Za-z]|\s+(?-i:[A-Z])[\w'’-]*)",
+        rf"(?<![^\W\d_]){re.escape(name)}"
+        r"(?![^\W\d_]|-[^\W\d_]|[ \t]+(?-i:[A-ZÀ-ÖØ-ÞŸ])[\w'’-]*)",
         flags=re.IGNORECASE if article_led_role else 0,
     )
     return [(match.start(), match.end()) for match in pattern.finditer(text)]
@@ -2205,7 +2213,7 @@ def _allow_auto_augmentation(
     *,
     allow_review_singletons: bool = False,
 ) -> bool:
-    words = re.findall(r"[A-Za-z][A-Za-z'-]*", name)
+    words = NAME_WORD_RE.findall(name)
     mentions = _find_name_mentions(text, name)
     if not mentions:
         return False

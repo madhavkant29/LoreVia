@@ -137,12 +137,40 @@ def test_shared_name_fragments_are_collected_across_separate_source_batches():
     assert "marie" not in fragments
 
 
+def test_accented_french_names_are_kept_whole_in_local_discovery():
+    source = "Céleste greeted Raymond Sintès. Thomas Pérez joined them."
+    candidates = extractor._candidate_names(source, allow_review_singletons=True)
+
+    assert "Raymond Sintès" in extractor.FULL_NAME_RE.findall(source)
+    assert "Thomas Pérez" in candidates
+    assert "Raymond Sint" not in candidates
+    assert extractor._find_name_mentions(source, "Céleste")
+    assert not extractor._find_name_mentions(source, "leste")
+    assert "raymond" not in extractor.ambiguous_full_name_fragments([source])
+
+
 def test_shared_surname_fragment_uses_earlier_roster_name_as_context():
     fragments = extractor.ambiguous_full_name_fragments(
         ["Monsieur Quill arrived at the gate.", "Madame Quill"]
     )
 
     assert "quill" in fragments
+
+
+def test_discourse_prefixes_do_not_invent_a_second_marie_identity():
+    fragments = extractor.ambiguous_full_name_fragments(
+        ["Then Marie called. Later Marie answered. Marie Cardona arrived."]
+    )
+
+    assert "marie" not in fragments
+
+
+def test_batch_chunk_boundaries_do_not_create_full_names():
+    source = "Marie Cardona arrived.\n\nMarie called again.\n\nRaymond Sintès replied."
+
+    assert extractor.FULL_NAME_RE.findall(source) == ["Marie Cardona", "Raymond Sintès"]
+    assert "marie" not in extractor.ambiguous_full_name_fragments([source])
+    assert extractor._find_name_mentions("Marie left.\n\nRaymond arrived.", "Marie")
 
 
 def test_repeated_named_communication_can_auto_save_without_optional_ner(monkeypatch):

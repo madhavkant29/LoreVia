@@ -44,6 +44,7 @@ from app.models.intelligence import (
     WorldElement,
     WorldGapAnalysis,
 )
+from app.models.operations import BookProcessingRun
 from app.models.tag import CustomTag
 from app.services.book_section_service import filter_analysis_eligible_chapters
 from app.utils.advisor_utils import invalidate_advisor_caches_for_book
@@ -795,6 +796,26 @@ async def _complete_rebuild_if_ready_in_generation(db: AsyncSession, book: Book)
     ):
         return False
     now = datetime.now(UTC)
+    runs = (
+        (
+            await db.execute(
+                select(BookProcessingRun)
+                .where(
+                    BookProcessingRun.book_id == book.id,
+                    BookProcessingRun.rebuild_run_id == rebuild_run_id,
+                    BookProcessingRun.status.in_(("queued", "running", "paused")),
+                )
+                .with_for_update()
+            )
+        )
+        .scalars()
+        .all()
+    )
+    for run in runs:
+        run.status = "succeeded"
+        run.completed_at = now
+        run.pause_reason = None
+        run.resume_blockers = []
     reprocess_metadata = dict(
         workspace.get("reprocess") if isinstance(workspace.get("reprocess"), dict) else {}
     )

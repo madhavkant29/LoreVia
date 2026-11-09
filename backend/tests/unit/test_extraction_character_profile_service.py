@@ -346,6 +346,76 @@ async def test_profile_enrichment_retries_invalid_output_and_fails_visibly(monke
     assert "lacked a verbatim quote" in prompts[1]
 
 
+def test_profile_enrichment_keeps_verified_claims_from_partially_invalid_batch(monkeypatch):
+    source = "Mara promised to protect the gate."
+
+    async def fake_complete(**_kwargs):
+        return json.dumps(
+            {
+                "profile": {
+                    "goal": "protect the gate",
+                    "fears": ["the sea"],
+                    "claim_evidence": {"goal": source},
+                }
+            }
+        )
+
+    monkeypatch.setattr(
+        extraction_character_profile_service, "complete_with_fallback", fake_complete
+    )
+    packet = {"text": source, "source_batch_key": "book:1:1", "source_start": 42}
+    coroutine = extract_profile_from_packet(
+        character_name="Mara",
+        aliases=[],
+        packet=packet,
+        user_id=uuid.uuid4(),
+        book_id=uuid.uuid4(),
+        language="en",
+    )
+    with pytest.raises(StopIteration) as finished:
+        coroutine.send(None)
+    result = finished.value.value
+    assert result["goal"] == "protect the gate"
+    assert result["fears"] == []
+    assert result["evidence"]["profile_claims"]["goal"]["start"] == 42
+    assert result["_profile_partial_invalid_response"] is True
+
+
+@pytest.mark.asyncio
+async def test_partial_profile_claims_remain_counted_in_chapter_warning(monkeypatch):
+    source = "Mara promised to protect the gate."
+
+    async def fake_complete(**_kwargs):
+        return json.dumps(
+            {
+                "profile": {
+                    "goal": "protect the gate",
+                    "fears": ["the sea"],
+                    "claim_evidence": {"goal": source},
+                }
+            }
+        )
+
+    monkeypatch.setattr(
+        extraction_character_profile_service, "complete_with_fallback", fake_complete
+    )
+    entity = {
+        "name": "Mara",
+        "aliases": [],
+        "cluster_members": [
+            {"source_batch_key": "book:1:1", "source_start": 0, "source_text": source}
+        ],
+    }
+    enriched = await enrich_chapter_character_profiles(
+        [entity], user_id=uuid.uuid4(), book_id=uuid.uuid4(), language="en"
+    )
+
+    assert enriched[0]["goal"] == "protect the gate"
+    assert enriched[0]["fears"] == []
+    assert enriched[0]["evidence"]["profile_enrichment_status"] == "partial_invalid_response"
+    assert enriched[0]["evidence"]["profile_enrichment_invalid_batches"] == 1
+
+
 @pytest.mark.asyncio
 async def test_profile_enrichment_does_not_accept_malformed_claims_as_empty_success(monkeypatch):
     attempts = 0

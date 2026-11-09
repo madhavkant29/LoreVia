@@ -25,7 +25,7 @@ from app.models.intelligence import (
     WorldElement,
     WorldGapAnalysis,
 )
-from app.models.operations import TaskDispatchOutbox, TaskExecution
+from app.models.operations import BookProcessingRun, TaskDispatchOutbox, TaskExecution
 from app.models.tag import CustomTag
 from app.models.user import ProcessingUsageEvent, User
 
@@ -590,6 +590,15 @@ async def test_complete_rebuild_if_ready_clears_active_run_id(db):
             reason="test",
         )
     )
+    run = BookProcessingRun(
+        user_id=user_id,
+        book_id=book.id,
+        rebuild_run_id=rebuild_run_id,
+        run_kind="manual_reprocess",
+        status="running",
+        chapters_total=0,
+    )
+    db.add(run)
     await db.commit()
 
     from app.services.editor_project_service import complete_rebuild_if_ready
@@ -602,6 +611,8 @@ async def test_complete_rebuild_if_ready_clears_active_run_id(db):
     assert "rebuild_run_id" not in book.writer_workspace["processing"]
     assert book.writer_workspace["reprocess"]["last_completed_rebuild_run_id"] == rebuild_run_id
     assert book.status == "ready"
+    await db.refresh(run)
+    assert run.status == "succeeded"
 
 
 @pytest.mark.asyncio

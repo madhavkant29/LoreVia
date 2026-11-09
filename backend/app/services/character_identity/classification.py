@@ -65,6 +65,7 @@ OBJECT_OR_PLACE_WORDS = {
     "garden",
     "hall",
     "hill",
+    "home",
     "hospital",
     "house",
     "inn",

@@ -49,7 +49,7 @@ def normalize_character_name(name: str | None) -> str:
         return ""
     tokens = [
         token
-        for token in re.findall(r"[A-Za-z][A-Za-z'-]*", name)
+        for token in re.findall(r"[^\W\d_]+(?:[-'][^\W\d_]+)*", name)
         if token.casefold() not in NAME_TITLES
     ]
     return " ".join(tokens).casefold().strip()
@@ -75,7 +75,7 @@ NAME_TITLES = {
 
 
 def _leading_title(name: str | None) -> str:
-    tokens = [token.casefold() for token in re.findall(r"[A-Za-z][A-Za-z'-]*", name or "")]
+    tokens = [token.casefold() for token in re.findall(r"[^\W\d_]+(?:[-'][^\W\d_]+)*", name or "")]
     if tokens and (tokens[0] in NAME_TITLES or tokens[0] in TITLE_IDENTITY_GROUPS):
         return tokens[0]
     return ""

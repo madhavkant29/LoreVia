@@ -280,6 +280,7 @@ COMMON_NON_NAME_WORDS = {
     "he",
     "her",
     "here",
+    "home",
     "him",
     "his",
     "how",
@@ -351,13 +352,14 @@ NON_NAME_PATTERNS = (
 
 
 def entity_words(name: str | None) -> list[str]:
-    return re.findall(r"[A-Za-z][A-Za-z'-]*", name or "")
+    return re.findall(r"[^\W\d_]+(?:[-'][^\W\d_]+)*", name or "")
 
 
 def normalize_entity_name(name: str | None) -> str:
     if not name:
         return ""
-    return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9\s-]", " ", name.lower())).strip()
+    cleaned = re.sub(r"[^\w\s-]", " ", name.casefold()).replace("_", " ")
+    return re.sub(r"\s+", " ", cleaned).strip()
 
 
 def matches_non_name_pattern(name: str | None) -> bool:
