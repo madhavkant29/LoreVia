@@ -11,6 +11,7 @@ import { ContextualUpgradePrompt } from "@/components/billing/ContextualUpgradeP
 import { CreateFab } from "@/components/overview/CreateFab"
 import { ActivationExperience } from "@/components/reader/ActivationExperience"
 import { ReviewReadyDialog } from "@/components/reader/ReviewReadyDialog"
+import { ProfileEnrichmentNotice } from "@/components/reader/ProfileEnrichmentNotice"
 import { WorkspaceModeSwitcher } from "@/components/reader/WorkspaceModeSwitcher"
 import { SUPPORT_HELP_EVENT } from "@/components/ui/ShortcutHelp"
 import { ErrorCard } from "@/components/ui/ErrorCard"
@@ -607,6 +608,7 @@ export default function BookOverviewPage() {
           {modeError ? <p role="alert" className="border-l-2 border-amber-500 px-3 py-2 text-sm text-amber-900 dark:text-amber-200">{modeError}</p> : null}
           {processingError ? <p role="alert" className="border-l-2 border-amber-500 px-3 py-2 text-sm text-amber-900 dark:text-amber-200">{processingError}</p> : null}
           {overviewQuery.isError ? <ErrorCard variant="compact" isDark={isDark} message="The overview could not be refreshed. Showing the last loaded information." onRetry={() => overviewQuery.refetch()} /> : null}
+          <ProfileEnrichmentNotice processing={book?.processing} bookId={bookId} isDark={isDark} onReview={() => navigateWithMemory(`/${bookId}/characters`)} />
           <ProcessingStatusPanel
             status={normalizedProcessingStatus}
             retrying={processingRetrying}
