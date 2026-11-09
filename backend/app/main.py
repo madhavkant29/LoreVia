@@ -247,9 +247,10 @@ class SecurityHeadersMiddleware:
                 response_started = True
                 response_status = int(message.get("status") or 500)
                 raw_headers: list[tuple[bytes, bytes]] = message.get("headers", [])
+                request_path = str(scope.get("path") or "")
                 is_api_response = (
-                    str(scope.get("path") or "").startswith(f"{settings.API_V1_PREFIX}/")
-                    or str(scope.get("path") or "") == settings.API_V1_PREFIX
+                    request_path.startswith(f"{settings.API_V1_PREFIX}/")
+                    or request_path == settings.API_V1_PREFIX
                 )
                 has_cache_control = any(
                     name.lower() == b"cache-control" for name, _value in raw_headers
@@ -276,7 +277,9 @@ class SecurityHeadersMiddleware:
                 for sec_name, sec_value in security_overrides.items():
                     if sec_name not in applied:
                         preserved.append((sec_name, sec_value))
-                if is_api_response and not has_cache_control:
+                if (
+                    is_api_response or request_path in {"/health", "/ready"}
+                ) and not has_cache_control:
                     preserved.append((b"cache-control", _PRIVATE_API_CACHE_CONTROL))
                 message["headers"] = preserved
             elif message["type"] == "http.response.body":

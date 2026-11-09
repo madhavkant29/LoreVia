@@ -32,6 +32,31 @@ async def test_health_response_includes_hardened_security_headers(monkeypatch):
     assert response.headers["permissions-policy"] == PERMISSIONS_POLICY
     assert response.headers["content-security-policy"] == API_CONTENT_SECURITY_POLICY
     assert response.headers["strict-transport-security"] == HSTS_POLICY
+    assert "no-store" in response.headers["cache-control"]
+
+
+@pytest.mark.asyncio
+async def test_failed_readiness_response_is_not_cacheable(monkeypatch):
+    class BrokenConnection:
+        async def __aenter__(self):
+            raise RuntimeError("db unavailable")
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    class BrokenEngine:
+        def connect(self):
+            return BrokenConnection()
+
+    monkeypatch.setattr("app.core.database.engine", BrokenEngine())
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url=_trusted_base_url()
+    ) as client:
+        response = await client.get("/ready")
+
+    assert response.status_code == 503
+    assert "no-store" in response.headers["cache-control"]
 
 
 @pytest.mark.asyncio
