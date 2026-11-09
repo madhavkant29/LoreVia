@@ -341,6 +341,76 @@ async def test_process_chapter_persists_cited_profile_from_separate_model_stage(
 
 
 @pytest.mark.asyncio
+async def test_process_chapter_keeps_discovery_when_profile_response_is_unsupported(
+    db, monkeypatch
+):
+    user = User(
+        email="profile-partial@lorevia.app", username="profile-partial", password_hash="hash"
+    )
+    db.add(user)
+    await db.flush()
+    book = Book(
+        user_id=user.id,
+        title="Partial Evidence Stage",
+        format="pdf",
+        s3_key="books/profile-partial.pdf",
+        status="processing",
+        total_chapters=1,
+    )
+    db.add(book)
+    await db.commit()
+    source = "Mara Vale walked to the gate. Mara Vale stood watch until morning."
+
+    async def fake_discover(_text: str, **_kwargs) -> dict:
+        return {
+            "characters": [
+                {
+                    "name": "Mara Vale",
+                    "entity_type": "person",
+                    "confidence": 0.95,
+                    "evidence": {"has_dialogue_or_action": True, "mention_count": 2},
+                }
+            ],
+            "relationships": [],
+        }
+
+    async def invalid_profile(**_kwargs) -> str:
+        return '{"profile":{"goal":"invent a kingdom","claim_evidence":{}}}'
+
+    async def fake_embed(texts: list[str], **_kwargs) -> list[list[float]]:
+        return _embedding_for(len(texts))
+
+    monkeypatch.setattr(
+        "app.services.extraction_chapter_llm_service.enrich_chapter_character_profiles",
+        enrich_chapter_character_profiles,
+    )
+    monkeypatch.setattr(
+        "app.services.extraction_chapter_llm_service.extract_characters_and_relationships",
+        fake_discover,
+    )
+    monkeypatch.setattr(
+        "app.services.extraction_character_profile_service.complete_with_fallback",
+        invalid_profile,
+    )
+    _patch_embedding_batches(monkeypatch, fake_embed)
+
+    assert await _process_chapter(
+        db, book, {"number": 1, "title": "One", "text": source}, queue_wait_ms=1
+    )
+
+    chapter = (
+        await db.execute(select(Chapter).where(Chapter.book_id == book.id, Chapter.number == 1))
+    ).scalar_one()
+    coverage = chapter.analysis_state["source_integrity"]["extraction_coverage"]
+    assert chapter.processed is True
+    assert coverage["complete"] is True
+    assert coverage["profile_enrichment"]["status"] == "partial"
+    assert coverage["profile_enrichment"]["invalid_response_batches"] == 1
+    characters = (await db.execute(select(Character).where(Character.book_id == book.id))).scalars()
+    assert all(character.goal != "invent a kingdom" for character in characters)
+
+
+@pytest.mark.asyncio
 async def test_process_chapter_remains_incomplete_when_embedding_provider_disconnects(
     db,
     monkeypatch,

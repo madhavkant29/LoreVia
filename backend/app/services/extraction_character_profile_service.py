@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import uuid
 from typing import Any
 
@@ -28,6 +29,8 @@ from app.utils.llm_usage_utils import (
     is_transient_llm_provider_error,
     short_llm_coordination_retry_delay,
 )
+
+log = logging.getLogger(__name__)
 
 PROFILE_SYSTEM = """Build a sparse, evidence-backed profile for ONE identified character.
 The identity has already been resolved. Do not discover or merge characters here.
@@ -182,12 +185,25 @@ async def enrich_chapter_character_profiles(
         *(run(entity_index, packet) for entity_index, packet in work),
         return_exceptions=True,
     )
-    for result in results:
+    profiles_by_entity: dict[int, list[dict[str, Any]]] = {}
+    invalid_responses_by_entity: dict[int, int] = {}
+    for (entity_index, _packet), result in zip(work, results, strict=True):
+        if isinstance(result, CharacterProfileFormatError):
+            invalid_responses_by_entity[entity_index] = (
+                invalid_responses_by_entity.get(entity_index, 0) + 1
+            )
+            continue
         if isinstance(result, Exception):
             raise result
-    profiles_by_entity: dict[int, list[dict[str, Any]]] = {}
-    for (entity_index, _packet), result in zip(work, results):
         profiles_by_entity.setdefault(entity_index, []).append(result)
+
+    if invalid_responses_by_entity:
+        log.warning(
+            "character_profile_enrichment_partial book_id=%s invalid_response_batches=%s affected_characters=%s",
+            book_id,
+            sum(invalid_responses_by_entity.values()),
+            len(invalid_responses_by_entity),
+        )
 
     enriched: list[dict[str, Any]] = []
     for entity_index, entity in enumerate(entities):
@@ -198,8 +214,14 @@ async def enrich_chapter_character_profiles(
         updates, citations = merge_grounded_profile_claims(profiles, merged_traits)
         evidence = dict(entity.get("evidence") or {})
         evidence["profile_claims"] = citations
-        evidence["profile_enrichment_status"] = (
-            "unanchored_reference" if entity_index in unanchored_indices else "complete"
-        )
+        if entity_index in unanchored_indices:
+            evidence["profile_enrichment_status"] = "unanchored_reference"
+        elif invalid_responses_by_entity.get(entity_index):
+            evidence["profile_enrichment_status"] = "partial_invalid_response"
+            evidence["profile_enrichment_invalid_batches"] = invalid_responses_by_entity[
+                entity_index
+            ]
+        else:
+            evidence["profile_enrichment_status"] = "complete"
         enriched.append({**entity, **updates, "evidence": evidence})
     return enriched
