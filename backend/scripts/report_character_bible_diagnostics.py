@@ -322,12 +322,17 @@ async def build_report(
                 recorded_coverage.get("profile_enrichment") if recorded_coverage else None
             )
             if isinstance(profile_enrichment, dict):
-                chapter_entry["profile_enrichment"] = {
+                profile_summary = {
                     "status": profile_enrichment.get("status"),
                     "identity_clusters": profile_enrichment.get("identity_clusters"),
                     "evidence_passages": profile_enrichment.get("evidence_passages"),
                     "unanchored_references": profile_enrichment.get("unanchored_references"),
                 }
+                if "invalid_response_batches" in profile_enrichment:
+                    profile_summary["invalid_response_batches"] = profile_enrichment[
+                        "invalid_response_batches"
+                    ]
+                chapter_entry["profile_enrichment"] = profile_summary
             if attempt:
                 chapter_entry["failure_stage"] = attempt.get("failure_stage")
                 profile_stage = attempt.get("profile_enrichment")

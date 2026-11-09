@@ -236,14 +236,21 @@ async def collect_chapter_llm_extraction(
         entity.get("evidence", {}).get("profile_enrichment_status") == "unanchored_reference"
         for entity in aggregated_character_entities
     )
-    source_coverage["profile_enrichment"] = {
-        "status": "partial" if unanchored_profiles else "complete",
+    invalid_response_batches = sum(
+        int(entity.get("evidence", {}).get("profile_enrichment_invalid_batches") or 0)
+        for entity in aggregated_character_entities
+    )
+    profile_enrichment = {
+        "status": "partial" if unanchored_profiles or invalid_response_batches else "complete",
         "identity_clusters": len(aggregated_character_entities),
         "evidence_passages": sum(
             len(profile_evidence_packets(entity)) for entity in aggregated_character_entities
         ),
         "unanchored_references": unanchored_profiles,
     }
+    if invalid_response_batches:
+        profile_enrichment["invalid_response_batches"] = invalid_response_batches
+    source_coverage["profile_enrichment"] = profile_enrichment
 
     return ChapterLlmExtractionResult(
         extraction_batch_texts=extraction_batch_texts,

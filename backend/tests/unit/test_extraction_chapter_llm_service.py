@@ -574,6 +574,41 @@ async def test_collect_chapter_llm_extraction_marks_unanchored_profile_incomplet
 
 
 @pytest.mark.asyncio
+async def test_collect_chapter_llm_extraction_records_invalid_profile_as_partial(monkeypatch):
+    book = SimpleNamespace(id=uuid.uuid4(), user_id=uuid.uuid4(), language="en")
+
+    async def fake_discover(_passage, **_kwargs):
+        return {"characters": [{"name": "Mara", "confidence": 0.9}], "relationships": []}
+
+    async def invalid_profile(**_kwargs):
+        return '{"profile":{"goal":"invent a kingdom","claim_evidence":{}}}'
+
+    monkeypatch.setattr(
+        extraction_chapter_llm_service, "extract_characters_and_relationships", fake_discover
+    )
+    monkeypatch.setattr(
+        extraction_character_profile_service, "complete_with_fallback", invalid_profile
+    )
+
+    result = await collect_chapter_llm_extraction(
+        object(),
+        book=book,
+        chapter_number=2,
+        chunks=["Mara arrived at dawn."],
+        existing_characters=[],
+    )
+
+    assert result.source_coverage["complete"] is True
+    assert result.source_coverage["profile_enrichment"]["status"] == "partial"
+    assert result.source_coverage["profile_enrichment"]["invalid_response_batches"] == 1
+    assert result.aggregated_character_entities[0]["evidence"]["profile_claims"] == {}
+    assert (
+        result.aggregated_character_entities[0]["evidence"]["profile_enrichment_status"]
+        == "partial_invalid_response"
+    )
+
+
+@pytest.mark.asyncio
 async def test_collect_chapter_llm_extraction_marks_unexpected_batch_failure_incomplete(
     monkeypatch,
 ):

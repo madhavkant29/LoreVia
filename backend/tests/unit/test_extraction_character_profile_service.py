@@ -437,3 +437,110 @@ async def test_profile_enrichment_marks_unanchored_reference_without_model_call(
     assert result[0]["goal"] is None
     assert result[0]["evidence"]["profile_claims"] == {}
     assert result[0]["evidence"]["profile_enrichment_status"] == "unanchored_reference"
+
+
+@pytest.mark.asyncio
+async def test_profile_enrichment_keeps_valid_packet_when_another_has_invalid_claims(monkeypatch):
+    async def fake_complete(**kwargs):
+        if "promised to protect" in kwargs["user"]:
+            return json.dumps(
+                {
+                    "profile": {
+                        "goal": "protect the gate",
+                        "claim_evidence": {"goal": "Mara promised to protect the gate."},
+                    }
+                }
+            )
+        return json.dumps({"profile": {"goal": "invent a kingdom", "claim_evidence": {}}})
+
+    monkeypatch.setattr(
+        extraction_character_profile_service, "complete_with_fallback", fake_complete
+    )
+    entity = {
+        "name": "Mara",
+        "cluster_members": [
+            {
+                "source_batch_key": "book:1:1",
+                "source_start": 0,
+                "source_text": "Mara promised to protect the gate.",
+            },
+            {
+                "source_batch_key": "book:1:2",
+                "source_start": 100,
+                "source_text": "Mara arrived at dawn.",
+            },
+        ],
+    }
+
+    enriched = await enrich_chapter_character_profiles(
+        [entity], user_id=uuid.uuid4(), book_id=uuid.uuid4(), language="en"
+    )
+
+    assert enriched[0]["goal"] == "protect the gate"
+    assert enriched[0]["evidence"]["profile_claims"]["goal"]["quote"] == (
+        "Mara promised to protect the gate."
+    )
+    assert enriched[0]["evidence"]["profile_enrichment_status"] == "partial_invalid_response"
+    assert enriched[0]["evidence"]["profile_enrichment_invalid_batches"] == 1
+
+
+@pytest.mark.asyncio
+async def test_profile_enrichment_marks_all_invalid_packets_without_inventing_claims(monkeypatch):
+    async def fake_complete(**_kwargs):
+        return "not JSON"
+
+    monkeypatch.setattr(
+        extraction_character_profile_service, "complete_with_fallback", fake_complete
+    )
+    enriched = await enrich_chapter_character_profiles(
+        [
+            {
+                "name": "Mara",
+                "cluster_members": [
+                    {
+                        "source_batch_key": "book:1:1",
+                        "source_start": 0,
+                        "source_text": "Mara arrived at dawn.",
+                    }
+                ],
+            }
+        ],
+        user_id=uuid.uuid4(),
+        book_id=uuid.uuid4(),
+        language="en",
+    )
+
+    assert enriched[0]["goal"] is None
+    assert enriched[0]["evidence"]["profile_claims"] == {}
+    assert enriched[0]["evidence"]["profile_enrichment_status"] == "partial_invalid_response"
+    assert enriched[0]["evidence"]["profile_enrichment_invalid_batches"] == 1
+
+
+@pytest.mark.asyncio
+async def test_profile_enrichment_still_propagates_provider_budget_failure(monkeypatch):
+    async def fake_complete(**_kwargs):
+        raise HTTPException(429, {"kind": "llm_budget", "message": "Monthly AI budget reached."})
+
+    monkeypatch.setattr(
+        extraction_character_profile_service, "complete_with_fallback", fake_complete
+    )
+    with pytest.raises(HTTPException) as caught:
+        await enrich_chapter_character_profiles(
+            [
+                {
+                    "name": "Mara",
+                    "cluster_members": [
+                        {
+                            "source_batch_key": "book:1:1",
+                            "source_start": 0,
+                            "source_text": "Mara arrived at dawn.",
+                        }
+                    ],
+                }
+            ],
+            user_id=uuid.uuid4(),
+            book_id=uuid.uuid4(),
+            language="en",
+        )
+
+    assert caught.value.detail["kind"] == "llm_budget"
