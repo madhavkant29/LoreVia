@@ -304,7 +304,9 @@ async def test_manuscript_import_syncs_chapter_scenes_and_reader_chapter_content
 
 
 @pytest.mark.asyncio
-async def test_reorder_chapter_scenes_persists_sort_order_and_structure_version(client, db):
+async def test_reorder_chapter_scenes_persists_sort_order_and_structure_version(
+    client, db, monkeypatch
+):
     headers, user_id = await _register_user(
         client, f"scene-order-{uuid.uuid4().hex[:8]}@lorevia.app"
     )
@@ -370,6 +372,11 @@ async def test_reorder_chapter_scenes_persists_sort_order_and_structure_version(
     db.add_all(scenes)
     await db.commit()
 
+    source_key = chapter.s3_key
+    monkeypatch.setattr(
+        "app.utils.books.scene_sync.download_book",
+        lambda key: {source_key: b"Original chapter source."}[key],
+    )
     response = await client.patch(
         f"/api/v1/books/{book.id}/chapters/2/scenes/order",
         headers=headers,
