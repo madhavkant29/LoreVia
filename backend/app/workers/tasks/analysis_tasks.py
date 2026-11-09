@@ -14,6 +14,7 @@ from app.utils.ingestion_utils import (
     load_analysis_chapter_payload,
 )
 from app.utils.llm_usage_utils import is_transient_llm_provider_error
+from app.utils.processing_error_utils import LLM_CAPACITY_MESSAGE
 from app.utils.retry_utils import NON_LLM_MAX_RETRIES, exponential_backoff_seconds
 from app.utils.worker_async_utils import run_worker_coro
 from app.workers.celery_app import celery_app
@@ -181,7 +182,7 @@ def analyse_chapter_task(
             if execution_id:
 
                 async def _pause_capacity_execution(
-                    error_detail: str = str(exc),
+                    error_detail: str = LLM_CAPACITY_MESSAGE,
                 ) -> None:
                     from app.services.task_execution_service import pause_task_execution
 

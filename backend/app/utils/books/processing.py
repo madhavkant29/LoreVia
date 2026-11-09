@@ -11,6 +11,14 @@ import re
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
+from app.utils.processing_error_utils import (
+    LLM_BUDGET_MESSAGE,
+    LLM_CAPACITY_MESSAGE,
+    LLM_TOKEN_LIMIT_MESSAGE,
+    MONTHLY_PROCESSED_WORDS_MESSAGE,
+    friendly_processing_error,
+)
+
 if TYPE_CHECKING:
     pass
 
@@ -247,6 +255,62 @@ def _normalize_processing_state(raw: dict | None) -> dict | None:
             payload["pipeline"] = pipeline
 
     return payload or None
+
+
+def sanitize_public_processing_state(processing: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Remove stored exception text from author-facing processing state."""
+    if not processing:
+        return processing
+    safe = dict(processing)
+    pause_reason = str(safe.get("pause_reason") or "")
+    if pause_reason == "llm_capacity":
+        safe_message = LLM_CAPACITY_MESSAGE
+    elif pause_reason == "llm_budget":
+        safe_message = LLM_BUDGET_MESSAGE
+    elif pause_reason in {"llm_token_limit", "llm_tokens"}:
+        safe_message = LLM_TOKEN_LIMIT_MESSAGE
+    elif pause_reason == "processing_allowance":
+        safe_message = MONTHLY_PROCESSED_WORDS_MESSAGE
+    else:
+        safe_message = None
+
+    if safe.get("last_error"):
+        safe["last_error"] = safe_message or friendly_processing_error(str(safe["last_error"]))
+
+    blockers = safe.get("resume_blockers")
+    if isinstance(blockers, list):
+        safe["resume_blockers"] = [
+            {
+                **blocker,
+                "detail": (
+                    LLM_CAPACITY_MESSAGE
+                    if str(blocker.get("kind")) == "llm_capacity"
+                    else LLM_BUDGET_MESSAGE
+                    if str(blocker.get("kind")) == "llm_budget"
+                    else LLM_TOKEN_LIMIT_MESSAGE
+                    if str(blocker.get("kind")) in {"llm_tokens", "llm_token_limit"}
+                    else MONTHLY_PROCESSED_WORDS_MESSAGE
+                    if str(blocker.get("kind")) == "monthly_processed_words"
+                    else friendly_processing_error(str(blocker.get("detail") or ""))
+                ),
+            }
+            if isinstance(blocker, dict)
+            else {"detail": friendly_processing_error(str(blocker))}
+            for blocker in blockers
+        ]
+
+    pipeline = safe.get("pipeline")
+    if isinstance(pipeline, dict):
+        safe["pipeline"] = {
+            key: {
+                **stage,
+                "last_error": friendly_processing_error(str(stage["last_error"])),
+            }
+            if isinstance(stage, dict) and stage.get("last_error")
+            else stage
+            for key, stage in pipeline.items()
+        }
+    return safe
 
 
 def _normalize_internal_processing_state(raw: dict | None) -> dict | None:

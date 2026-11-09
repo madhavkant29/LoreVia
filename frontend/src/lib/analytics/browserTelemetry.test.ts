@@ -6,6 +6,7 @@ vi.mock("@/lib/analytics/posthog", () => ({ capture: captureMock }))
 
 import {
   captureApiFailure,
+  captureCaughtRenderError,
   captureWebVital,
   installBrowserErrorTelemetry,
   normalizedTelemetryPath,
@@ -62,6 +63,15 @@ describe("browser telemetry", () => {
       rating: "good",
       value: 812.5,
     })
+  })
+
+  it("reports caught render failures without exception messages or page content", () => {
+    captureCaughtRenderError(new TypeError("private manuscript text"), "route")
+    expect(captureMock).toHaveBeenCalledWith("browser_caught_render_error", {
+      area: "route",
+      error_type: "TypeError",
+    })
+    expect(JSON.stringify(captureMock.mock.calls)).not.toContain("private manuscript text")
   })
 
   it("registers metadata-only global error handlers and removes them", () => {

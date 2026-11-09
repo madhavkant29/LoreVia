@@ -1522,6 +1522,12 @@ def test_reader_utils_timeline_graph_summary_and_media_helpers():
     assert summary["key_events"][1]["impact"] == "Danger rises"
     assert reader_utils.strip_json_fence('```json\n{"ok": true}\n```') == '{"ok": true}'
     assert reader_utils.chapter_analysis_status(None) is None
+    failed_chapter = SimpleNamespace(
+        analysis_state={"status": "failed", "last_error": "SQL parameters: private manuscript text"}
+    )
+    assert "private manuscript text" not in str(
+        reader_utils.chapter_analysis_status(failed_chapter)
+    )
     assert reader_utils.chapter_source_integrity(None) is None
     assert (
         reader_utils.serialize_inline_images(

@@ -56,6 +56,15 @@ from app.utils.tag_utils import (
     ENTITY_TYPE_CHAPTER,
 )
 
+RESTORE_FAILED_MESSAGE = "The restore stopped before it finished. Try again."
+
+
+def public_restore_error(version: ChapterVersion) -> str | None:
+    """Hide exception text saved by older restore tasks from chapter history APIs."""
+    if version.restore_status == "failed":
+        return RESTORE_FAILED_MESSAGE
+    return version.restore_error
+
 
 async def snapshot_chapter_version(
     db: AsyncSession,
@@ -148,7 +157,7 @@ async def get_chapter_version_content(
         "note": version.note,
         "snapshot_kind": version.snapshot_kind,
         "restore_status": version.restore_status,
-        "restore_error": version.restore_error,
+        "restore_error": public_restore_error(version),
         "restore_task_id": version.restore_task_id,
         "restore_started_at": version.restore_started_at,
         "restore_completed_at": version.restore_completed_at,
@@ -662,7 +671,7 @@ async def list_chapter_versions(
             "note": version.note,
             "snapshot_kind": version.snapshot_kind,
             "restore_status": version.restore_status,
-            "restore_error": version.restore_error,
+            "restore_error": public_restore_error(version),
             "restore_task_id": version.restore_task_id,
             "restore_started_at": version.restore_started_at,
             "restore_completed_at": version.restore_completed_at,

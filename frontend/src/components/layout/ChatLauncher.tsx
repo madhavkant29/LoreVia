@@ -4,6 +4,7 @@ import Link from "next/link"
 import dynamic from "next/dynamic"
 import React, { memo, useEffect, useRef, useState } from "react"
 
+import { captureCaughtRenderError } from "@/lib/analytics/browserTelemetry"
 import { useChatUnreadCount } from "@/lib/hooks/useChatUnreadCount"
 import { prefetchChatsSidebarData } from "@/lib/query/sidebarPrefetch"
 import { useAuthStore } from "@/lib/stores/authStore"
@@ -177,6 +178,10 @@ class ChatPanelErrorBoundary extends React.Component<React.PropsWithChildren, Ch
 
   static getDerivedStateFromError(): ChatPanelErrorBoundaryState {
     return { hasError: true }
+  }
+
+  componentDidCatch(error: Error) {
+    captureCaughtRenderError(error, "chat_panel")
   }
 
   render() {

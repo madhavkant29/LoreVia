@@ -20,6 +20,7 @@ from app.utils.books.processing import (
     _normalize_internal_processing_state,
     _normalize_processing_state,
     normalize_reprocess_metadata,
+    sanitize_public_processing_state,
 )
 from app.utils.books.workspace_constants import (
     DEFAULT_WRITER_WORKSPACE,
@@ -27,6 +28,7 @@ from app.utils.books.workspace_constants import (
 )
 from app.utils.first_impression_utils import normalize_first_impression_state
 from app.utils.index_format import INDEX_FORMATS
+from app.utils.processing_error_utils import friendly_processing_error
 
 if TYPE_CHECKING:
     pass
@@ -463,11 +465,15 @@ def build_writer_workspace_payload(book: Book) -> dict:
     payload = normalize_writer_workspace(
         book.writer_workspace if isinstance(book.writer_workspace, dict) else None
     )
-    payload["processing"] = (
+    payload["processing"] = sanitize_public_processing_state(
         _normalize_processing_state(payload.get("processing"))
         if isinstance(payload.get("processing"), dict)
         else None
     )
+    if payload["reprocess"].get("last_error"):
+        payload["reprocess"]["last_error"] = friendly_processing_error(
+            str(payload["reprocess"]["last_error"])
+        )
     payload["manuscript_front_matter"] = _derive_front_matter_defaults(
         payload.get("manuscript_front_matter"),
         title=book.title or "",
@@ -483,6 +489,6 @@ def build_book_processing_payload(book: Book) -> dict[str, Any] | None:
     processing = workspace.get("processing")
     if not isinstance(processing, dict) or not processing:
         return None
-    return BookProcessingOut.model_validate(_normalize_processing_state(processing)).model_dump(
-        mode="json"
-    )
+    return BookProcessingOut.model_validate(
+        sanitize_public_processing_state(_normalize_processing_state(processing))
+    ).model_dump(mode="json")

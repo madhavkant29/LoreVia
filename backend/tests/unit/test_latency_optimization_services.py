@@ -4,6 +4,7 @@ import io
 import uuid
 from datetime import UTC, datetime
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 from fastapi import HTTPException, UploadFile
@@ -364,6 +365,46 @@ async def test_import_job_lookup_cancel_retry_dispatch_and_missing_worker(monkey
         uuid.uuid4(),
     )
     assert result["status"] == "missing"
+
+
+def test_failed_import_job_hides_legacy_exception_details():
+    now = datetime.now(UTC)
+    job = ManuscriptImportJob(
+        id=uuid.uuid4(),
+        user_id=uuid.uuid4(),
+        book_id=uuid.uuid4(),
+        status="failed",
+        source_files_json=[],
+        request_json={},
+        error_detail="database query failed with private manuscript text",
+        created_at=now,
+        updated_at=now,
+    )
+
+    payload = manuscript_import_job_service.manuscript_import_job_out(job)
+
+    assert payload.error == "Something went wrong. Please try again."
+
+
+@pytest.mark.asyncio
+async def test_import_dispatch_failure_reports_without_claiming_job_was_sent(monkeypatch):
+    from app.workers.tasks.extraction_tasks import process_manuscript_import_job_task
+
+    job = SimpleNamespace(id=uuid.uuid4(), status="queued", celery_task_id=None)
+    db = _FakeDb()
+    report = Mock()
+    monkeypatch.setattr(
+        process_manuscript_import_job_task,
+        "apply_async",
+        Mock(side_effect=RuntimeError("broker unavailable")),
+    )
+    monkeypatch.setattr(manuscript_import_job_service, "report_caught_failure", report)
+
+    assert not await manuscript_import_job_service.dispatch_manuscript_import_job(db, job)
+    assert job.status == "queued"
+    assert job.celery_task_id is None
+    assert db.commits == 0
+    assert report.call_args.args[0] == "manuscript_import_job_dispatch_failed"
 
 
 @pytest.mark.asyncio

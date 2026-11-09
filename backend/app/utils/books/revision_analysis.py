@@ -11,6 +11,8 @@ import re
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
+from fastapi import HTTPException
+
 from app.core.storage import download_book
 from app.models.book import (
     Chapter,
@@ -28,6 +30,7 @@ from app.utils.books import (
     revision_decisions,
 )
 from app.utils.books.domain_constants import REVISION_KEYWORD_STOPWORDS
+from app.utils.logging.errors import report_caught_failure
 from app.utils.storage_utils import STORAGE_IO_EXCEPTIONS
 
 if TYPE_CHECKING:
@@ -210,8 +213,11 @@ async def _load_version_text(version: ChapterVersion) -> str:
         return ""
     try:
         raw = await asyncio.to_thread(download_book, version.s3_key)
-    except STORAGE_IO_EXCEPTIONS:
-        return ""
+    except STORAGE_IO_EXCEPTIONS as exc:
+        report_caught_failure("revision_version_storage_failed", exc)
+        raise HTTPException(
+            503, "A saved chapter version could not be loaded. Retry the report."
+        ) from exc
     payload = manuscript.deserialize_manuscript_content(raw)
     return str(payload.get("text") or "").strip()
 

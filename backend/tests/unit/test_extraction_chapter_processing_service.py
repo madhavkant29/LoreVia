@@ -7,9 +7,11 @@ from app.services import extraction_chapter_processing_service
 
 
 @pytest.mark.parametrize("diagnostic_persistence_failure", [False, True])
+@pytest.mark.parametrize("rebuild_run_id", [None, "rebuild-run"])
 async def test_chapter_extraction_preserves_provider_error_when_diagnostics_fail(
     monkeypatch,
     diagnostic_persistence_failure,
+    rebuild_run_id,
 ):
     class StopAfterProviderChecks(Exception):
         pass
@@ -37,7 +39,7 @@ async def test_chapter_extraction_preserves_provider_error_when_diagnostics_fail
     book = SimpleNamespace(
         id=uuid.uuid4(),
         user_id=uuid.uuid4(),
-        is_editor_project=False,
+        is_editor_project=bool(rebuild_run_id),
         writer_workspace={},
     )
     chapter = SimpleNamespace(
@@ -56,7 +58,8 @@ async def test_chapter_extraction_preserves_provider_error_when_diagnostics_fail
         db.transaction_open = True
         return False
 
-    async def stage(*_args, **_kwargs):
+    async def stage(*_args, **kwargs):
+        assert kwargs["rebuild_existing_chapter"] is bool(rebuild_run_id)
         return chapter
 
     async def embed(*_args, **_kwargs):
@@ -92,13 +95,16 @@ async def test_chapter_extraction_preserves_provider_error_when_diagnostics_fail
     monkeypatch.setattr(
         extraction_chapter_processing_service, "collect_chapter_llm_extraction", extract
     )
-    monkeypatch.setattr("app.services.editor_project_service.get_rebuild_run_id", lambda _: None)
+    monkeypatch.setattr(
+        "app.services.editor_project_service.get_rebuild_run_id", lambda _: rebuild_run_id
+    )
 
     with pytest.raises(StopAfterProviderChecks):
         await extraction_chapter_processing_service._process_chapter_in_generation(
             db,
             book,
             {"number": 1, "text": "Mara waits.", "title": "One"},
+            rebuild_run_id=rebuild_run_id,
         )
 
     assert db.commits == 5

@@ -1,7 +1,9 @@
 import json
 import logging
 import sys
+from unittest.mock import Mock
 
+import sentry_sdk
 from starlette.requests import Request
 
 from app.utils.logging import (
@@ -13,6 +15,7 @@ from app.utils.logging import (
     scrub_sensitive_data,
     scrub_sentry_event,
 )
+from app.utils.logging.errors import public_stored_error_message, report_caught_failure
 from app.utils.request_context import set_request_id
 
 
@@ -21,6 +24,28 @@ def test_public_error_message_maps_common_status_codes() -> None:
     assert public_error_message(401) == "Authentication failed."
     assert public_error_message(404) == "Not found."
     assert public_error_message(500) == "Something went wrong. Please try again."
+
+
+def test_public_stored_error_message_retains_safe_validation_but_masks_legacy_raw_text():
+    assert public_stored_error_message("Uploaded content is too large.") == (
+        "Uploaded content is too large."
+    )
+    assert public_stored_error_message("SQL parameters: private manuscript text") == (
+        "Something went wrong. Please try again."
+    )
+    assert public_stored_error_message(None) == "Something went wrong. Please try again."
+
+
+def test_report_caught_failure_sends_only_static_event_and_failure_type(monkeypatch):
+    capture = Mock()
+    monkeypatch.setattr(sentry_sdk, "capture_message", capture)
+
+    report_caught_failure(
+        "manuscript_export_storage_failed", RuntimeError("private manuscript text")
+    )
+
+    capture.assert_called_once_with("manuscript_export_storage_failed", level="error")
+    assert "private manuscript text" not in str(capture.call_args)
 
 
 def test_request_log_context_includes_request_metadata() -> None:
@@ -142,8 +167,9 @@ def test_scrub_sentry_event_redacts_request_headers_and_extras() -> None:
 
     assert scrubbed["request"]["headers"]["authorization"] == "[REDACTED]"
     assert scrubbed["request"]["headers"]["x-request-id"] == "req-1"
-    assert scrubbed["request"]["data"]["openai_api_key"] == "[REDACTED]"
+    assert "data" not in scrubbed["request"]
     assert scrubbed["extra"]["database_url"] == "[REDACTED]"
+    assert "data" in event["request"]
 
 
 def test_json_formatter_serializes_extras_and_exception() -> None:

@@ -18,6 +18,7 @@ from app.utils.ingestion_utils import (
     mark_book_processing_cancelled,
     update_book_processing_state,
 )
+from app.utils.processing_error_utils import MONTHLY_PROCESSED_WORDS_MESSAGE
 
 
 async def queue_initial_extraction_chapters(
@@ -68,7 +69,7 @@ async def queue_initial_extraction_chapters(
                 chapter_rows=chapter_rows,
                 chapter_number=chapter_number,
                 processing_started_at=processing_started_at,
-                error_detail=str(exc.detail),
+                error_detail=MONTHLY_PROCESSED_WORDS_MESSAGE,
             )
             break
         await ensure_task_execution(

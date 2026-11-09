@@ -41,12 +41,21 @@ async def enqueue_world_analysis_refresh(
             queue="intelligence",
             headers={"enqueued_at": datetime.now(UTC).isoformat()},
         )
-    except Exception:
+    except Exception as exc:
         await cache_delete_if_owner(lock_key, job_id)
         log.warning(
             "world_analysis_refresh_dispatch_failed",
             extra={"scope": scope, "target_id": str(target_id)},
             exc_info=True,
         )
+        try:
+            import sentry_sdk
+
+            with sentry_sdk.new_scope() as sentry_scope:
+                sentry_scope.set_tag("scope", scope)
+                sentry_scope.set_tag("failure_type", type(exc).__name__)
+                sentry_sdk.capture_message("world_analysis_refresh_dispatch_failed", level="error")
+        except Exception:
+            log.warning("world_analysis_dispatch_sentry_report_failed", exc_info=True)
         return None
     return job_id

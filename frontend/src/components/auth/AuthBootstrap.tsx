@@ -1,7 +1,8 @@
 "use client"
 
-import { useEffect, useRef } from "react"
+import { useEffect, useRef, useState } from "react"
 import { usePathname, useRouter } from "next/navigation"
+import axios from "axios"
 import { authApi } from "@/lib/api/auth"
 import { capture, captureTiming, identify } from "@/lib/analytics/posthog"
 import { shouldSkipAuthBootstrap } from "@/lib/routes"
@@ -10,12 +11,15 @@ import { useAuthStore } from "@/lib/stores/authStore"
 export function AuthBootstrap() {
   const { user, setUser, setHydrated, logout } = useAuthStore()
   const ran = useRef(false)
+  const [retryCount, setRetryCount] = useState(0)
+  const [sessionUnavailable, setSessionUnavailable] = useState(false)
   const startedAt = useRef(typeof performance !== "undefined" ? performance.now() : 0)
   const pathname = usePathname()
   const router = useRouter()
 
   useEffect(() => {
     if (shouldSkipAuthBootstrap(pathname)) {
+      setSessionUnavailable(false)
       setHydrated()
       captureTiming("auth_ready_ms", startedAt.current, { skipped: true })
       return
@@ -43,7 +47,13 @@ export function AuthBootstrap() {
           captureTiming("auth_ready_ms", startedAt.current, { cached_user: cachedUser })
           return
         }
-      } catch {}
+      } catch (error) {
+        if (!axios.isAxiosError(error) || error.response?.status !== 401) {
+          setHydrated()
+          setSessionUnavailable(true)
+          return
+        }
+      }
 
       if (cachedUser) {
         logout()
@@ -63,7 +73,25 @@ export function AuthBootstrap() {
     }
 
     void restoreSession({ cachedUser: false })
-  }, [pathname, user, setHydrated, setUser, logout, router])
+  }, [pathname, user, setHydrated, setUser, logout, router, retryCount])
 
-  return null
+  if (!sessionUnavailable) return null
+
+  return (
+    <div role="alert" className="fixed inset-x-4 top-4 z-[100] mx-auto max-w-lg rounded-lg border border-amber-500/40 bg-[rgb(var(--background))] p-4 text-sm text-[rgb(var(--foreground))] shadow-lg">
+      <p className="font-semibold">Could not verify your session right now.</p>
+      <p className="mt-1">We could not confirm your sign-in. Check your connection and try again.</p>
+      <button
+        type="button"
+        className="app-button-secondary mt-3"
+        onClick={() => {
+          setSessionUnavailable(false)
+          ran.current = false
+          setRetryCount((count) => count + 1)
+        }}
+      >
+        Retry session check
+      </button>
+    </div>
+  )
 }

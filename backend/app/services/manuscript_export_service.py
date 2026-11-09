@@ -51,6 +51,11 @@ from app.utils.export_utils import (
     novel_pdf_compiled,
     write_manuscript_vault_zip,
 )
+from app.utils.logging.errors import (
+    public_error_message,
+    public_stored_error_message,
+    report_caught_failure,
+)
 from app.utils.storage_utils import STORAGE_IO_EXCEPTIONS, bounded_storage_map
 
 log = logging.getLogger("lorevia.manuscript_export_jobs")
@@ -77,17 +82,17 @@ async def load_manuscript_export_chapters(
 
     async def load_chapter(row: Any) -> dict[str, Any]:
         number, chapter_title, s3_key = row
-        chapter_text = ""
+        if not s3_key:
+            raise HTTPException(409, "A chapter is missing its saved source. Contact support.")
         chapter_html = None
-        if s3_key:
-            try:
-                raw = await asyncio.to_thread(storage.download_book, s3_key)
-                stored = deserialize_manuscript_content(raw)
-                chapter_text = str(stored.get("text") or "")
-                chapter_html = str(stored.get("html") or "") or None
-            except STORAGE_IO_EXCEPTIONS:
-                chapter_text = ""
-                chapter_html = None
+        try:
+            raw = await asyncio.to_thread(storage.download_book, s3_key)
+        except STORAGE_IO_EXCEPTIONS as exc:
+            report_caught_failure("manuscript_export_chapter_storage_failed", exc)
+            raise HTTPException(503, "A chapter could not be loaded. Retry the export.") from exc
+        stored = deserialize_manuscript_content(raw)
+        chapter_text = str(stored.get("text") or "")
+        chapter_html = str(stored.get("html") or "") or None
         if not include_scene_metadata:
             chapter_text = strip_scene_metadata_from_manuscript_text(chapter_text)
             chapter_html = None
@@ -160,7 +165,9 @@ def manuscript_export_job_out(job: ManuscriptExportJob) -> ManuscriptExportJobOu
         media_type=job.artifact_media_type,
         size_bytes=job.artifact_size_bytes,
         download_url=download_url,
-        error=job.error_detail,
+        error=public_stored_error_message(job.error_detail)
+        if job.status == "failed"
+        else job.error_detail,
         expires_at=job.expires_at,
         created_at=job.created_at,
         updated_at=job.updated_at,
@@ -259,8 +266,9 @@ async def dispatch_manuscript_export_job(db: AsyncSession, job: ManuscriptExport
             task_id=task_id,
             queue="maintenance",
         )
-    except Exception:
+    except Exception as exc:
         log.exception("manuscript_export_job_dispatch_failed", extra={"job_id": str(job.id)})
+        report_caught_failure("manuscript_export_job_dispatch_failed", exc)
         return False
     job.celery_task_id = task_id
     await db.commit()
@@ -600,13 +608,22 @@ async def process_manuscript_export_job(
         job = await db.get(ManuscriptExportJob, job_id)
         if job is not None:
             job.status = "failed"
-            job.error_detail = str(exc)[:2000] or exc.__class__.__name__
+            job.error_detail = public_error_message(500)
             job.completed_at = datetime.now(UTC)
             job.expires_at = job.completed_at + timedelta(
                 seconds=settings.MANUSCRIPT_EXPORT_ARTIFACT_TTL_SECONDS
             )
             await db.commit()
         log.exception("manuscript_export_job_failed", extra={"job_id": str(job_id)})
+        try:
+            import sentry_sdk
+
+            with sentry_sdk.new_scope() as scope:
+                scope.set_tag("job_id", str(job_id))
+                scope.set_tag("failure_type", type(exc).__name__)
+                sentry_sdk.capture_message("manuscript_export_job_failed", level="error")
+        except Exception:
+            log.warning("manuscript_export_sentry_report_failed job_id=%s", job_id, exc_info=True)
         return {"status": "failed", "job_id": str(job_id)}
     finally:
         if artifact is not None:

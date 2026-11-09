@@ -30,8 +30,9 @@ class _ScalarResult:
 
 
 class _FakeDb:
-    def __init__(self, chapter):
+    def __init__(self, chapter, *, media_count=0):
         self.chapter = chapter
+        self.media_count = media_count
         self.execute_calls = 0
         self.flush_calls = 0
         self.added = []
@@ -40,7 +41,7 @@ class _FakeDb:
         self.execute_calls += 1
         if self.execute_calls == 1:
             return _ScalarResult(self.chapter)
-        return _ScalarResult(None)
+        return _ScalarResult(self.media_count)
 
     def add(self, value):
         self.added.append(value)
@@ -108,6 +109,61 @@ async def test_stage_chapter_for_extraction_updates_existing_chapter_without_pur
     assert db.flush_calls == 2
     assert db.execute_calls == 1
     assert synced and synced[0][2] is chapter
+
+
+@pytest.mark.asyncio
+async def test_rebuild_staging_preserves_saved_source_and_metadata(monkeypatch):
+    async def fake_sync_chapter_media(*_args):
+        pytest.fail("reprocessing must not replace saved chapter media")
+
+    monkeypatch.setattr(
+        extraction_chapter_record_service, "_sync_chapter_media", fake_sync_chapter_media
+    )
+    monkeypatch.setattr(
+        extraction_chapter_record_service,
+        "upload_text",
+        lambda *_args: pytest.fail("reprocessing must not rewrite saved source"),
+    )
+    book = SimpleNamespace(id=uuid.uuid4())
+    chapter = SimpleNamespace(
+        id=uuid.uuid4(),
+        book_id=book.id,
+        number=1,
+        s3_key="saved-chapter-key",
+        title="Opening  material",
+        description=None,
+        chapter_kind="prologue",
+        processed=True,
+        word_count=107,
+        content_version=1,
+        analysis_state={"status": "succeeded"},
+    )
+    db = _FakeDb(chapter, media_count=2)
+
+    result = await stage_chapter_for_extraction(
+        db,
+        book,
+        {
+            "number": 1,
+            "title": "Opening material",
+            "chapter_kind": "chapter",
+            "content_version": 2,
+            "text": "word " * 106,
+            "html": "<p>word</p>",
+            "_lorevia_persist_rich_content": True,
+        },
+        1,
+        rebuild_existing_chapter=True,
+    )
+
+    assert result is chapter
+    assert chapter.word_count == 107
+    assert chapter.title == "Opening  material"
+    assert chapter.chapter_kind == "prologue"
+    assert chapter.s3_key == "saved-chapter-key"
+    assert chapter.content_version == 1
+    assert chapter.processed is False
+    assert chapter.analysis_state["source_integrity"]["stored_media_count"] == 2
 
 
 @pytest.mark.asyncio

@@ -1,12 +1,19 @@
 "use client"
 
+import { useEffect } from "react"
+import { captureCaughtRenderError } from "@/lib/analytics/browserTelemetry"
+
 export default function GlobalError({
-  error: _error,
+  error,
   reset,
 }: {
   error: Error & { digest?: string }
   reset: () => void
 }) {
+  useEffect(() => {
+    captureCaughtRenderError(error, "route")
+  }, [error])
+
   return (
     <main className="grid min-h-[100dvh] place-items-center bg-[#f8f4ee] px-6 py-12 text-stone-950">
       <section className="w-full max-w-lg border-y border-stone-300 py-8">
