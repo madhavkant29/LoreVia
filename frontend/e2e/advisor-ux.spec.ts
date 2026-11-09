@@ -19,6 +19,17 @@ test.beforeEach(async ({ page }) => {
   await page.route(checksApi, (route) => route.fulfill({ json: checks }))
 })
 
+test("legacy scan priorities remain visible as informational checks", async ({ page }) => {
+  await page.route(checksApi, (route) => route.fulfill({ json: {
+    ...checks,
+    suggestions: [{ ...checks.suggestions[0], id: "legacy-1", severity: "high", title: "Legacy bridge check" }],
+  } }))
+  await page.goto(path)
+  await page.getByRole("tab", { name: "Recommended checks" }).click()
+  await expect(page.getByText("Legacy bridge check", { exact: true })).toBeVisible()
+  await expect(page.getByText(/unrecognized priority from an earlier scan/)).toBeVisible()
+})
+
 test("advisor modes stay readable at four widths and both themes", async ({ page }, info) => {
   const errors: string[] = []; page.on("pageerror", (error) => errors.push(error.message))
   await page.goto(path); await expect(input(page)).toBeEnabled()
@@ -154,7 +165,26 @@ test("cached scan failures stay errors and an empty report does not imply a clea
   await expect(page.getByText("Latest available checks loaded.", { exact: true })).toHaveCount(0)
   await page.route(checksApi, (route) => route.fulfill({ json: { ...checks, suggestions: [], total: 0 } }))
   await page.getByRole("button", { name: "Retry loading checks" }).click()
-  await expect(page.getByText(/does not confirm the manuscript is free/)).toBeVisible()
+  await expect(page.getByText(/does not prove the manuscript is free/)).toBeVisible()
+  await page.route(checksApi, (route) => route.fulfill({ json: {
+    ...checks, suggestions: [], total: 0,
+    meta: { ...checks.meta, proactive_audit_applied: false, audit_failure_category: "ai_unavailable", audit_groups_total: 1, audit_groups_completed: 0 },
+  } }))
+  await page.getByRole("button", { name: "Reload checks", exact: true }).click()
+  await expect(page.getByText(/The AI audit did not finish/)).toBeVisible()
+  await page.route(checksApi, (route) => route.fulfill({ json: {
+    ...checks, suggestions: [], total: 0,
+    meta: { ...checks.meta, proactive_audit_applied: false, audit_failure_category: "budget_exhausted", audit_groups_total: 1, audit_groups_completed: 0 },
+  } }))
+  await page.getByRole("button", { name: "Reload checks", exact: true }).click()
+  await expect(page.getByText(/Monthly AI budget reached/)).toBeVisible()
+  await expect(page.getByText(/monthly reset/)).toBeVisible()
+  await page.route(checksApi, (route) => route.fulfill({ json: {
+    ...checks, suggestions: [], total: 0,
+    meta: { ...checks.meta, proactive_audit_applied: false, audit_failure_category: "capacity_busy", audit_groups_total: 1, audit_groups_completed: 0 },
+  } }))
+  await page.getByRole("button", { name: "Reload checks", exact: true }).click()
+  await expect(page.getByText(/AI processing slots are temporarily busy/)).toBeVisible()
 })
 
 test("expired scan jobs unlock recovery without automatically starting another scan", async ({ page }) => {
@@ -239,12 +269,25 @@ test("a scan observation timeout resumes its existing job", async ({ page }) => 
   await page.goto(path); await page.getByRole("tab", { name: "Recommended checks" }).click()
   await page.getByRole("button", { name: "Refresh checks", exact: true }).click()
   await expect(page.getByText("Checking extracted story evidence…", { exact: true })).toBeVisible()
-  await page.clock.fastForward(241000)
-  await expect(page.getByText(/Status checking paused after four minutes/)).toBeVisible()
+  await page.clock.fastForward(25 * 60 * 1000 + 1000)
+  await expect(page.getByText(/Status checking paused after 25 minutes/)).toBeVisible()
   await expect(page.getByRole("button", { name: "Refresh checks", exact: true })).toBeDisabled()
   complete = true; await page.getByRole("button", { name: "Resume checking", exact: true }).click()
   await expect(page.getByText("Checks updated.", { exact: true })).toBeVisible()
   expect(starts).toBe(1)
+})
+
+test("a long Recommended Checks audit shows group progress without losing earlier findings", async ({ page }) => {
+  await page.route(scanApi, (route) => route.fulfill({ json: { job_id: "group-scan", cached: false, status: "queued" } }))
+  await page.route(jobApi, (route) => route.fulfill({ json: {
+    job_id: "group-scan", status: "running", result: null,
+    progress: { completed: 2, total: 21 }, error: null,
+  } }))
+  await page.goto(path)
+  await page.getByRole("tab", { name: "Recommended checks" }).click()
+  await page.getByRole("button", { name: "Refresh checks", exact: true }).click()
+  await expect(page.getByText("Scanning evidence group 2/21…", { exact: true })).toBeVisible()
+  await expect(page.getByText("The missing oath", { exact: true })).toBeVisible()
 })
 
 test("empty answers remain incomplete and browser storage failures are explained", async ({ page }) => {

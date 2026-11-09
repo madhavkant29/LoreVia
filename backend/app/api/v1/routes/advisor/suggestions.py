@@ -9,7 +9,6 @@ from app.api.deps.auth import get_current_user
 from app.api.deps.rate_limit import rate_limit_advisor
 from app.api.v1.routes.advisor.chat import _parse_advisor_job_id
 from app.core.database import get_db
-from app.core.redis import get_suggestion_scan_cache
 from app.models.book import Book
 from app.models.intelligence import AdvisorSuggestionJob
 from app.schemas.advisor import (
@@ -19,6 +18,7 @@ from app.schemas.advisor import (
 )
 from app.services.advisor_suggestion_jobs_service import (
     create_advisor_suggestion_job,
+    fail_stale_advisor_suggestion_job,
     mark_advisor_suggestion_job_failed,
     serialize_advisor_suggestion_job,
 )
@@ -50,6 +50,7 @@ async def advisor_suggestions(
         db=db,
         book=book,
         user_id=current_user.id,
+        cache_only=True,
     )
     result["cached"] = False
     return result
@@ -69,24 +70,19 @@ async def advisor_suggestions_scan(
     require_author_access(current_user)
 
     total_ch = book.total_chapters or 1
-    cache_key = make_advisor_suggestions_cache_key(
-        book_id=book_id,
-        total_chapters=total_ch,
-        character_count=0,
-        thread_count=0,
-        state_count=0,
-        relationship_count=0,
-        world_element_count=0,
-    )
-    cached = await get_suggestion_scan_cache(str(book.id), cache_key)
-    if cached is not None:
-        return {"job_id": str(uuid.uuid4()), "status": "queued", "cached": True}
-
     job = await create_advisor_suggestion_job(
         db,
         user_id=current_user.id,
         book_id=book.id,
-        cache_key=cache_key,
+        cache_key=make_advisor_suggestions_cache_key(
+            book_id=book_id,
+            total_chapters=total_ch,
+            character_count=0,
+            thread_count=0,
+            state_count=0,
+            relationship_count=0,
+            world_element_count=0,
+        ),
     )
     try:
         generate_advisor_suggestions_task.apply_async(
@@ -130,4 +126,7 @@ async def advisor_suggestions_job_status(
         raise HTTPException(404, detail="suggestion scan job not found")
     if job.user_id != current_user.id or job.book_id != book.id:
         raise HTTPException(403, detail="scan job does not belong to this book")
+    job = await fail_stale_advisor_suggestion_job(db, job_id=job.id)
+    if job is None:
+        raise HTTPException(404, detail="suggestion scan job not found")
     return serialize_advisor_suggestion_job(job)

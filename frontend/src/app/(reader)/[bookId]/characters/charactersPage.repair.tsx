@@ -43,9 +43,9 @@ export function CharacterRepairTab({
       <div className="space-y-5">
         <div>
           <p className={`text-xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-amber-300" : "text-amber-700"}`}>Repair workspace</p>
-          <h2 className={`mt-2 text-3xl font-semibold tracking-tight ${isDark ? "text-white" : "text-stone-950"}`}>Book reprocess preview</h2>
+          <h2 className={`mt-2 text-3xl font-semibold tracking-tight ${isDark ? "text-white" : "text-stone-950"}`}>Character identity repair preview</h2>
           <p className={`mt-2 text-sm ${isDark ? "text-slate-400" : "text-stone-600"}`}>
-            Preview safe merges, obvious-noise demotions, and protected skips before reprocessing the Character Bible.
+            Preview duplicate merges, obvious-noise demotions, and protected records before applying identity cleanup. This does not reread the manuscript or discover missing characters.
           </p>
         </div>
 

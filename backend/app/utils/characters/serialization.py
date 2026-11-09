@@ -24,7 +24,11 @@ from app.models.intelligence import (
 )
 from app.utils.characters.candidates import build_character_analysis_payload
 from app.utils.characters.constants import CHARACTER_APPROVAL_PROTECTED
-from app.utils.characters.governance import character_governance, character_status
+from app.utils.characters.governance import (
+    character_governance,
+    character_status,
+    is_author_curated_character,
+)
 from app.utils.characters.graph import get_graph_visibility_override
 from app.utils.characters.presentation import compose_character_description, dedupe_preserve_order
 from app.utils.characters.text import clean_optional_text, clean_string_list
@@ -37,8 +41,7 @@ def is_protected_character(char: Character | None) -> bool:
     _visibility_state, approval_state, _approval_source, _reason_codes = character_governance(char)
     if approval_state == CHARACTER_APPROVAL_PROTECTED:
         return True
-    metadata = dict(getattr(char, "analysis_metadata", None) or {})
-    return bool(getattr(char, "is_manual", False) or metadata.get("protected_from_repair"))
+    return is_author_curated_character(char)
 
 
 def serialize_character_alias_record(alias: CharacterAlias) -> dict[str, Any]:
@@ -212,7 +215,7 @@ def serialize_character_navigation(
         "id": str(char.id),
         "book_id": str(char.book_id),
         "name": char.name,
-        "aliases": char.aliases or [],
+        "aliases": (char.aliases or []) if "aliases" in requested_fields else None,
         "role": char.role,
         "first_chapter": char.first_chapter,
         "last_seen_chapter": char.last_seen_chapter,

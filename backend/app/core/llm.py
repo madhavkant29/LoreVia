@@ -27,13 +27,14 @@ from app.utils.llm_usage_utils import (
     create_tracked_chat_completion,
     estimate_chat_completion_token_parts,
     is_retryable_llm_call_error,
+    require_complete_llm_response,
 )
 from app.utils.observability_metrics import record_llm_client_creation
 from app.utils.request_context import get_request_id
 from app.utils.retry_utils import LLM_MAX_RETRIES
 
 _openai_client: AsyncOpenAI | None = None
-_openai_clients: dict[tuple[int, int | None], AsyncOpenAI] = {}
+_openai_clients: dict[tuple[int, asyncio.AbstractEventLoop | None], AsyncOpenAI] = {}
 _gemini_client: object | None = None
 _gemini_client_cache_key: tuple[str | None, int] | None = None
 LLM_PROVIDER_EXCEPTIONS = (
@@ -47,10 +48,10 @@ LLM_PROVIDER_EXCEPTIONS = (
 logger = logging.getLogger("lorevia.llm")
 
 
-def _openai_client_registry_key() -> tuple[int, int | None]:
-    """Keep httpx-backed clients inside the process and event loop that own them."""
+def _openai_client_registry_key() -> tuple[int, asyncio.AbstractEventLoop | None]:
+    """Retain the owning loop so a later loop cannot reuse its numeric id."""
     try:
-        return os.getpid(), id(asyncio.get_running_loop())
+        return os.getpid(), asyncio.get_running_loop()
     except RuntimeError:
         return os.getpid(), None
 
@@ -61,7 +62,7 @@ def get_openai_client(external: AsyncOpenAI | None = None) -> AsyncOpenAI:
         return external
     registry_key = _openai_client_registry_key()
     client = _openai_clients.get(registry_key)
-    if client is None:
+    if client is None or getattr(client, "is_closed", lambda: False)() is True:
         # Tenacity below is the single retry owner. Leaving the SDK's default
         # retries enabled would multiply every configured attempt.
         client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY, max_retries=0)
@@ -69,7 +70,10 @@ def get_openai_client(external: AsyncOpenAI | None = None) -> AsyncOpenAI:
         record_llm_client_creation()
         logger.info(
             "openai_client_created",
-            extra={"process_id": registry_key[0], "event_loop_id": registry_key[1]},
+            extra={
+                "process_id": registry_key[0],
+                "event_loop_id": id(registry_key[1]) if registry_key[1] is not None else None,
+            },
         )
     # Kept as a compatibility reference for modules and diagnostics that used
     # the original singleton. New code must always resolve through the registry.
@@ -179,6 +183,7 @@ async def complete_with_fallback(
     temperature: float = 0.2,
     max_tokens: int = 1200,
     response_format: dict[str, Any] | None = None,
+    require_complete_output: bool = False,
     openai_client: AsyncOpenAI | None = None,
     usage_feature: str = "llm_completion",
     usage_user_id: uuid.UUID | None,
@@ -221,6 +226,8 @@ async def complete_with_fallback(
                 billing_scope=usage_billing_scope,
                 **request_kwargs,
             )
+            if require_complete_output:
+                require_complete_llm_response(response)
             content = response.choices[0].message.content or ""
             if content.strip():
                 return content.strip()

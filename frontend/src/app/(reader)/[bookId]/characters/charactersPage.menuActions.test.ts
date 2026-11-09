@@ -127,4 +127,32 @@ describe("charactersPage menu action builders", () => {
       onToggleProtectedFromRepair: vi.fn(),
     })).toEqual([])
   })
+
+  it("does not offer a removable repair-protection action for reviewed characters", () => {
+    const onToggleProtectedFromRepair = vi.fn()
+    const actions = buildCharacterMenuActions({
+      character: character({ analysis_metadata: { user_reviewed: true } }),
+      deleting: false,
+      editing: false,
+      exporting: null,
+      isAuthorMode: true,
+      partitioning: false,
+      saving: false,
+      onCloseCharacterMenu: vi.fn(),
+      onDeleteCharacter: vi.fn(),
+      onDemoteSelectedCharacter: vi.fn(),
+      onExportCharacter: vi.fn(),
+      onFindEvidence: vi.fn(),
+      onManualMerge: vi.fn(),
+      onOpenDuplicateReview: vi.fn(),
+      onOpenReviewQueue: vi.fn(),
+      onPartitionCharacter: vi.fn(),
+      onSetEditing: vi.fn(),
+      onToggleProtectedFromRepair,
+    })
+
+    const action = actions.find((item) => item.label === "Protected by review or manual edits")
+    expect(action?.disabled).toBe(true)
+    expect(onToggleProtectedFromRepair).not.toHaveBeenCalled()
+  })
 })

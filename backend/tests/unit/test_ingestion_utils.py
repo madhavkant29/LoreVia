@@ -16,10 +16,12 @@ from app.utils.books.manuscript import (
 )
 from app.utils.ingestion_utils import (
     apply_chapter_number_strategy,
+    build_analysis_chapter_state,
     build_chapter_dispatch_plan,
     build_ingestion_progress_state,
     extract_queue_wait_ms,
     is_book_hidden,
+    is_immutable_editor_chapter_key,
     is_llm_usage_limit_error,
     is_retryable_processing_error,
     load_analysis_chapter_payload,
@@ -28,9 +30,57 @@ from app.utils.ingestion_utils import (
     mark_book_processing_cancelled,
     merge_processing_pipeline,
     processing_state_for_completed_extraction,
+    record_extraction_coverage_in_analysis_state,
+    record_incomplete_extraction_attempt_in_analysis_state,
     regroup_prose_chapters_for_reading,
     update_book_processing_state,
 )
+
+
+def test_record_extraction_coverage_survives_analysis_state_update():
+    coverage = {"complete": True, "source_characters": 42, "ranges": []}
+    initial = {"status": "pending", "source_integrity": {"text_present": True}}
+
+    recorded = record_extraction_coverage_in_analysis_state(initial, coverage)
+    succeeded = build_analysis_chapter_state(recorded, status="succeeded")
+
+    assert initial["source_integrity"] == {"text_present": True}
+    assert succeeded["source_integrity"]["extraction_coverage"] == coverage
+    assert succeeded["source_integrity"]["text_present"] is True
+
+
+def test_record_extraction_coverage_rejects_incomplete_result():
+    with pytest.raises(ValueError, match="source_coverage_incomplete"):
+        record_extraction_coverage_in_analysis_state({}, {"complete": False})
+
+
+def test_incomplete_extraction_attempt_is_recorded_then_cleared_after_success():
+    attempt = {
+        "complete": False,
+        "failure_stage": "character_discovery",
+        "batch_outcomes": [
+            {"batch_index": 1, "status": "succeeded"},
+            {"batch_index": 2, "status": "failed", "error_type": "TimeoutError"},
+        ],
+    }
+    initial = {"status": "pending", "source_integrity": {"text_present": True}}
+
+    recorded = record_incomplete_extraction_attempt_in_analysis_state(initial, attempt)
+
+    assert initial["source_integrity"] == {"text_present": True}
+    assert recorded["source_integrity"]["extraction_attempt"] == attempt
+    assert "extraction_coverage" not in recorded["source_integrity"]
+
+    completed = record_extraction_coverage_in_analysis_state(
+        recorded, {"complete": True, "batch_outcomes": [{"batch_index": 1, "status": "succeeded"}]}
+    )
+    assert "extraction_attempt" not in completed["source_integrity"]
+    assert completed["source_integrity"]["text_present"] is True
+
+
+def test_incomplete_extraction_attempt_rejects_missing_batch_outcomes():
+    with pytest.raises(ValueError, match="invalid_incomplete_extraction_attempt"):
+        record_incomplete_extraction_attempt_in_analysis_state({}, {"complete": False})
 
 
 def test_build_chapter_dispatch_plan_staggers_non_eager_chapters():
@@ -305,6 +355,45 @@ async def test_load_staged_chapter_payload_uses_existing_chapter_key(monkeypatch
 
 
 @pytest.mark.asyncio
+async def test_load_staged_chapter_payload_preserves_exact_storage_key_whitespace(monkeypatch):
+    book_id = uuid.uuid4()
+    stored_key = "chapters/custom/part  one.txt"
+    calls: list[str] = []
+
+    def _fake_download(storage_key: str) -> bytes:
+        calls.append(storage_key)
+        if storage_key != stored_key:
+            raise FileNotFoundError(storage_key)
+        return serialize_manuscript_content("Saved chapter").encode("utf-8")
+
+    monkeypatch.setattr("app.utils.ingestion_utils.download_book", _fake_download)
+
+    payload = await load_staged_chapter_payload(book_id, 7, chapter_s3_key=stored_key)
+
+    assert payload is not None
+    assert payload["text"] == "Saved chapter"
+    assert calls == [stored_key]
+
+
+@pytest.mark.asyncio
+async def test_load_staged_chapter_payload_without_recorded_key_uses_standard_key(monkeypatch):
+    book_id = uuid.uuid4()
+    requested_keys: list[str] = []
+
+    def _fake_download(storage_key: str) -> bytes:
+        requested_keys.append(storage_key)
+        return serialize_manuscript_content("Recovered chapter").encode("utf-8")
+
+    monkeypatch.setattr("app.utils.ingestion_utils.download_book", _fake_download)
+
+    payload = await load_staged_chapter_payload(book_id, 7)
+
+    assert payload is not None
+    assert payload["text"] == "Recovered chapter"
+    assert requested_keys == [f"chapters/{book_id}/7.txt"]
+
+
+@pytest.mark.asyncio
 async def test_load_staged_chapter_payload_falls_back_to_deterministic_key(monkeypatch):
     book_id = uuid.uuid4()
     calls: list[str] = []
@@ -329,6 +418,26 @@ async def test_load_staged_chapter_payload_falls_back_to_deterministic_key(monke
         "html": "<p>Recovered chapter</p>",
     }
     assert calls == ["missing-key", f"chapters/{book_id}/3.txt"]
+
+
+@pytest.mark.asyncio
+async def test_strict_immutable_chapter_load_never_returns_older_standard_source(monkeypatch):
+    book_id = uuid.uuid4()
+    current_key = f"chapters/{book_id}/3/{uuid.uuid4().hex}.txt"
+    standard_key = f"chapters/{book_id}/3.txt"
+    calls: list[str] = []
+
+    def load(key: str) -> bytes:
+        calls.append(key)
+        if key == current_key:
+            raise FileNotFoundError(key)
+        return serialize_manuscript_content("Old chapter").encode()
+
+    monkeypatch.setattr("app.utils.ingestion_utils.download_book", load)
+    assert is_immutable_editor_chapter_key(book_id, current_key)
+    assert not is_immutable_editor_chapter_key(book_id, standard_key)
+    assert await load_staged_chapter_payload(book_id, 3, chapter_s3_key=current_key) is None
+    assert calls == [current_key]
 
 
 @pytest.mark.asyncio
@@ -374,6 +483,52 @@ async def test_load_processing_chapter_payload_returns_chapter_only_payload(monk
         "text": "Chapter body",
         "html": "<p>Chapter body</p>",
     }
+
+
+@pytest.mark.asyncio
+async def test_processing_preserves_exact_saved_text_and_rejects_blank_source(monkeypatch):
+    book_id = uuid.uuid4()
+
+    async def saved(*_args, **_kwargs):
+        return {"text": "\n  Chapter body  \n", "html": None}
+
+    monkeypatch.setattr("app.utils.ingestion_utils.load_staged_chapter_payload", saved)
+    result = await load_processing_chapter_payload(book_id, 5)
+    assert result is not None and result["text"] == "\n  Chapter body  \n"
+
+    async def blank(*_args, **_kwargs):
+        return {"text": " \n\t ", "html": None}
+
+    monkeypatch.setattr("app.utils.ingestion_utils.load_staged_chapter_payload", blank)
+    assert await load_processing_chapter_payload(book_id, 5) is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("source_kind", ["editor", "renumbered_editor", "restored"])
+async def test_processing_rejects_stale_fallback_after_immutable_save(monkeypatch, source_kind):
+    book_id = uuid.uuid4()
+    saved_key = {
+        "editor": f"chapters/{book_id}/5/{uuid.uuid4().hex}.txt",
+        "renumbered_editor": f"chapters/{book_id}/4/{uuid.uuid4().hex}.txt",
+        "restored": f"books/{uuid.uuid4()}/{book_id}/chapters/5/{uuid.uuid4()}.txt",
+    }[source_kind]
+    requested: list[str] = []
+
+    def load(key: str) -> bytes:
+        requested.append(key)
+        if key == saved_key:
+            raise FileNotFoundError(key)
+        return serialize_manuscript_content("Old chapter").encode()
+
+    monkeypatch.setattr("app.utils.ingestion_utils.download_book", load)
+    assert is_immutable_editor_chapter_key(book_id, saved_key)
+    assert (
+        await load_processing_chapter_payload(
+            book_id, 5, chapter_s3_key=saved_key, chapter_title="Five"
+        )
+        is None
+    )
+    assert requested == [saved_key]
 
 
 @pytest.mark.asyncio

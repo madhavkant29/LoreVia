@@ -1,3 +1,4 @@
+import asyncio
 import json
 import uuid
 from types import SimpleNamespace
@@ -83,6 +84,43 @@ async def test_get_client_reuses_and_closes_cached_client(monkeypatch):
     assert third is clients[1]
     assert calls == 2
     clients[0].close.assert_awaited_once()
+
+
+def test_get_client_recreates_closed_cached_client(monkeypatch):
+    clients = [MagicMock(), MagicMock()]
+    clients[0].is_closed.side_effect = [False, True]
+    clients[1].is_closed.return_value = False
+    monkeypatch.setattr(embedder, "_EMBEDDING_CLIENT", None)
+    monkeypatch.setattr(embedder, "_EMBEDDING_CLIENT_CACHE_KEY", None)
+    monkeypatch.setattr(embedder, "AsyncOpenAI", MagicMock(side_effect=clients))
+
+    assert embedder.get_client() is clients[0]
+    assert embedder.get_client() is clients[0]
+    assert embedder.get_client() is clients[1]
+    assert embedder.get_client() is clients[1]
+
+
+def test_embedding_client_does_not_reuse_a_client_from_a_previous_event_loop(monkeypatch):
+    clients = [MagicMock(), MagicMock()]
+    for client in clients:
+        client.is_closed.return_value = False
+        client.close = AsyncMock()
+    monkeypatch.setattr(embedder, "_EMBEDDING_CLIENT", None)
+    monkeypatch.setattr(embedder, "_EMBEDDING_CLIENT_CACHE_KEY", None)
+    monkeypatch.setattr(embedder, "AsyncOpenAI", MagicMock(side_effect=clients))
+
+    async def resolve():
+        return embedder.get_client(), asyncio.get_running_loop()
+
+    first_client, first_loop = asyncio.run(resolve())
+    second_client, second_loop = asyncio.run(resolve())
+
+    assert first_client is clients[0]
+    assert second_client is clients[1]
+    assert first_loop is not second_loop
+    assert embedder._EMBEDDING_CLIENT_CACHE_KEY[1] is second_loop
+    asyncio.run(embedder.close_embedding_client())
+    clients[1].close.assert_awaited_once()
 
 
 @pytest.mark.asyncio

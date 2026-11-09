@@ -10,6 +10,8 @@ PERSON_ROLE_WORDS = {
     "mrs",
     "ms",
     "miss",
+    "madame",
+    "monsieur",
     "dr",
     "doctor",
     "professor",
@@ -55,6 +57,7 @@ NON_PERSON_HEADWORDS = {
     "academy",
     "association",
     "catholicism",
+    "chapter",
     "church",
     "city",
     "circles",
@@ -372,9 +375,22 @@ def person_name_shape_score(name: str | None) -> int:
     lowered = [word.casefold() for word in words]
     score = 0
 
-    # Single-word common words (e.g., "From", "Then") are a primary false-positive source.
+    # Common leading words also form accidental two-word names in prose,
+    # such as "In Chapter". Penalize them without making a hard stopword gate.
     if len(words) == 1 and lowered[0] in COMMON_NON_NAME_WORDS:
         score -= 6
+    elif len(words) >= 2 and lowered[0] in {
+        "at",
+        "by",
+        "for",
+        "from",
+        "in",
+        "into",
+        "of",
+        "on",
+        "to",
+    }:
+        score -= 3
 
     if len(words) == 1:
         score += 1 if len(words[0]) >= 4 else 0
@@ -385,7 +401,7 @@ def person_name_shape_score(name: str | None) -> int:
         score += 1
     if any(word in PERSON_ROLE_WORDS for word in lowered):
         score += 2
-    if lowered[0] in {"mr", "mrs", "ms", "miss", "dr", "sir", "lady", "lord"}:
+    if lowered[0] in {"mr", "mrs", "ms", "miss", "madame", "monsieur", "dr", "sir", "lady", "lord"}:
         score += 1
 
     if len(words) >= 2 and lowered[-1].endswith("s") and lowered[-1] not in PERSON_ROLE_WORDS:

@@ -418,6 +418,161 @@
         "plot_threads": [],
         "findings": [{"key": "object|leah phone|3,4", "category": "object", "subject": "Leah's phone", "chapters": [3, 4]}]
       }
+    },
+    {
+      "id": "contemporary_first_person_shared_surname_and_discourse_prefix",
+      "genre": "contemporary",
+      "text": "Chapter 1. I arrived at the clinic before sunrise with a folded letter in my coat. The receptionist asked for a name; I told her I was Arun Vale. She wrote it in the visitor book and said that Madame Vale had asked for me. Madame Vale was my mother. She had taught me to keep receipts, to ask direct questions, and to leave before an argument became a performance. I had not seen her since spring. At the back door, the warden checked my visitor pass. He returned it without speaking. Later he pointed me toward the garden when I asked where the patients were walking. Chapter 2. So Raymond came over from the bakery with bread for the staff. Raymond was not a relative; he had been my friend since school, and he knew I would forget breakfast. He stayed while I read the letter. The warden passed us twice and finally told us the garden would close at noon. Chapter 3. Monsieur Vale called from the station. He was my father, not the patient listed on the clinic form, and he wanted to know whether my mother had received the parcel he sent. I said I did not know. He asked again, then promised to come himself. Raymond offered to wait with me. When the warden opened the garden gate for the last time that morning, I went back inside to ask Madame Vale directly about the parcel. She had not seen it. I wrote that fact on the back of the visitor pass so I would not confuse it with what my father merely hoped was true.",
+      "labels": {
+        "characters": [
+          {"canonical_name": "Arun Vale", "mentions": ["I", "Arun Vale"]},
+          {"canonical_name": "Madame Vale", "mentions": ["Madame Vale", "my mother"]},
+          {"canonical_name": "Monsieur Vale", "mentions": ["Monsieur Vale", "my father"]},
+          {"canonical_name": "Raymond", "mentions": ["Raymond"]},
+          {"canonical_name": "the warden", "mentions": ["the warden"]}
+        ],
+        "identity_links": {"I": "Arun Vale", "Arun Vale": "Arun Vale", "Madame Vale": "Madame Vale", "my mother": "Madame Vale", "Monsieur Vale": "Monsieur Vale", "my father": "Monsieur Vale", "Raymond": "Raymond", "the warden": "the warden"},
+        "ambiguous_mentions": ["Vale"],
+        "relationships": [{"a": "Arun Vale", "b": "Madame Vale", "type": "mother_and_son"}, {"a": "Arun Vale", "b": "Monsieur Vale", "type": "father_and_son"}, {"a": "Arun Vale", "b": "Raymond", "type": "friends"}],
+        "state_transitions": [],
+        "timeline_events": [{"chapter": 1, "event": "Arun arrives at clinic"}, {"chapter": 3, "event": "Arun learns parcel was not received"}],
+        "knowledge_events": [{"character": "Arun Vale", "fact": "Madame Vale had not received the parcel", "chapter": 3}],
+        "plot_threads": [{"title": "The missing parcel", "promise_chapter": 3, "payoff_chapter": null}],
+        "findings": []
+      }
+    },
+    {
+      "id": "contemporary_narrator_named_in_dialogue_with_shared_surname",
+      "genre": "contemporary",
+      "text": "Chapter 1. I waited at the records desk until the clerk asked who had come for the parcel. I said, \"My name is Lena Moss.\" He wrote Lena Moss on the pass and handed it back. Madame Moss, my aunt, waited outside with an umbrella. A visitor behind us said, \"I am Theo Moss.\" I turned toward him, but he was speaking to the clerk, not introducing me. Later my aunt and I carried the parcel home together.",
+      "labels": {
+        "characters": [
+          {"canonical_name": "Lena Moss", "mentions": ["I", "Lena Moss"]},
+          {"canonical_name": "Madame Moss", "mentions": ["Madame Moss", "my aunt"]},
+          {"canonical_name": "Theo Moss", "mentions": ["Theo Moss"]},
+          {"canonical_name": "the clerk", "mentions": ["the clerk"]}
+        ],
+        "identity_links": {"I": "Lena Moss", "Lena Moss": "Lena Moss", "Madame Moss": "Madame Moss", "my aunt": "Madame Moss", "Theo Moss": "Theo Moss", "the clerk": "the clerk"},
+        "ambiguous_mentions": ["Moss"],
+        "relationships": [{"a": "Lena Moss", "b": "Madame Moss", "type": "aunt_and_niece"}],
+        "state_transitions": [],
+        "timeline_events": [{"chapter": 1, "event": "Lena receives the parcel"}],
+        "knowledge_events": [{"character": "the clerk", "fact": "Lena Moss came for the parcel", "chapter": 1}],
+        "plot_threads": [{"title": "The parcel", "promise_chapter": 1, "payoff_chapter": 1}],
+        "findings": []
+      }
+    },
+    {
+      "id": "mystery_two_independent_source_conflicts",
+      "genre": "mystery",
+      "text": "Chapter 1. Detective Dara Bell photographed the archive door before Lio touched the handle. The door had no window and the only key was sealed in Dara's evidence bag. Lio checked the corridor camera, which still had its power cable attached. Dara signed the bag and locked it in her desk. Chapter 2. A storm cut power to the archive building. Lio unplugged the corridor camera and placed its cable in a marked box. Dara watched the indicator light go dark and wrote the shutdown in her notebook. She then left with the sealed key bag still inside her desk. Chapter 3. Without returning to her office or asking for another key, Dara opened the archive door with the key from the sealed bag in her pocket. At the same moment, Lio reviewed live corridor footage from the unplugged camera and saw an intruder pass the door. Neither detective mentioned a spare key, a restored cable, a battery, or any repair. Dara and Lio based their next accusation on the footage and on the apparent ease of entry.",
+      "labels": {
+        "characters": [{"canonical_name": "Dara Bell", "mentions": ["Detective Dara Bell", "Dara"]}, {"canonical_name": "Lio", "mentions": ["Lio"]}],
+        "identity_links": {"Detective Dara Bell": "Dara Bell", "Dara": "Dara Bell", "Lio": "Lio"},
+        "ambiguous_mentions": [],
+        "relationships": [{"a": "Dara Bell", "b": "Lio", "type": "investigative_partners"}],
+        "state_transitions": [{"subject": "archive key", "predicate": "location", "from": "sealed bag in Dara's desk", "to": "Dara's pocket", "chapter": 3, "intentional": false}, {"subject": "corridor camera", "predicate": "power", "from": "unplugged", "to": "live", "chapter": 3, "intentional": false}],
+        "timeline_events": [{"chapter": 2, "event": "camera unplugged and key left in desk"}, {"chapter": 3, "event": "door opened and live footage viewed"}],
+        "knowledge_events": [{"character": "Dara Bell", "fact": "camera was unplugged", "chapter": 2}],
+        "plot_threads": [{"title": "Archive intruder", "promise_chapter": 1, "payoff_chapter": null}],
+        "findings": [{"key": "object|archive key|2,3", "category": "object", "subject": "archive key", "chapters": [2, 3]}, {"key": "world_rule|corridor camera power|2,3", "category": "world_rule", "subject": "corridor camera", "chapters": [2, 3]}]
+      }
+    },
+    {
+      "id": "science_fiction_intentional_register_shift",
+      "genre": "science_fiction",
+      "text": "Chapter 1. Commander Sera Nix spoke in measured technical orders on the bridge. She told engineer Paz, 'Maintain the shield at forty percent until the relay confirms our course.' Paz repeated the instruction, and Sera logged the exchange. Their ship was approaching a border station where the patrol recorded every official transmission. Chapter 2. Paz warned Sera that the patrol would recognize her voice if she used the same formal cadence in the market. Sera changed into a plain coat and practiced the market dialect with Paz. She kept the technical terms out of each answer. Chapter 3. Under a false name at the station, Sera told the vendor, 'Nah, that route's busted; got another way through?' The vendor pointed to a freight tunnel. Paz later told Sera that her informal speech had kept the patrol from noticing her. Back on the bridge, Sera returned to her normal clipped orders and explained why she had changed registers only in the market.",
+      "labels": {
+        "characters": [{"canonical_name": "Sera Nix", "mentions": ["Commander Sera Nix", "Sera"]}, {"canonical_name": "Paz", "mentions": ["Paz"]}, {"canonical_name": "the vendor", "mentions": ["the vendor"]}],
+        "identity_links": {"Commander Sera Nix": "Sera Nix", "Sera": "Sera Nix", "Paz": "Paz", "the vendor": "the vendor"},
+        "ambiguous_mentions": [],
+        "relationships": [{"a": "Sera Nix", "b": "Paz", "type": "commander_and_engineer"}],
+        "state_transitions": [{"subject": "Sera Nix", "predicate": "speech_register", "from": "formal technical", "to": "informal market dialect", "chapter": 3, "intentional": true}],
+        "timeline_events": [{"chapter": 2, "event": "Sera rehearses market dialect"}, {"chapter": 3, "event": "Sera uses disguise at station"}],
+        "knowledge_events": [{"character": "Paz", "fact": "patrol could recognize Sera's formal cadence", "chapter": 2}],
+        "plot_threads": [{"title": "Crossing the border station", "promise_chapter": 1, "payoff_chapter": 3}],
+        "findings": []
+      }
+    },
+    {
+      "id": "mystery_long_form_late_arrival_and_two_source_conflicts",
+      "genre": "mystery",
+      "text": "Chapter 1. I reached the island records house before the ferry bell sounded. The sign over the gate promised an archive of every crossing, but the windows were dark and the garden path had flooded overnight. The porter let me through after checking the name on my pass. I told him I was Mara Quill. He wrote Mara Quill in his book, returned the pass, and asked whether I had come for the missing permit. I had, though I said only that I wanted to see the public ledger. The porter kept a blue oilcloth cape beside his desk and used it to carry damp papers between buildings. He had worked at the house long enough to recognize every ferry captain by the sound of a footstep. Madame Quill was waiting in the reading room. She was my mother, and she had spent the summer cataloguing permits after the former clerk retired. She showed me a gap in the register where a crossing should have been entered. A small signal lamp on the east wall blinked whenever the gate camera transmitted a picture to the watch office. I saw it blink twice while we spoke. Mother said the permit could settle whether a boat had come in during the storm, but she would not guess from an empty line. She had written down the names of the people who handled the ledger, and she wanted me to ask each one directly. The porter brought us dry towels, then stood at the door as if he expected an argument. I left the reading room with the list but not with the ledger. Chapter 2. So Rafi Sen met me outside the ferry office with a paper map and a loaf of bread. Rafi was my oldest friend, not a relative of the Quill family, and he had repaired the watch office radio the week before. He drew a circle around the service stair and said the missing permit might have been carried to the watch office without being entered. We went back through the records house together. The porter unlocked the corridor, brought a tray of wet forms into the reading room, and stayed while Madame Quill checked the shelves. Mother found the public ledger on the lower table. She and I counted every leaf. The page for the storm night was still empty, and no loose permit lay between the covers. At noon Mother placed the ledger inside the locked drawer of her office desk. She turned the only drawer key twice, put that key on a chain under her collar, and asked the porter to witness the seal across the drawer. I watched him sign the seal. I never borrowed the key. Later, Rafi inspected the signal lamp with the porter beside him. He disconnected its only power cable, wrapped the loose end in a white tag, and wrote DISCONNECTED on the tag. The porter confirmed that the wall had no battery socket and that the camera stopped sending pictures when the lamp lost power. I touched the cold glass of the lamp; it did not blink. Rafi said he would return with a replacement cable after the ferry brought supplies, which could not happen before the next afternoon. We left the archive without reopening Mother's office. Chapter 3. Monsieur Quill called from the mainland station before the next ferry was due. He was my father and had not been inside the records house that week. His surname matched Mother's, but he spoke about her work as an outsider: he believed a duplicate permit had been mailed to the watch office. I told him that I had seen an empty page, not a duplicate, and that the ledger was sealed in Mother's desk. He asked whether I trusted Rafi's repair plan. I said I trusted what I had watched him do to the cable. The porter walked past with his blue cape folded over one arm and paused when he heard me mention the sealed drawer. He said the wax had not been broken since Mother locked it. I asked him whether anyone else had a key. He said the desk came with one key and that Mother wore it under her collar. I wrote that answer on the back of my pass so I would not confuse it later with Father's guess. Rafi met me by the garden wall. He had spent the morning checking paper receipts at the dock rather than touching the disconnected cable. He showed me two receipts for food deliveries, neither a permit. We talked about returning after the supply ferry, but the sky was already closing in and the boat had not appeared. At dusk Mother sent word through the porter that the drawer seal was still intact. I went home carrying only my pass, Rafi's paper map, and the list of people to interview. Chapter 4. Rain kept the supply ferry away the following morning. The porter opened the records house and showed me the untouched wax on Mother's drawer before I went upstairs. He said Mother was across the island and had taken the only key with her. Rafi had gone to the dock to ask when a replacement cable might arrive. I waited in the watch office, where the camera monitor showed a blank gray square and the signal lamp below it remained dark. The porter went back down the corridor with a stack of folded forms. I walked to the east wall and read the white tag again. It still said DISCONNECTED, and the loose cable lay beside the lamp. I returned to the watch office without touching it. Inspector Leda Voss arrived after midday with a notebook and a dry coat. She introduced herself by name, asked for the storm-night permit, and listened while I described the empty ledger page. Leda Voss checked the time in her notebook before asking the porter to bring the visitor book. He found it but did not enter Mother's office. The inspector had never met either of my parents, so when she asked whether Quill had taken the ledger away, I made her say which Quill she meant. She meant Madame Quill, not Monsieur Quill. She wrote that distinction in the margin. Then I found the same public ledger inside my coat, although I had left Mother's sealed drawer untouched and had not seen anyone bring the ledger upstairs. Its storm-night page was still empty. I handed it to the inspector. At the same moment she pointed to live pictures of the gate on the watch office monitor. The disconnected lamp was blinking again and the camera was transmitting, even though Rafi had not returned, the supply ferry had not arrived, and the only cable still lay loose with its white tag. The porter came upstairs when he heard us call. He looked at the ledger in the inspector's hands and then at the live monitor, but he offered no explanation. Leda Voss copied both observations into her notebook before making an accusation. I could not tell her how the ledger had crossed the locked drawer or how an unplugged camera had begun to transmit. She closed the notebook and asked us to preserve the cable, the wax seal, and every page of the ledger until she could inspect the room again.",
+      "labels": {
+        "characters": [{"canonical_name": "Mara Quill", "mentions": ["I", "Mara Quill"]}, {"canonical_name": "Madame Quill", "mentions": ["Madame Quill", "Mother"]}, {"canonical_name": "Monsieur Quill", "mentions": ["Monsieur Quill", "my father", "Father"]}, {"canonical_name": "Rafi Sen", "mentions": ["Rafi Sen", "Rafi"]}, {"canonical_name": "the porter", "mentions": ["the porter"]}, {"canonical_name": "Leda Voss", "mentions": ["Inspector Leda Voss", "Leda Voss"]}],
+        "identity_links": {"I": "Mara Quill", "Mara Quill": "Mara Quill", "Madame Quill": "Madame Quill", "Mother": "Madame Quill", "Monsieur Quill": "Monsieur Quill", "my father": "Monsieur Quill", "Father": "Monsieur Quill", "Rafi Sen": "Rafi Sen", "Rafi": "Rafi Sen", "the porter": "the porter", "Inspector Leda Voss": "Leda Voss", "Leda Voss": "Leda Voss"},
+        "ambiguous_mentions": ["Quill"],
+        "relationships": [{"a": "Mara Quill", "b": "Madame Quill", "type": "mother_and_daughter"}, {"a": "Mara Quill", "b": "Monsieur Quill", "type": "father_and_daughter"}, {"a": "Mara Quill", "b": "Rafi Sen", "type": "friends"}],
+        "state_transitions": [{"subject": "public ledger", "predicate": "location", "from": "sealed drawer in Madame Quill's office", "to": "Mara's coat", "chapter": 4, "intentional": false}, {"subject": "gate camera", "predicate": "power", "from": "disconnected", "to": "transmitting", "chapter": 4, "intentional": false}],
+        "timeline_events": [{"chapter": 2, "event": "ledger sealed and lamp cable disconnected"}, {"chapter": 4, "event": "ledger appears in Mara's coat and camera transmits"}],
+        "knowledge_events": [{"character": "Mara Quill", "fact": "lamp cable was disconnected", "chapter": 2}, {"character": "Leda Voss", "fact": "ledger was in Mara's coat", "chapter": 4}],
+        "plot_threads": [{"title": "Missing storm-night permit", "promise_chapter": 1, "payoff_chapter": null}],
+        "findings": [{"key": "object|public ledger|2,4", "category": "object", "subject": "public ledger", "chapters": [2, 4]}, {"key": "world_rule|gate camera power|2,4", "category": "world_rule", "subject": "gate camera", "chapters": [2, 4]}]
+      }
+    },
+    {
+      "id": "contemporary_repeated_single_name_attributed_speech",
+      "genre": "contemporary",
+      "text": "At the depot, Nyra said, \"Wait for the last train.\" I followed Nyra to the platform. Nyra replied, \"I will carry the case.\" The ticket window stayed closed.",
+      "labels": {
+        "characters": [{"canonical_name": "Nyra", "mentions": ["Nyra"]}],
+        "identity_links": {"Nyra": "Nyra"},
+        "ambiguous_mentions": [],
+        "relationships": [],
+        "state_transitions": [],
+        "timeline_events": [{"chapter": 1, "event": "Nyra waits at the depot"}],
+        "knowledge_events": [],
+        "plot_threads": [{"title": "The last train", "promise_chapter": 1, "payoff_chapter": null}],
+        "findings": []
+      }
+    },
+    {
+      "id": "contemporary_single_name_action_without_speech",
+      "genre": "contemporary",
+      "text": "At the depot, Mara said nothing. I followed Mara to the platform. Mara opened the ticket window and waved me through.",
+      "labels": {
+        "characters": [{"canonical_name": "Mara", "mentions": ["Mara"]}],
+        "identity_links": {"Mara": "Mara"},
+        "ambiguous_mentions": [],
+        "relationships": [],
+        "state_transitions": [],
+        "timeline_events": [{"chapter": 1, "event": "Mara opens the ticket window"}],
+        "knowledge_events": [],
+        "plot_threads": [],
+        "findings": []
+      }
+    },
+    {
+      "id": "science_fiction_long_form_narrator_shared_surname_and_two_conflicts",
+      "genre": "science_fiction",
+      "text": "Chapter 1. I arrived at the tide observatory after the last shuttle crossed the causeway. The building stood above a basin of black salt water, and its only public entrance faced the harbor. My pass identified me as Leena Voss, the technician hired to restore its old weather records. I showed the pass to the mechanic who kept the intake pumps running. He had a strip of yellow tape on his sleeve and a habit of tapping each valve twice before opening it. He let me through the gate and asked me to tell him if the warning siren sounded. According to his maintenance sheet, the siren had been disabled during the winter because its battery casing was cracked. I had never met him before, but he knew the shape of every pipe in the building. Magistrate Sol was waiting in the chart room with a stack of harbor notices. She said the council wanted the observatory's original storm map before voting on the new sea wall. The map was drawn on blue film and showed the location of a buried channel. She did not ask me to endorse the wall; she wanted to know whether the map was genuine. Sister Sol arrived a few minutes later with a box of replacement lamps. She was the magistrate's older sister, a field engineer who worked for the ferry cooperative. Their surname and similar coats had already confused a visitor at the gate, but they were two separate people with different jobs. Sister Sol examined the glass ceiling while Magistrate Sol read the notices. I copied the map's identifying number into my notebook and asked them both to watch me put the original map into a locked archive drawer. Magistrate Sol signed the drawer seal. Sister Sol found a clean sheet of blue film, and I marked it COPY across the top before placing it on the public table. We all agreed that the copy could be used for discussion while the sealed original remained in the archive. Chapter 2. At dawn, Tarek Imani met me at the observatory gate. Tarek had been my friend since our training voyage, and he knew how I labeled test circuits. He brought a meter and a roll of red insulating tape to check the siren. The mechanic walked us to the roof and opened its casing with a bent screwdriver. He showed us the cracked battery housing, then pulled the only power lead out of the siren. Tarek photographed the disconnected lead beside a tag that read NO POWER. The mechanic checked the roof for a second battery and found none. I watched Tarek wrap the loose lead in red tape. He said the siren could not sound again until someone installed a new housing and reconnected it; the replacement parts were not expected before the next shuttle. We descended together. In the chart room, Sister Sol lifted the marked copy from the public table to compare it with a newer survey. Magistrate Sol asked whether the original had moved. I showed her the intact seal on the archive drawer and the key hanging from a chain at my neck. Neither sister touched the drawer. Tarek remained with me while I returned the copy to the table. The mechanic came through with a tray of bolts, tapped the chart-room valve twice, and went back to the pump corridor. Chapter 3. The shuttle did not arrive. A gate light announced a road closure before noon, and the mechanic confirmed that no supply truck had crossed the causeway. So Tarek suggested measuring the buried channel from the roof rather than waiting for a fresh map. I told him the original was still sealed and that the marked copy would be enough for a preliminary calculation. Magistrate Sol objected to making a public claim from a copy. Sister Sol agreed with her sister on that point, although she thought the channel was probably deeper than the old survey indicated. Tarek drew a second set of measurements on transparent paper. He did not alter either blue sheet. I put the marked copy into a broad envelope and handed it to the mechanic to carry to the council desk downstairs. He returned with the empty envelope and a receipt signed by the council clerk. That transfer was deliberate and witnessed; the copy's new location was no mystery. When the clerk later asked whether Sol had approved the calculation, I asked which Sol she meant. She meant the magistrate, who had not approved it. I wrote that distinction beside the receipt. In the evening the roof light flashed once during a lightning storm, but I could still see the siren's power lead hanging loose under its red tape. Tarek said a flash of reflected lightning was not a sounding siren. Chapter 4. The causeway stayed closed the following morning. The mechanic opened the gate, showed me the pump pressure, and went to inspect the roof. He still had yellow tape on his sleeve and still tapped each valve twice. Magistrate Sol brought the council clerk into the chart room to inspect the seal. The clerk recorded that it had not been broken. My key was still on its chain. Sister Sol was in the ferry shed, and Tarek was working beside me at the public table. We compared the transparent measurements with the receipt for the marked copy. Nobody claimed that the clerk's receipt proved anything about the sealed original. Then I opened my empty tool case and found the original blue-film map inside, with its identifying number and my pencil mark on the back. It was not the sheet marked COPY. The archive drawer still bore the intact seal that Magistrate Sol had signed, and I had not unlocked it since the first night. I handed the original to the magistrate, who asked us to preserve the case and the seal. Before anyone could examine the drawer, the warning siren on the roof sounded for several seconds. Tarek ran upstairs with me. The red tape still covered the disconnected lead, and the cracked battery housing was empty. The mechanic reached the roof from the opposite stair. He said he had not installed a battery or touched the lead. We checked the service log: no shuttle or truck had brought a new housing. The siren was quiet when we opened its casing, but its bell was still vibrating. Tarek refused to call the sound an electrical fault without an electrical source. Chapter 5. Magistrate Sol postponed the vote and asked for a room-by-room inventory. Sister Sol returned from the ferry shed and identified the map in the magistrate's hands as the original by its recorded number. She did not claim that her copied sheet had turned into it. The council clerk brought back the envelope containing the marked copy; COPY remained visible on that separate sheet. This was the expected result of the deliberate transfer the day before. The mechanic gave us his maintenance sheet, including the winter entry that disabled the siren. He showed Magistrate Sol the damaged casing and the red tape, then returned to his pumps. Tarek wrote down the exact time we had heard the bell and the condition of the lead afterward. I kept my tool case on the table so no one could argue later that I had hidden a second map inside it. I could not explain how the sealed original reached the case or how a disconnected siren had sounded. Magistrate Sol recorded both observations as open questions rather than accusing her sister, Tarek, or the mechanic. She asked us to wait for the causeway to reopen before moving any of the evidence.",
+      "labels": {
+        "characters": [{"canonical_name": "Leena Voss", "mentions": ["I", "Leena Voss"]}, {"canonical_name": "Magistrate Sol", "mentions": ["Magistrate Sol", "the magistrate"]}, {"canonical_name": "Sister Sol", "mentions": ["Sister Sol", "her sister"]}, {"canonical_name": "Tarek Imani", "mentions": ["Tarek Imani", "Tarek"]}, {"canonical_name": "the mechanic", "mentions": ["the mechanic"]}, {"canonical_name": "the council clerk", "mentions": ["the council clerk", "the clerk"]}],
+        "identity_links": {"I": "Leena Voss", "Leena Voss": "Leena Voss", "Magistrate Sol": "Magistrate Sol", "the magistrate": "Magistrate Sol", "Sister Sol": "Sister Sol", "her sister": "Sister Sol", "Tarek Imani": "Tarek Imani", "Tarek": "Tarek Imani", "the mechanic": "the mechanic", "the council clerk": "the council clerk", "the clerk": "the council clerk"},
+        "ambiguous_mentions": ["Sol"],
+        "relationships": [{"a": "Magistrate Sol", "b": "Sister Sol", "type": "sisters"}, {"a": "Leena Voss", "b": "Tarek Imani", "type": "friends"}],
+        "state_transitions": [{"subject": "original blue-film map", "predicate": "location", "from": "sealed archive drawer", "to": "Leena's tool case", "chapter": 4, "intentional": false}, {"subject": "warning siren", "predicate": "power", "from": "disconnected with no battery", "to": "sounding", "chapter": 4, "intentional": false}, {"subject": "marked copy", "predicate": "location", "from": "public table", "to": "council desk", "chapter": 3, "intentional": true}],
+        "timeline_events": [{"chapter": 1, "event": "original map sealed and marked copy placed on public table"}, {"chapter": 2, "event": "siren lead disconnected and tagged"}, {"chapter": 3, "event": "marked copy deliberately delivered to council desk"}, {"chapter": 4, "event": "original map found in tool case and disconnected siren sounds"}],
+        "knowledge_events": [{"character": "Leena Voss", "fact": "original map was sealed in archive drawer", "chapter": 1}, {"character": "Tarek Imani", "fact": "siren lead was disconnected", "chapter": 2}, {"character": "Magistrate Sol", "fact": "original map was found in Leena's tool case", "chapter": 4}],
+        "plot_threads": [{"title": "The council's sea-wall vote", "promise_chapter": 1, "payoff_chapter": null}, {"title": "Unexplained map and siren events", "promise_chapter": 4, "payoff_chapter": null}],
+        "findings": [{"key": "object|original blue-film map|1,4", "category": "object", "subject": "original blue-film map", "chapters": [1, 4]}, {"key": "world_rule|warning siren power|2,4", "category": "world_rule", "subject": "warning siren", "chapters": [2, 4]}]
+      }
+    },
+    {
+      "id": "contemporary_single_name_explicit_human_self_action",
+      "genre": "contemporary",
+      "text": "At the station, Mara checked the sealed parcel. I followed Mara to the platform. Mara raised her hand to signal the porter. The parcel remained unopened.",
+      "labels": {
+        "characters": [{"canonical_name": "Mara", "mentions": ["Mara"]}, {"canonical_name": "the porter", "mentions": ["the porter"]}],
+        "identity_links": {"Mara": "Mara", "the porter": "the porter"},
+        "ambiguous_mentions": [],
+        "relationships": [],
+        "state_transitions": [],
+        "timeline_events": [{"chapter": 1, "event": "Mara signals the porter at the station"}],
+        "knowledge_events": [],
+        "plot_threads": [{"title": "The sealed parcel", "promise_chapter": 1, "payoff_chapter": null}],
+        "findings": []
+      }
     }
   ]
 }

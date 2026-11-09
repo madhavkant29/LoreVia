@@ -1,5 +1,6 @@
 x-release-build-args: &release-build-args
   RELEASE_SHA: ${RELEASE_SHA:-unknown}
+  SECURITY_REFRESH: ${SECURITY_REFRESH:-unknown}
 
 x-runtime-hardening: &runtime-hardening
   read_only: true

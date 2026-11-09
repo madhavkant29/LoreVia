@@ -159,6 +159,27 @@ async def test_replace_chapter_extraction_records_preserves_curated_rows(db):
                 status="pending",
                 confidence=10,
             ),
+            CharacterCandidate(
+                book_id=book.id,
+                chapter_number=2,
+                raw_name="Sol",
+                proposed_name="Sol",
+                normalized_name="sol",
+                status="pending",
+                source_batch_key=f"manual-demote:{book.id}:{right.id}",
+                reason_codes=["manual_demoted_for_review"],
+                confidence=90,
+            ),
+            CharacterCandidate(
+                book_id=book.id,
+                chapter_number=2,
+                raw_name="Old Pier",
+                proposed_name="Old Pier",
+                normalized_name="old pier",
+                status="suppressed",
+                rejection_reason="author_marked_place",
+                confidence=95,
+            ),
             CharacterRelationshipCandidate(
                 book_id=book.id,
                 chapter_number=2,
@@ -172,6 +193,14 @@ async def test_replace_chapter_extraction_records_preserves_curated_rows(db):
                 raw_character_a="Mara",
                 raw_character_b="Noise",
                 status="suppressed",
+            ),
+            CharacterRelationshipCandidate(
+                book_id=book.id,
+                chapter_number=2,
+                raw_character_a="Mara",
+                raw_character_b="Iris",
+                status="pending",
+                reason_codes=["author_attached_endpoint"],
             ),
             CharacterRelationship(
                 book_id=book.id,
@@ -230,10 +259,15 @@ async def test_replace_chapter_extraction_records_preserves_curated_rows(db):
         .scalars()
         .all()
     )
-    assert [(row.proposed_name, row.status) for row in candidates] == [("Mara", "accepted")]
-    assert [(row.raw_character_b, row.status) for row in relationship_candidates] == [
-        ("Sol", "accepted")
-    ]
+    assert {(row.proposed_name, row.status) for row in candidates} == {
+        ("Mara", "accepted"),
+        ("Sol", "pending"),
+        ("Old Pier", "suppressed"),
+    }
+    assert {(row.raw_character_b, row.status) for row in relationship_candidates} == {
+        ("Sol", "accepted"),
+        ("Iris", "pending"),
+    }
     assert [(row.rel_type, row.edited_by_author) for row in relationships] == [("friend", True)]
     assert (
         await db.scalar(select(CharacterState).where(CharacterState.character_id == left.id))

@@ -9,9 +9,9 @@ from openai import OpenAIError
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.engine.character.extractor import extract_characters_and_relationships
 from app.engine.character.profile_builder import (
-    choose_richer_text,
     flat,
     merge_growth_events,
     merge_list_values,
@@ -30,6 +30,7 @@ from app.models.intelligence import (
     QuoteEntry,
     WikiEntry,
 )
+from app.parsers.chunker import count_tokens
 from app.utils.characters.classification import (
     update_character_classification,
 )
@@ -46,7 +47,18 @@ from app.utils.characters.manual import (
 from app.utils.characters.merging import (
     _dedupe_relationships,
 )
-from app.utils.characters.text import clean_optional_text, clean_string_list
+from app.utils.characters.partition_evidence import collect_partition_evidence
+from app.utils.characters.profile_evidence import (
+    PROFILE_LIST_FIELDS,
+    PROFILE_SCALAR_FIELDS,
+    merge_grounded_profile_claims,
+    profile_claim_records,
+)
+from app.utils.characters.text import (
+    clean_optional_text,
+    clean_string_list,
+    split_text_for_token_budget,
+)
 
 PARTITION_ENRICHMENT_EXCEPTIONS = (
     OpenAIError,
@@ -55,34 +67,6 @@ PARTITION_ENRICHMENT_EXCEPTIONS = (
     TypeError,
     ValueError,
 )
-
-
-def _collect_partition_evidence(
-    chapter_rows: list[tuple[int, str]],
-    *,
-    name: str,
-    aliases: list[str],
-) -> dict[str, Any]:
-    candidates = merge_list_values([name], aliases)
-    snippets: list[str] = []
-    chapter_counts: dict[int, int] = {}
-    mention_count = 0
-    for chapter_number, text in chapter_rows:
-        score = sum(_find_name_occurrences(text, candidate) for candidate in candidates)
-        if score <= 0:
-            continue
-        mention_count += score
-        chapter_counts[chapter_number] = chapter_counts.get(chapter_number, 0) + score
-        if len(snippets) < 6:
-            snippets.append(text[:2200])
-    ordered_chapters = sorted(chapter_counts)
-    return {
-        "chapter_counts": chapter_counts,
-        "snippets": snippets,
-        "mention_count": mention_count,
-        "first_chapter": ordered_chapters[0] if ordered_chapters else None,
-        "last_seen_chapter": ordered_chapters[-1] if ordered_chapters else None,
-    }
 
 
 def _partition_matches_entity(name: str, aliases: list[str], entity: dict[str, Any]) -> bool:
@@ -112,9 +96,6 @@ def _merge_partition_entities(
 ) -> dict[str, Any]:
     merged_traits: dict[str, Any] = {}
     merged_growth_events: list[dict] = []
-    merged_personality: list[str] = []
-    merged_motivations: list[str] = []
-    merged_fears: list[str] = []
     merged_aliases = merge_list_values([name], aliases)
     merged: dict[str, Any] = {
         "name": name,
@@ -135,46 +116,65 @@ def _merge_partition_entities(
         merged_aliases = merge_list_values(
             merged_aliases, entity.get("aliases") if isinstance(entity.get("aliases"), list) else []
         )
-        merged_personality = merge_list_values(
-            merged_personality,
-            entity.get("personality_tags")
-            if isinstance(entity.get("personality_tags"), list)
-            else [],
-        )
-        merged_motivations = merge_list_values(
-            merged_motivations,
-            entity.get("motivations") if isinstance(entity.get("motivations"), list) else [],
-        )
-        merged_fears = merge_list_values(
-            merged_fears, entity.get("fears") if isinstance(entity.get("fears"), list) else []
-        )
         if not merged["role"]:
             merged["role"] = entity.get("role")
-        merged["goal"] = choose_richer_text(merged["goal"], entity.get("goal"))
-        merged["lie_they_believe"] = choose_richer_text(
-            merged["lie_they_believe"], entity.get("lie_they_believe")
-        )
-        merged["backstory_wound"] = choose_richer_text(
-            merged["backstory_wound"], entity.get("backstory_wound")
-        )
-        merged["arc_type"] = choose_richer_text(merged["arc_type"], entity.get("arc_type"))
-        merged["arc_summary"] = choose_richer_text(merged["arc_summary"], entity.get("arc_summary"))
-        merged["archetype"] = choose_richer_text(merged["archetype"], entity.get("archetype"))
         growth_event = entity.get("growth_event")
         merged_growth_events = merge_growth_events(
             merged_growth_events, [growth_event] if isinstance(growth_event, dict) else []
         )
 
-    merged["traits"] = merged_traits
+    grounded, _ = merge_grounded_profile_claims(entities, merged_traits)
+    merged["traits"] = grounded["traits"]
     merged["aliases"] = [
         alias
         for alias in merged_aliases
         if normalize_character_name(alias) != normalize_character_name(name)
     ]
-    merged["personality_tags"] = merged_personality
-    merged["motivations"] = merged_motivations
-    merged["fears"] = merged_fears
-    merged["growth_events"] = merged_growth_events
+    for field in PROFILE_SCALAR_FIELDS:
+        merged[field] = grounded[field]
+    for field in PROFILE_LIST_FIELDS:
+        merged[field] = grounded[field]
+    merged["growth_events"] = [
+        event
+        for event in merged_growth_events
+        if any(
+            item.get("growth_event") == event
+            and isinstance(item.get("evidence"), dict)
+            and isinstance(item["evidence"].get("profile_claims"), dict)
+            and isinstance(item["evidence"]["profile_claims"].get("growth_event"), dict)
+            and item["evidence"]["profile_claims"]["growth_event"].get("quote")
+            for item in entities
+        )
+    ]
+    profile_records: list[dict[str, Any]] = []
+    seen_records: set[tuple[str, str, str, int]] = set()
+    for item in entities:
+        chapter = item.get("_chapter_number")
+        if not isinstance(chapter, int) or isinstance(chapter, bool) or chapter < 1:
+            continue
+        for record in profile_claim_records(item, chapter_number=chapter):
+            field, value = record["field"], record["value"]
+            if field.startswith("trait:"):
+                trait = merged["traits"].get(field.removeprefix("trait:"))
+                kept = isinstance(trait, dict) and trait.get("value") == value
+            elif field == "growth_event":
+                kept = any(event.get("event") == value for event in merged["growth_events"])
+            elif field in PROFILE_LIST_FIELDS:
+                kept = value in merged[field]
+            else:
+                kept = merged.get(field) == value
+            key = (field, value, record["quote"], chapter)
+            if kept and key not in seen_records:
+                seen_records.add(key)
+                profile_records.append(
+                    {
+                        "field": field,
+                        "value": value,
+                        "quote": record["quote"],
+                        "chapter_number": chapter,
+                    }
+                )
+    merged["profile_claim_records"] = profile_records
     return merged
 
 
@@ -190,16 +190,29 @@ async def _build_partition_payload(
     entities: list[dict[str, Any]] = []
     if evidence["snippets"]:
         try:
-            extracted = await extract_characters_and_relationships(
-                "\n\n".join(evidence["snippets"])[:12000],
-                user_id=user_id,
-                book_id=book_id,
-            )
-            entities = [
-                entity
-                for entity in extracted.get("characters", [])
-                if isinstance(entity, dict) and _partition_matches_entity(name, aliases, entity)
-            ]
+            snippet_chapters = evidence.get("snippet_chapters") or []
+            for snippet_index, snippet in enumerate(evidence["snippets"]):
+                chapter = (
+                    snippet_chapters[snippet_index]
+                    if snippet_index < len(snippet_chapters)
+                    else evidence.get("first_chapter")
+                )
+                for passage in split_text_for_token_budget(
+                    snippet,
+                    max_tokens=settings.EXTRACTION_BATCH_MAX_TOKENS,
+                    count_tokens=count_tokens,
+                ):
+                    extracted = await extract_characters_and_relationships(
+                        passage,
+                        user_id=user_id,
+                        book_id=book_id,
+                    )
+                    entities.extend(
+                        {**entity, "_chapter_number": chapter}
+                        for entity in extracted.get("characters", [])
+                        if isinstance(entity, dict)
+                        and _partition_matches_entity(name, aliases, entity)
+                    )
         except PARTITION_ENRICHMENT_EXCEPTIONS:
             entities = []
 
@@ -240,6 +253,7 @@ async def _build_partition_payload(
         "arc_summary": merged_entity.get("arc_summary"),
         "archetype": merged_entity.get("archetype"),
         "growth_events": merged_entity.get("growth_events") or [],
+        "analysis_metadata": {"profile_claims": merged_entity["profile_claim_records"]},
     }
 
 
@@ -476,7 +490,7 @@ async def partition_character(
     created_partitions: list[Character] = []
     evidence_by_character_id: dict[uuid.UUID, dict[str, Any]] = {}
     for partition in cleaned_partitions:
-        evidence = _collect_partition_evidence(
+        evidence = collect_partition_evidence(
             chapter_rows,
             name=str(partition["name"]),
             aliases=[str(alias) for alias in partition["aliases"]],

@@ -426,7 +426,10 @@ def test_generate_series_advisor_reply_task_does_not_replay_paid_work(monkeypatc
     assert failed[-1]["error_code"] == "advisor_generation_failed"
 
 
-def test_generate_advisor_suggestions_task_builds_cache_key_and_payload(monkeypatch):
+@pytest.mark.parametrize("audit_failure_category", [None, "invalid_ai_response"])
+def test_generate_advisor_suggestions_task_builds_cache_key_and_payload(
+    monkeypatch, audit_failure_category
+):
     job_id = uuid.uuid4()
     book_id = uuid.uuid4()
     user_id = uuid.uuid4()
@@ -440,6 +443,7 @@ def test_generate_advisor_suggestions_task_builds_cache_key_and_payload(monkeypa
             "state_count": 4,
             "relationship_count": 5,
             "world_element_count": 6,
+            "audit_failure_category": audit_failure_category,
         }
     }
 
@@ -453,7 +457,14 @@ def test_generate_advisor_suggestions_task_builds_cache_key_and_payload(monkeypa
     async def mark_complete(session, **kwargs):
         calls.append(("complete", kwargs))
 
+    async def mark_progress(session, **kwargs):
+        calls.append(("progress", kwargs["completed"], kwargs["total"]))
+        return True
+
     async def build_payload(**kwargs):
+        calls.append(("build", kwargs.get("force_audit")))
+        await kwargs["on_audit_progress"](0, 3)
+        await kwargs["on_audit_progress"](1, 3)
         return dict(payload)
 
     async def cache_version(*_args, **_kwargs):
@@ -477,6 +488,10 @@ def test_generate_advisor_suggestions_task_builds_cache_key_and_payload(monkeypa
         mark_complete,
     )
     monkeypatch.setattr(
+        "app.services.advisor_suggestion_jobs_service.mark_advisor_suggestion_job_progress",
+        mark_progress,
+    )
+    monkeypatch.setattr(
         "app.utils.advisor_scan_utils.build_advisor_suggestions_payload", build_payload
     )
     monkeypatch.setattr(
@@ -494,8 +509,14 @@ def test_generate_advisor_suggestions_task_builds_cache_key_and_payload(monkeypa
     )
 
     assert result["cached"] is False
+    assert ("build", True) in calls
+    assert ("progress", 0, 3) in calls
+    assert ("progress", 1, 3) in calls
     assert db.commits == 1
-    assert calls[-2] == ("cache", str(book_id), "scan:12:2", False)
+    if audit_failure_category is None:
+        assert calls[-2] == ("cache", str(book_id), "scan:12:2", False)
+    else:
+        assert not any(call[0] == "cache" for call in calls)
     assert calls[-1][0] == "complete"
 
 

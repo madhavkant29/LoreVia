@@ -1,6 +1,44 @@
-import type { VoiceConsistencyIssue, VoiceConsistencyMatch } from "@/types/intelligence"
+import type { VoiceConsistencyIssue, VoiceConsistencyMatch, VoiceConsistencyResponse, VoiceReviewDecision } from "@/types/intelligence"
 
+import { getApiErrorDetail } from "./apiErrors"
 import { buildUniqueWorkspacePathFromCandidate, sanitizeWorkspaceTitle } from "./workspacePaths"
+
+export function countVoiceSourceCharacters(text: string): number {
+  return Array.from(text).length
+}
+
+export function focusedVoicePassage(
+  source: string,
+  range: { start: number; end: number } | undefined,
+  maxCharacters: number,
+): string | null {
+  if (!Number.isInteger(maxCharacters) || maxCharacters < 1) return null
+  const characters = Array.from(source)
+  if (!characters.length) return null
+  if (range && (!Number.isInteger(range.start) || !Number.isInteger(range.end) || range.start < 0 || range.start >= range.end || range.end > characters.length)) return null
+  if (characters.length <= maxCharacters) return source
+  const anchor = range?.start ?? 0
+  const anchorLength = range ? Math.min(range.end - range.start, maxCharacters) : 0
+  const contextBefore = Math.min(2_000, Math.floor((maxCharacters - anchorLength) / 2))
+  const start = Math.max(0, Math.min(anchor - contextBefore, characters.length - maxCharacters))
+  return characters.slice(start, start + maxCharacters).join("")
+}
+
+export function voiceReviewErrorMessage(error: unknown): string {
+  const detail = getApiErrorDetail(error)
+  if (detail) return detail
+  if (error instanceof Error) {
+    const streamFailure = error.message.match(/^\d{3}: Advisor stream failed(?: — (.+))?$/)
+    if (streamFailure?.[1]) return streamFailure[1]
+    if (error.message === "Advisor stream ended before a final response arrived") {
+      return "Voice review ended before the full result arrived. Please try again."
+    }
+    if (error.message === "Advisor stream is unavailable in this browser") {
+      return "Live voice review is unavailable in this browser. Please try another browser."
+    }
+  }
+  return "Could not run the voice review right now. Please try again."
+}
 
 export function defaultVoiceSceneFolder(chapterNumber: number | null | undefined) {
   if (typeof chapterNumber === "number" && chapterNumber > 0) {
@@ -9,15 +47,44 @@ export function defaultVoiceSceneFolder(chapterNumber: number | null | undefined
   return "scenes/voice/unassigned"
 }
 
-export function buildVoiceIssueNote(issue: Pick<VoiceConsistencyIssue, "character_name" | "title" | "description" | "severity" | "evidence" | "suggestion">) {
+type VoiceNoteIssue = Pick<VoiceConsistencyIssue, "character_name" | "title" | "description" | "severity"> & Partial<Pick<VoiceConsistencyIssue,
+  "classification" | "submitted_excerpt" | "baseline_excerpt" | "baseline_chapter_number" | "confidence" | "revision_direction" | "intentionality_prompt" | "evidence" | "suggestion" | "decision">>
+
+function voiceIssueEvidenceLines(issue: VoiceNoteIssue): string[] {
+  return [
+    issue.classification ? `**Classification:** ${issue.classification.replace(/_/g, " ")}` : null,
+    issue.decision ? `**Review decision:** ${issue.decision}` : null,
+    issue.submitted_excerpt ? `**Submitted excerpt:** ${issue.submitted_excerpt}` : null,
+    issue.baseline_excerpt ? `**Baseline excerpt${typeof issue.baseline_chapter_number === "number" ? ` (chapter ${issue.baseline_chapter_number})` : ""}:** ${issue.baseline_excerpt}` : null,
+    typeof issue.confidence === "number" ? `**Evidence strength:** ${Math.round(issue.confidence * 100)}%` : null,
+    issue.revision_direction ? `**Revision direction:** ${issue.revision_direction}` : null,
+    issue.intentionality_prompt ? `**Intentionality question:** ${issue.intentionality_prompt}` : null,
+    issue.evidence && !issue.submitted_excerpt ? `**Evidence:** ${issue.evidence}` : null,
+    issue.suggestion && !issue.revision_direction ? `**Suggestion:** ${issue.suggestion}` : null,
+  ].filter((line): line is string => !!line)
+}
+
+export function applyVoiceFindingDecision<T extends VoiceConsistencyResponse>(result: T, findingKey: string, decision: VoiceReviewDecision): T {
+  const issue = result.review.issues.find((item) => item.finding_key === findingKey)
+  if (!issue) return result
+  const issues = result.review.issues.filter((item) => item.finding_key !== findingKey)
+  const suppressed = [...(result.suppressed_findings ?? []), { ...issue, decision }]
+  const overallVerdict = issues.length
+    ? `New voice findings to review: ${issues.length}. Previously reviewed findings shown below: ${suppressed.length}.`
+    : result.review.status === "partial_evidence"
+      ? "No new unresolved voice findings. Previously reviewed findings are listed separately, but the review remains limited by the available evidence."
+      : "No new unresolved voice findings. All supported findings in this review have recorded decisions."
+  return { ...result, review: { ...result.review, issues, overall_verdict: overallVerdict }, suppressed_findings: suppressed }
+}
+
+export function buildVoiceIssueNote(issue: VoiceNoteIssue) {
   return {
     title: `Voice: ${issue.character_name} - ${issue.title}`,
     body: [
       `**Voice Issue: ${issue.character_name} - ${issue.title}**`,
       "",
       issue.description,
-      issue.evidence ? `**Evidence:** ${issue.evidence}` : null,
-      issue.suggestion ? `**Suggestion:** ${issue.suggestion}` : null,
+      ...voiceIssueEvidenceLines(issue),
       issue.severity ? `**Severity:** ${issue.severity}` : null,
     ].filter(Boolean).join("\n\n"),
   }
@@ -28,7 +95,9 @@ export function buildVoiceReviewNote(options: {
   chapterTitle?: string | null
   overallVerdict: string
   charactersReviewed: string[]
-  issues: Array<Pick<VoiceConsistencyIssue, "character_name" | "title" | "description" | "severity" | "evidence" | "suggestion">>
+  issues: VoiceNoteIssue[]
+  suppressedFindings?: VoiceNoteIssue[]
+  reviewStatus?: VoiceConsistencyResponse["review"]["status"]
   matches: Array<Pick<VoiceConsistencyMatch, "character_name" | "match_score" | "strongest_signals" | "closest_other_character" | "closest_other_score">>
 }) {
   const heading = typeof options.chapterNumber === "number"
@@ -61,11 +130,23 @@ export function buildVoiceReviewNote(options: {
     for (const issue of options.issues) {
       lines.push(`- ${issue.character_name}: ${issue.title} (${issue.severity})`)
       lines.push(`  ${issue.description}`)
-      if (issue.evidence) lines.push(`  Evidence: ${issue.evidence}`)
-      if (issue.suggestion) lines.push(`  Suggestion: ${issue.suggestion}`)
+      lines.push(...voiceIssueEvidenceLines(issue).map((line) => `  ${line}`))
     }
   } else {
-    lines.push("No voice issues were flagged in this review.")
+    lines.push(options.suppressedFindings?.length
+      ? "No new unresolved voice findings; recorded decisions are listed below."
+      : options.reviewStatus === "partial_evidence" || options.reviewStatus === "insufficient_evidence"
+        ? "No complete voice verdict was made; review the limitations before drawing a conclusion."
+        : "No supported character voice issues were found in the reviewed passage.")
+  }
+
+  if (options.suppressedFindings?.length) {
+    lines.push("**Previously reviewed findings**")
+    for (const issue of options.suppressedFindings) {
+      lines.push(`- ${issue.character_name}: ${issue.title} (${issue.severity})`)
+      lines.push(`  ${issue.description}`)
+      lines.push(...voiceIssueEvidenceLines(issue).map((line) => `  ${line}`))
+    }
   }
 
   return {
@@ -79,7 +160,9 @@ export function buildVoiceReviewSceneDraft(options: {
   chapterTitle?: string | null
   overallVerdict: string
   sourceText: string
-  issues: Array<Pick<VoiceConsistencyIssue, "character_name" | "title" | "description" | "severity" | "suggestion">>
+  issues: VoiceNoteIssue[]
+  suppressedFindings?: VoiceNoteIssue[]
+  reviewStatus?: VoiceConsistencyResponse["review"]["status"]
   existingPaths: string[]
 }) {
   const chapterLabel = typeof options.chapterNumber === "number" ? `Chapter ${options.chapterNumber}` : "Voice Review"
@@ -98,10 +181,17 @@ export function buildVoiceReviewSceneDraft(options: {
     "Source passage:",
     options.sourceText.trim(),
     "",
-    options.issues.length ? "Detected issues:" : "Detected issues: none",
-    ...options.issues.map((issue) =>
-      `- ${issue.character_name}: ${issue.title} (${issue.severity})${issue.suggestion ? ` - ${issue.suggestion}` : ""}`
-    ),
+    options.issues.length ? "Unresolved findings:" : options.suppressedFindings?.length ? "Unresolved findings: none; recorded decisions follow." : options.reviewStatus === "partial_evidence" || options.reviewStatus === "insufficient_evidence" ? "No complete voice verdict; review the limitations before drawing a conclusion." : "No supported findings in the reviewed passage.",
+    ...options.issues.flatMap((issue) => [
+      `- ${issue.character_name}: ${issue.title} (${issue.severity})`,
+      `  ${issue.description}`,
+      ...voiceIssueEvidenceLines(issue).map((line) => `  ${line}`),
+    ]),
+    ...(options.suppressedFindings?.length ? ["", "Previously reviewed findings:", ...options.suppressedFindings.flatMap((issue) => [
+      `- ${issue.character_name}: ${issue.title} (${issue.severity})`,
+      `  ${issue.description}`,
+      ...voiceIssueEvidenceLines(issue).map((line) => `  ${line}`),
+    ])] : []),
   ].join("\n")
 
   return {

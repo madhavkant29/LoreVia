@@ -114,6 +114,7 @@ export interface AdvisorSuggestion {
   severity: SuggestionSeverity
   title: string
   description: string
+  evidence_excerpt?: string | null
   chapter_ref: number | null
   action_label: string
   ask_prompt: string
@@ -133,6 +134,9 @@ export interface AdvisorScanMeta {
   scan_basis: string[]
   data_gaps: string[]
   audit_summary?: string | null
+  audit_failure_category?: "invalid_ai_response" | "ai_unavailable" | "database_unavailable" | "not_configured" | "capacity_busy" | "budget_exhausted" | null
+  audit_groups_total?: number
+  audit_groups_completed?: number
 }
 
 export interface AdvisorSuggestionsResponse {
@@ -155,6 +159,7 @@ export interface AdvisorSuggestionJobStatusResponse {
   job_id: string
   status: "queued" | "running" | "complete" | "failed"
   result: AdvisorSuggestionsResponse | null
+  progress?: { completed: number; total: number } | null
   error: string | null
 }
 
@@ -242,17 +247,26 @@ export type ContinuityReportFormat = "pdf" | "md"
 
 export interface VoiceConsistencyIssue {
   character_name: string
+  finding_key?: string
+  decision?: VoiceReviewDecision
+  classification?: "confirmed" | "possible" | "justified_variation"
   severity: "critical" | "moderate" | "minor"
   title: string
   description: string
-  evidence: string
-  suggestion: string
+  submitted_excerpt?: string
+  baseline_excerpt?: string
+  baseline_chapter_number?: number
+  confidence?: number
+  revision_direction?: string
+  evidence?: string
+  suggestion?: string
   intentionality_prompt: string
 }
 
 export interface VoiceConsistencyReview {
   issues: VoiceConsistencyIssue[]
   overall_verdict: string
+  status?: "complete" | "partial_evidence" | "insufficient_evidence"
 }
 
 export interface VoiceConsistencyMatch {
@@ -265,12 +279,64 @@ export interface VoiceConsistencyMatch {
   closest_other_score?: number | null
 }
 
+export interface VoiceSourceCoverage {
+  processed_ranges: Array<{ start: number; end: number }>
+  unattributed_ranges?: Array<{ start: number; end: number }>
+  compared_ranges?: Array<{ start: number; end: number }>
+  not_compared_ranges?: Array<{ start: number; end: number }>
+  unattributed_quoted_ranges?: Array<{ start: number; end: number }>
+  total_characters: number
+}
+
 export interface VoiceConsistencyResponse {
   review: VoiceConsistencyReview
+  voice_mode?: "dialogue" | "first_person_narration"
   retrieved_passages: EditorialReviewPassage[]
   characters_reviewed: string[]
+  characters_detected?: string[]
   character_matches?: VoiceConsistencyMatch[]
+  baseline_evidence?: Array<{ character_name: string; sample_count: number; word_count: number; chapters: number[]; attribution_confidence: "explicit" | "contextual" | "unattributed" | "user_selected_narrator"; baseline_attribution_confidence?: "explicit" | "contextual" | "unattributed" | "user_selected_narrator" | "unverified_narrator" }>
   warnings: string[]
+  coverage?: VoiceSourceCoverage
+  coverage_by_character?: Array<VoiceSourceCoverage & { character_name: string }>
+  suppressed_findings?: VoiceConsistencyIssue[]
+}
+
+export interface VoiceChapterReviewResult {
+  status: "complete" | "partial_evidence" | "insufficient_evidence"
+  voices: Array<{
+    character_id: string
+    character_name: string
+    voice_mode: "dialogue" | "first_person_narration"
+    status: "complete" | "partial_evidence" | "insufficient_evidence"
+    issues: VoiceConsistencyIssue[]
+    warnings: string[]
+    coverage: VoiceSourceCoverage
+  }>
+  coverage: VoiceSourceCoverage
+  unreviewed_ranges: Array<{ start: number; end: number }>
+  work_total: number
+  work_completed: number
+  narrator_identified: boolean
+  narration_present?: boolean
+}
+
+export interface VoiceChapterReviewJob {
+  job_id: string
+  status: "queued" | "running" | "paused" | "complete" | "failed"
+  chapter_number: number
+  progress: { completed: number; total: number }
+  next_resume_at: string | null
+  result: VoiceChapterReviewResult | null
+  error: string | null
+}
+
+export type VoiceReviewDecision = "intentional" | "incorrect" | "resolved"
+
+export interface VoiceReviewDecisionResponse {
+  finding_key: string
+  decision: VoiceReviewDecision
+  note: string | null
 }
 
 export type BetaReaderScope = "passage" | "chapter" | "chapter_range" | "full_book"

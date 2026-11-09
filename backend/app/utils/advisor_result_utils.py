@@ -262,7 +262,33 @@ def normalize_prose_tighten_result(raw: str, original_text: str) -> dict:
     }
 
 
-def normalize_proactive_scan_result(raw: str) -> dict:
+PROACTIVE_SUGGESTION_SEVERITIES = {"warning", "direction", "opportunity", "info"}
+PROACTIVE_SUGGESTION_TYPES = {
+    "trait_contradiction",
+    "dropped_thread",
+    "character_absent",
+    "arc_opportunity",
+    "foreshadowing_opportunity",
+    "unresolved_clue",
+    "future_direction",
+    "manuscript_checkpoint",
+    "editorial_focus",
+    "event_conflict",
+    "relationship_flip",
+    "location_conflict",
+    "object_continuity",
+    "world_rule_conflict",
+    "role_drift",
+}
+
+
+def normalize_proactive_scan_result(
+    raw: str,
+    *,
+    strict: bool = False,
+    source_blocks: list[str] | None = None,
+    allow_partial: bool = False,
+) -> dict:
     fallback = {
         "findings": [],
         "overall_note": "Proactive continuity scan could not be parsed.",
@@ -270,28 +296,109 @@ def normalize_proactive_scan_result(raw: str) -> dict:
     try:
         parsed = json.loads(raw)
     except json.JSONDecodeError:
+        if strict:
+            raise ValueError("advisor_scan_invalid_json") from None
         fallback["overall_note"] = raw[:400] or fallback["overall_note"]
         return fallback
 
+    if strict and (
+        not isinstance(parsed, dict)
+        or not isinstance(parsed.get("findings"), list)
+        or not isinstance(parsed.get("overall_note"), str)
+        or not parsed["overall_note"].strip()
+    ):
+        raise ValueError("advisor_scan_invalid_shape")
+
+    if not isinstance(parsed, dict):
+        return fallback
+
     findings: list[dict[str, Any]] = []
+    rejected_reason: str | None = None
     for item in parsed.get("findings") or []:
         if not isinstance(item, dict):
+            if strict and not allow_partial:
+                raise ValueError("advisor_scan_invalid_findings")
+            rejected_reason = "advisor_scan_invalid_findings"
             continue
         title = " ".join(str(item.get("title") or "").split()).strip()
         description = " ".join(str(item.get("description") or "").split()).strip()
         action_label = " ".join(str(item.get("action_label") or "").split()).strip()
         ask_prompt = " ".join(str(item.get("ask_prompt") or "").split()).strip()
         if not title or not description or not action_label or not ask_prompt:
+            if strict and not allow_partial:
+                raise ValueError("advisor_scan_invalid_findings")
+            rejected_reason = "advisor_scan_invalid_findings"
+            continue
+        severity = str(item.get("severity") or "info").strip().lower()
+        finding_type = str(item.get("type") or "future_direction").strip().lower()
+        if (
+            severity not in PROACTIVE_SUGGESTION_SEVERITIES
+            or finding_type not in PROACTIVE_SUGGESTION_TYPES
+        ):
+            if strict and not allow_partial:
+                raise ValueError("advisor_scan_invalid_labels")
+            rejected_reason = "advisor_scan_invalid_labels"
             continue
         chapter_ref = item.get("chapter_ref")
+        evidence_excerpt = str(item.get("evidence_excerpt") or "").strip()
+        matching_blocks = [
+            block for block in source_blocks or [] if evidence_excerpt and evidence_excerpt in block
+        ]
+        if (
+            strict
+            and source_blocks is not None
+            and (
+                not evidence_excerpt
+                or re.fullmatch(
+                    r"(?:chapter|ch\.?)\s*\d+(?:\s*\([^)]*\))?:?",
+                    evidence_excerpt,
+                    flags=re.IGNORECASE,
+                )
+                or not matching_blocks
+            )
+        ):
+            if not allow_partial:
+                raise ValueError("advisor_scan_unsupported_evidence")
+            rejected_reason = "advisor_scan_unsupported_evidence"
+            continue
+        if strict and source_blocks is not None:
+            source_chapters: set[int] = set()
+            has_unanchored_source = False
+            for block in matching_blocks:
+                chapter_match = (
+                    re.match(r"Chapter\s+(\d+)\b", block, flags=re.IGNORECASE)
+                    or re.search(r"\bintroduced\s+ch\.(\d+)\b", block, flags=re.IGNORECASE)
+                    or re.search(r"\bat\s+chapter\s+(\d+)\b", block, flags=re.IGNORECASE)
+                )
+                if chapter_match:
+                    source_chapters.add(int(chapter_match.group(1)))
+                else:
+                    has_unanchored_source = True
+            valid_chapter = (
+                isinstance(chapter_ref, int)
+                and not isinstance(chapter_ref, bool)
+                and chapter_ref > 0
+            )
+            if valid_chapter and chapter_ref not in source_chapters:
+                if not has_unanchored_source:
+                    if not allow_partial:
+                        raise ValueError("advisor_scan_unsupported_chapter")
+                    rejected_reason = "advisor_scan_unsupported_chapter"
+                    continue
+                chapter_ref = None
+            elif not valid_chapter:
+                chapter_ref = next(iter(source_chapters)) if len(source_chapters) == 1 else None
         findings.append(
             {
-                "severity": str(item.get("severity") or "info"),
-                "type": str(item.get("type") or "future_direction"),
+                "severity": severity,
+                "type": finding_type,
                 "title": title,
                 "description": description,
+                **({"evidence_excerpt": evidence_excerpt} if evidence_excerpt else {}),
                 "chapter_ref": chapter_ref
-                if isinstance(chapter_ref, int) and chapter_ref > 0
+                if isinstance(chapter_ref, int)
+                and not isinstance(chapter_ref, bool)
+                and chapter_ref > 0
                 else None,
                 "action_label": action_label,
                 "ask_prompt": ask_prompt,
@@ -301,7 +408,15 @@ def normalize_proactive_scan_result(raw: str) -> dict:
     overall_note = (
         " ".join(str(parsed.get("overall_note") or "").split()).strip() or fallback["overall_note"]
     )
-    return {"findings": findings[:4], "overall_note": overall_note}
+    if strict and parsed["findings"] and not findings:
+        raise ValueError(rejected_reason or "advisor_scan_invalid_findings")
+    if strict and rejected_reason:
+        return {
+            "findings": findings,
+            "overall_note": "Some checks had invalid labels or lacked verifiable evidence and were omitted.",
+            "partial": True,
+        }
+    return {"findings": findings, "overall_note": overall_note}
 
 
 def normalize_series_continuity_result(raw: str) -> dict:

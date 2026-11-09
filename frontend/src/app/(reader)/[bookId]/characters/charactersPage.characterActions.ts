@@ -6,7 +6,7 @@ import type { Character } from "@/types/character"
 import type { PromptDialogConfig, ConfirmDialogConfig } from "@/types/ux"
 import {
   buildRelationshipDraft,
-  isProtectedCharacter,
+  hasImplicitRepairProtection,
   parsePartitionTargets,
   type CreateDraft,
   type EditDraft,
@@ -292,12 +292,12 @@ export function useCharacterMutationActions({
   }
 
   async function handleToggleProtectedFromRepair() {
-    if (!selectedCharacter) return
+    if (!selectedCharacter || hasImplicitRepairProtection(selectedCharacter)) return
     setReviewNoteBusy(true)
     setActionError(null)
     try {
       const updated = await booksApi.updateCharacter(bookId, selectedCharacter.id, {
-        protectedFromRepair: !isProtectedCharacter(selectedCharacter),
+        protectedFromRepair: !selectedCharacter.analysis_metadata?.protected_from_repair,
         reviewNote: reviewNoteDraft.trim() || null,
       })
       setChars((current) => current.map((item) => item.id === updated.id ? updated : item))

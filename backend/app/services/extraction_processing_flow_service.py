@@ -14,6 +14,7 @@ from app.parsers.chunker import count_tokens
 from app.services.character_identity.resolver import reconcile_pending_first_name_alias_candidates
 from app.services.editor_project_service import complete_rebuild_if_ready
 from app.services.email_service import send_processing_complete_with_stats
+from app.utils.characters.text import split_text_for_token_budget
 from app.utils.ingestion_utils import (
     get_processing_started_at,
     processing_state_for_completed_extraction,
@@ -151,13 +152,18 @@ def _group_chunks_for_extraction(chunks: list[str]) -> list[list[str]]:
     current_batch: list[str] = []
 
     for chunk in chunks:
-        candidate = "\n\n".join([*current_batch, chunk])
-        exceeds_token_budget = count_tokens(candidate) > settings.EXTRACTION_BATCH_MAX_TOKENS
-        exceeds_chunk_budget = len(current_batch) >= settings.EXTRACTION_BATCH_MAX_CHUNKS
-        if current_batch and (exceeds_token_budget or exceeds_chunk_budget):
-            batches.append(current_batch)
-            current_batch = []
-        current_batch.append(chunk)
+        for passage in split_text_for_token_budget(
+            chunk,
+            max_tokens=settings.EXTRACTION_BATCH_MAX_TOKENS,
+            count_tokens=count_tokens,
+        ):
+            candidate = "\n\n".join([*current_batch, passage])
+            exceeds_token_budget = count_tokens(candidate) > settings.EXTRACTION_BATCH_MAX_TOKENS
+            exceeds_chunk_budget = len(current_batch) >= settings.EXTRACTION_BATCH_MAX_CHUNKS
+            if current_batch and (exceeds_token_budget or exceeds_chunk_budget):
+                batches.append(current_batch)
+                current_batch = []
+            current_batch.append(passage)
 
     if current_batch:
         batches.append(current_batch)

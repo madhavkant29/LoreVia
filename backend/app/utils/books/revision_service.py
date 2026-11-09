@@ -50,9 +50,9 @@ from app.utils.books.consistency_reports import list_chapter_consistency_reports
 from app.utils.books.revision_external_signals import build_revision_external_signals
 from app.utils.intelligence_utils import (
     compute_voice_metrics,
-    extract_dialogue_samples_by_character,
     score_voice_match,
 )
+from app.utils.voice_profile_samples import explicit_dialogue_by_character
 
 if TYPE_CHECKING:
     pass
@@ -541,7 +541,9 @@ async def _build_revision_intelligence_payload(db: AsyncSession, book: Book) -> 
         chapter_text = chapter_texts.get(chapter.number)
         if chapter_text is None:
             chapter_text = (await manuscript.load_chapter_texts([chapter])).get(chapter.number, "")
-        attributed_dialogue = extract_dialogue_samples_by_character(chapter_text, character_rows)
+        attributed_dialogue = explicit_dialogue_by_character(
+            chapter_text, character_rows, chapter_number=chapter.number
+        )
         for character in major_characters[:3]:
             profile = profiles_by_character_id.get(str(character.id))
             if profile is None:

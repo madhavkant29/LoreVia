@@ -9,6 +9,24 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 from app.core.security import create_access_token
 from app.models.operations import TaskExecution
 
+_STORED_TEST_CHAPTERS: dict[tuple[uuid.UUID, int], str] = {}
+
+
+@pytest.fixture(autouse=True)
+def _mock_reprocess_stored_chapters(monkeypatch):
+    _STORED_TEST_CHAPTERS.clear()
+
+    async def load_saved_source(book_id, chapter_number, **_kwargs):
+        text = _STORED_TEST_CHAPTERS.get((book_id, chapter_number))
+        return {"text": text, "html": None} if text else None
+
+    monkeypatch.setattr(
+        "app.services.manuscript_reprocess_service.load_processing_chapter_payload",
+        load_saved_source,
+    )
+    yield
+    _STORED_TEST_CHAPTERS.clear()
+
 
 @pytest.fixture(autouse=True)
 async def _isolate_durable_dispatch_capacity(db):
@@ -69,6 +87,7 @@ async def _add_chapter(db, book_id: uuid.UUID, number: int = 1, text: str = "Som
     )
     db.add(chapter)
     await db.commit()
+    _STORED_TEST_CHAPTERS[(book_id, number)] = text
     return chapter
 
 
@@ -89,6 +108,15 @@ async def _chapter_executions(db, book_id: uuid.UUID) -> list[TaskExecution]:
     )
 
 
+async def _ready_reprocess_fingerprint(client, url: str, headers: dict[str, str]) -> str:
+    preview = await client.get(f"{url}/preflight", headers=headers)
+    assert preview.status_code == 200
+    payload = preview.json()
+    assert payload["ready"] is True
+    assert payload["preview_fingerprint"]
+    return payload["preview_fingerprint"]
+
+
 @pytest.mark.asyncio
 async def test_reprocess_requires_confirmation(client, db, monkeypatch):
     headers, user_id = await _register_author(
@@ -105,6 +133,429 @@ async def test_reprocess_requires_confirmation(client, db, monkeypatch):
 
     assert response.status_code == 400
     assert "confirm" in response.json()["detail"].lower()
+
+
+@pytest.mark.asyncio
+async def test_reprocess_preflight_checks_stored_sources_and_rejects_stale_snapshot(
+    client, db, monkeypatch
+):
+    headers, user_id = await _register_author(
+        client, db, f"repr-preview-{uuid.uuid4().hex[:8]}@lorevia.app", monkeypatch
+    )
+    from app.models.book import Book
+    from app.models.character import (
+        Character,
+        CharacterCandidate,
+        CharacterIdentityConstraint,
+        CharacterRelationshipCandidate,
+        VoiceReviewDecision,
+    )
+    from app.models.user import ProcessingUsageEvent
+
+    book = Book(
+        user_id=user_id,
+        title="Saved source preflight",
+        format="txt",
+        s3_key="saved-source.txt",
+        status="ready",
+    )
+    db.add(book)
+    await db.commit()
+    await _add_chapter(db, book.id, 1, "The first stored chapter has four words.")
+    db.add_all(
+        [
+            Character(
+                book_id=book.id,
+                name="Reviewed Mara",
+                first_chapter=1,
+                analysis_metadata={"user_reviewed": True},
+            ),
+            Character(book_id=book.id, name="Generated Milo", first_chapter=1),
+        ]
+    )
+    await db.commit()
+    stored_text = "The first stored chapter has four words."
+
+    async def fake_load(*_args, **_kwargs):
+        return {"text": stored_text}
+
+    monkeypatch.setattr(
+        "app.services.manuscript_reprocess_service.load_processing_chapter_payload", fake_load
+    )
+    url = f"/api/v1/books/{book.id}/manuscript/reprocess"
+    preview = await client.get(f"{url}/preflight", headers=headers)
+    assert preview.status_code == 200
+    snapshot = preview.json()
+    assert snapshot["ready"] is True
+    assert snapshot["chapters_total"] == 1
+    assert snapshot["protected_characters"] == 1
+    assert snapshot["replaceable_characters"] == 1
+    assert snapshot["missing_source_chapters"] == []
+    assert snapshot["preview_fingerprint"]
+    assert "The first stored chapter" not in str(snapshot)
+    assert (
+        await db.scalar(
+            select(func.count())
+            .select_from(ProcessingUsageEvent)
+            .where(ProcessingUsageEvent.book_id == book.id)
+        )
+    ) == 0
+
+    without_preview = await client.post(
+        url, headers=headers, json={"confirm_processing_words": True}
+    )
+    assert without_preview.status_code == 409
+    assert "preview" in without_preview.json()["detail"].lower()
+    assert await _chapter_executions(db, book.id) == []
+
+    review_preview = (await client.get(f"{url}/preflight", headers=headers)).json()
+    reviewed_character = await db.scalar(
+        select(Character).where(Character.book_id == book.id, Character.name == "Reviewed Mara")
+    )
+    reviewed_character.analysis_metadata = {
+        **reviewed_character.analysis_metadata,
+        "review_note": "Keep the author's correction to Mara's profile.",
+    }
+    await db.commit()
+    stale_review = await client.post(
+        url,
+        headers=headers,
+        json={
+            "confirm_processing_words": True,
+            "preview_fingerprint": review_preview["preview_fingerprint"],
+        },
+    )
+    assert stale_review.status_code == 409
+
+    decision_preview = (await client.get(f"{url}/preflight", headers=headers)).json()
+    db.add(
+        VoiceReviewDecision(
+            book_id=book.id,
+            user_id=user_id,
+            finding_key="a" * 64,
+            decision="intentional",
+            note="Deliberate change in this scene.",
+        )
+    )
+    await db.commit()
+    stale_decision = await client.post(
+        url,
+        headers=headers,
+        json={
+            "confirm_processing_words": True,
+            "preview_fingerprint": decision_preview["preview_fingerprint"],
+        },
+    )
+    assert stale_decision.status_code == 409
+
+    candidate_preview = (await client.get(f"{url}/preflight", headers=headers)).json()
+    candidate = CharacterCandidate(
+        book_id=book.id,
+        chapter_number=1,
+        raw_name="Mara",
+        proposed_name="Mara",
+        normalized_name="mara",
+        status="pending",
+    )
+    db.add(candidate)
+    await db.commit()
+    stale_candidate = await client.post(
+        url,
+        headers=headers,
+        json={
+            "confirm_processing_words": True,
+            "preview_fingerprint": candidate_preview["preview_fingerprint"],
+        },
+    )
+    assert stale_candidate.status_code == 409
+    candidate_update_preview = (await client.get(f"{url}/preflight", headers=headers)).json()
+    candidate.status = "rejected"
+    candidate.reason_codes = ["author_rejected_candidate"]
+    await db.commit()
+    stale_candidate_update = await client.post(
+        url,
+        headers=headers,
+        json={
+            "confirm_processing_words": True,
+            "preview_fingerprint": candidate_update_preview["preview_fingerprint"],
+        },
+    )
+    assert stale_candidate_update.status_code == 409
+
+    relationship_preview = (await client.get(f"{url}/preflight", headers=headers)).json()
+    relationship_candidate = CharacterRelationshipCandidate(
+        book_id=book.id,
+        chapter_number=1,
+        raw_character_a="Mara",
+        raw_character_b="Milo",
+        status="pending",
+    )
+    db.add(relationship_candidate)
+    await db.commit()
+    stale_relationship = await client.post(
+        url,
+        headers=headers,
+        json={
+            "confirm_processing_words": True,
+            "preview_fingerprint": relationship_preview["preview_fingerprint"],
+        },
+    )
+    assert stale_relationship.status_code == 409
+    relationship_update_preview = (await client.get(f"{url}/preflight", headers=headers)).json()
+    relationship_candidate.matched_character_a_id = reviewed_character.id
+    relationship_candidate.reason_codes = ["author_attached_endpoint"]
+    await db.commit()
+    stale_relationship_update = await client.post(
+        url,
+        headers=headers,
+        json={
+            "confirm_processing_words": True,
+            "preview_fingerprint": relationship_update_preview["preview_fingerprint"],
+        },
+    )
+    assert stale_relationship_update.status_code == 409
+
+    generated_character = await db.scalar(
+        select(Character).where(Character.book_id == book.id, Character.name == "Generated Milo")
+    )
+    generated_character.analysis_metadata = {"user_reviewed": True}
+    await db.commit()
+    identity_preview = (await client.get(f"{url}/preflight", headers=headers)).json()
+    db.add(
+        CharacterIdentityConstraint(
+            book_id=book.id,
+            left_character_id=reviewed_character.id,
+            right_character_id=generated_character.id,
+            left_text="Mara",
+            right_text="Milo",
+            constraint_type="not_same_character",
+            source="manual",
+        )
+    )
+    await db.commit()
+    stale_identity = await client.post(
+        url,
+        headers=headers,
+        json={
+            "confirm_processing_words": True,
+            "preview_fingerprint": identity_preview["preview_fingerprint"],
+        },
+    )
+    assert stale_identity.status_code == 409
+    assert (
+        await db.scalar(
+            select(func.count())
+            .select_from(ProcessingUsageEvent)
+            .where(ProcessingUsageEvent.book_id == book.id)
+        )
+    ) == 0
+
+    stored_text = "The stored chapter changed after the preview was loaded."
+    stale = await client.post(
+        url,
+        headers=headers,
+        json={
+            "confirm_processing_words": True,
+            "preview_fingerprint": snapshot["preview_fingerprint"],
+        },
+    )
+    assert stale.status_code == 409
+    assert "Refresh the preflight" in stale.json()["detail"]
+    assert (
+        await db.scalar(
+            select(func.count())
+            .select_from(ProcessingUsageEvent)
+            .where(ProcessingUsageEvent.book_id == book.id)
+        )
+    ) == 0
+
+
+@pytest.mark.asyncio
+async def test_reprocess_preflight_blocks_missing_stored_source(client, db, monkeypatch):
+    headers, user_id = await _register_author(
+        client, db, f"repr-missing-{uuid.uuid4().hex[:8]}@lorevia.app", monkeypatch
+    )
+    from app.models.book import Book
+    from app.models.user import ProcessingUsageEvent
+
+    book = Book(
+        user_id=user_id,
+        title="Missing source",
+        format="txt",
+        s3_key="missing-source.txt",
+        status="ready",
+    )
+    db.add(book)
+    await db.commit()
+    await _add_chapter(db, book.id, 1, "Saved chapter text.")
+
+    async def missing_load(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr(
+        "app.services.manuscript_reprocess_service.load_processing_chapter_payload",
+        missing_load,
+    )
+    preview = await client.get(
+        f"/api/v1/books/{book.id}/manuscript/reprocess/preflight", headers=headers
+    )
+    assert preview.status_code == 200
+    assert preview.json()["ready"] is False
+    assert preview.json()["missing_source_chapters"] == [1]
+    assert preview.json()["preview_fingerprint"] is None
+
+    start = await client.post(
+        f"/api/v1/books/{book.id}/manuscript/reprocess",
+        headers=headers,
+        json={"confirm_processing_words": True},
+    )
+    assert start.status_code == 409
+    assert "preflight" in start.json()["detail"].lower()
+    assert (
+        await db.scalar(
+            select(func.count())
+            .select_from(ProcessingUsageEvent)
+            .where(ProcessingUsageEvent.book_id == book.id)
+        )
+        == 0
+    )
+    assert await _chapter_executions(db, book.id) == []
+
+
+@pytest.mark.asyncio
+async def test_reprocess_source_loading_runs_outside_database_transaction(client, db, monkeypatch):
+    from app.models.book import Book
+    from app.models.user import User
+    from app.schemas.books import ManuscriptReprocessBody
+    from app.services.manuscript_reprocess_service import (
+        preview_manual_manuscript_reprocess,
+        start_manual_manuscript_reprocess,
+    )
+
+    headers, user_id = await _register_author(
+        client, db, f"repr-no-open-txn-{uuid.uuid4().hex[:8]}@lorevia.app", monkeypatch
+    )
+    book_id = uuid.UUID(await _create_editor_project(client, headers))
+    await _add_chapter(db, book_id)
+    user = await db.get(User, user_id)
+    observed: list[bool] = []
+
+    async def load_without_transaction(*_args, **_kwargs):
+        observed.append(db.in_transaction())
+        return None
+
+    monkeypatch.setattr(
+        "app.services.manuscript_reprocess_service.load_processing_chapter_payload",
+        load_without_transaction,
+    )
+    preview = await preview_manual_manuscript_reprocess(db=db, current_user=user, book_id=book_id)
+    assert preview.ready is False
+    with pytest.raises(HTTPException) as exc:
+        await start_manual_manuscript_reprocess(
+            db=db,
+            current_user=user,
+            book_id=book_id,
+            body=ManuscriptReprocessBody(confirm_processing_words=True),
+        )
+    assert exc.value.status_code == 409
+    assert observed == [False, False]
+    assert await db.get(Book, book_id) is not None
+
+
+@pytest.mark.asyncio
+async def test_reprocess_rejects_chapter_change_during_source_loading(client, db, monkeypatch):
+    from app.models.book import Book, Chapter
+    from app.models.user import ProcessingUsageEvent
+
+    headers, user_id = await _register_author(
+        client, db, f"repr-raced-source-{uuid.uuid4().hex[:8]}@lorevia.app", monkeypatch
+    )
+    book = Book(
+        user_id=user_id,
+        title="Source race",
+        format="txt",
+        s3_key="source-race.txt",
+        status="ready",
+    )
+    db.add(book)
+    await db.commit()
+    await _add_chapter(db, book.id)
+    url = f"/api/v1/books/{book.id}/manuscript/reprocess"
+    fingerprint = await _ready_reprocess_fingerprint(client, url, headers)
+    sessions = async_sessionmaker(db.bind, expire_on_commit=False)
+
+    async def mutate_during_load(*_args, **_kwargs):
+        async with sessions() as session:
+            await session.execute(
+                update(Chapter)
+                .where(Chapter.book_id == book.id, Chapter.number == 1)
+                .values(title="Edited while loading")
+            )
+            await session.commit()
+        return {"text": _STORED_TEST_CHAPTERS[(book.id, 1)], "html": None}
+
+    monkeypatch.setattr(
+        "app.services.manuscript_reprocess_service.load_processing_chapter_payload",
+        mutate_during_load,
+    )
+    response = await client.post(
+        url,
+        headers=headers,
+        json={"confirm_processing_words": True, "preview_fingerprint": fingerprint},
+    )
+    assert response.status_code == 409
+    assert "changed" in response.json()["detail"].lower()
+    assert await _chapter_executions(db, book.id) == []
+    assert (
+        await db.scalar(
+            select(func.count())
+            .select_from(ProcessingUsageEvent)
+            .where(ProcessingUsageEvent.book_id == book.id)
+        )
+    ) == 0
+
+
+@pytest.mark.asyncio
+async def test_single_chapter_reprocess_rejects_source_change_before_reservation(
+    client, db, monkeypatch
+):
+    from app.models.book import Chapter
+    from app.models.user import ProcessingUsageEvent
+
+    headers, user_id = await _register_author(
+        client, db, f"repr-chapter-race-{uuid.uuid4().hex[:8]}@lorevia.app", monkeypatch
+    )
+    book_id = uuid.UUID(await _create_editor_project(client, headers))
+    await _add_chapter(db, book_id)
+    sessions = async_sessionmaker(db.bind, expire_on_commit=False)
+
+    async def mutate_during_load(*_args, **_kwargs):
+        async with sessions() as session:
+            await session.execute(
+                update(Chapter)
+                .where(Chapter.book_id == book_id, Chapter.number == 1)
+                .values(title="Edited before chapter reprocess")
+            )
+            await session.commit()
+        return {"text": _STORED_TEST_CHAPTERS[(book_id, 1)], "html": None}
+
+    monkeypatch.setattr(
+        "app.services.manuscript_reprocess_service.load_processing_chapter_payload",
+        mutate_during_load,
+    )
+    response = await client.post(
+        f"/api/v1/books/{book_id}/manuscript/chapters/1/reprocess", headers=headers
+    )
+    assert response.status_code == 409
+    assert "changed" in response.json()["detail"].lower()
+    assert await _chapter_executions(db, book_id) == []
+    assert (
+        await db.scalar(
+            select(func.count())
+            .select_from(ProcessingUsageEvent)
+            .where(ProcessingUsageEvent.book_id == book_id)
+        )
+    ) == 0
 
 
 @pytest.mark.asyncio
@@ -140,10 +591,12 @@ async def test_reprocess_uploaded_manuscript_success(client, db, monkeypatch):
     await _add_chapter(db, book.id, 1, "Uploaded manuscript chapter content.")
     await _add_chapter(db, book.id, 2, "A second uploaded manuscript chapter.")
 
+    url = f"/api/v1/books/{book.id}/manuscript/reprocess"
+    fingerprint = await _ready_reprocess_fingerprint(client, url, headers)
     response = await client.post(
-        f"/api/v1/books/{book.id}/manuscript/reprocess",
+        url,
         headers=headers,
-        json={"confirm_upload_charge": True},
+        json={"confirm_upload_charge": True, "preview_fingerprint": fingerprint},
     )
 
     assert response.status_code == 200
@@ -228,10 +681,12 @@ async def test_successful_reprocess_consumes_exact_manuscript_words_once(client,
     await _add_chapter(db, book.id, 1, "one two three four")
     await _add_chapter(db, book.id, 2, "five six seven")
 
+    url = f"/api/v1/books/{book.id}/manuscript/reprocess"
+    fingerprint = await _ready_reprocess_fingerprint(client, url, headers)
     response = await client.post(
-        f"/api/v1/books/{book.id}/manuscript/reprocess",
+        url,
         headers=headers,
-        json={"confirm_processing_words": True},
+        json={"confirm_processing_words": True, "preview_fingerprint": fingerprint},
     )
 
     assert response.status_code == 200
@@ -319,17 +774,19 @@ async def test_reprocess_duplicate_run(client, db, monkeypatch):
 
     await _add_chapter(db, book_id)
 
+    url = f"/api/v1/books/{book_id}/manuscript/reprocess"
+    fingerprint = await _ready_reprocess_fingerprint(client, url, headers)
     response = await client.post(
-        f"/api/v1/books/{book_id}/manuscript/reprocess",
+        url,
         headers=headers,
-        json={"confirm_upload_charge": True},
+        json={"confirm_upload_charge": True, "preview_fingerprint": fingerprint},
     )
     assert response.status_code == 200
 
     response2 = await client.post(
-        f"/api/v1/books/{book_id}/manuscript/reprocess",
+        url,
         headers=headers,
-        json={"confirm_upload_charge": True},
+        json={"confirm_upload_charge": True, "preview_fingerprint": fingerprint},
     )
     assert response2.status_code == 409
 
@@ -340,6 +797,8 @@ async def test_concurrent_duplicate_reprocess_requests_reserve_only_one_run(db, 
     from app.models.user import ProcessingUsageEvent, User
     from app.schemas.books import ManuscriptReprocessBody
     from app.services.manuscript_reprocess_service import (
+        _build_manual_reprocess_preflight,
+        _load_manual_reprocess_state,
         start_manual_manuscript_reprocess,
     )
 
@@ -363,6 +822,11 @@ async def test_concurrent_duplicate_reprocess_requests_reserve_only_one_run(db, 
     await db.commit()
     await _add_chapter(db, book.id, 1, "one two three")
     await _add_chapter(db, book.id, 2, "four five")
+    state = await _load_manual_reprocess_state(db, book)
+    await db.commit()
+    preflight = await _build_manual_reprocess_preflight(book.id, state)
+    assert preflight.ready is True
+    assert preflight.preview_fingerprint
 
     def _fake_apply_async(*_args, **_kwargs):
         return type("Result", (), {"id": uuid.uuid4().hex})()
@@ -381,7 +845,10 @@ async def test_concurrent_duplicate_reprocess_requests_reserve_only_one_run(db, 
                     db=session,
                     current_user=local_user,
                     book_id=book.id,
-                    body=ManuscriptReprocessBody(confirm_processing_words=True),
+                    body=ManuscriptReprocessBody(
+                        confirm_processing_words=True,
+                        preview_fingerprint=preflight.preview_fingerprint,
+                    ),
                 )
                 return 200
             except HTTPException as exc:
@@ -446,10 +913,12 @@ async def test_reprocess_success(client, db, monkeypatch):
     await _add_chapter(db, book_id, 1, "First chapter content here.")
     await _add_chapter(db, book_id, 2, "Second chapter content too.")
 
+    url = f"/api/v1/books/{book_id}/manuscript/reprocess"
+    fingerprint = await _ready_reprocess_fingerprint(client, url, headers)
     response = await client.post(
-        f"/api/v1/books/{book_id}/manuscript/reprocess",
+        url,
         headers=headers,
-        json={"confirm_upload_charge": True},
+        json={"confirm_upload_charge": True, "preview_fingerprint": fingerprint},
     )
 
     assert response.status_code == 200
@@ -518,10 +987,12 @@ async def test_reprocess_charge_failure_invalidates_queued_rebuild(client, db, m
     await db.commit()
     await _add_chapter(db, book.id)
 
+    url = f"/api/v1/books/{book.id}/manuscript/reprocess"
+    fingerprint = await _ready_reprocess_fingerprint(client, url, headers)
     response = await client.post(
-        f"/api/v1/books/{book.id}/manuscript/reprocess",
+        url,
         headers=headers,
-        json={"confirm_upload_charge": True},
+        json={"confirm_upload_charge": True, "preview_fingerprint": fingerprint},
     )
 
     assert response.status_code == 503
@@ -647,10 +1118,12 @@ async def test_reprocess_rejects_when_upload_capacity_is_exhausted(client, db, m
         _reject_processing_allowance,
     )
 
+    url = f"/api/v1/books/{book.id}/manuscript/reprocess"
+    fingerprint = await _ready_reprocess_fingerprint(client, url, headers)
     response = await client.post(
-        f"/api/v1/books/{book.id}/manuscript/reprocess",
+        url,
         headers=headers,
-        json={"confirm_upload_charge": True},
+        json={"confirm_upload_charge": True, "preview_fingerprint": fingerprint},
     )
 
     assert response.status_code == 403
@@ -788,6 +1261,7 @@ async def test_manual_chapter_reprocess_queues_one_chapter_without_upload_charge
         },
     )
     assert import_response.status_code == 200
+    _STORED_TEST_CHAPTERS[(uuid.UUID(book_id), 1)] = "Chapter text that needs a targeted reprocess."
     await client.put(
         f"/api/v1/books/{book_id}/writer-workspace",
         headers=headers,

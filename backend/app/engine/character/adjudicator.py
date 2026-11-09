@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -412,6 +412,13 @@ def score_character_likeness(
     ):
         score += 5
         reasons.append("full_name_human_evidence")
+    if (
+        entity_type == ENTITY_PERSON
+        and mention_count >= 2
+        and _has_named_profile_claim_evidence(name, aliases, evidence)
+    ):
+        score += 15
+        reasons.append("cited_profile_person_evidence")
     if entity_type == ENTITY_JUNK:
         score -= 40
         reasons.append("junk_shape")
@@ -437,6 +444,41 @@ def score_character_likeness(
         reasons.append("article_phrase_without_proper_name")
 
     return max(-100, min(100, score)), reasons
+
+
+def _has_named_profile_claim_evidence(
+    name: str | None, aliases: Sequence[object] | None, evidence: Mapping[str, Any]
+) -> bool:
+    """Count a verified, named source quote as positive character evidence."""
+    claims = evidence.get("profile_claims")
+    if not isinstance(claims, Mapping):
+        return False
+    names = [str(value).strip() for value in [name, *(aliases or [])] if str(value).strip()]
+    if not names:
+        return False
+
+    def cited_quotes(value: object) -> Iterator[str]:
+        if not isinstance(value, Mapping):
+            return
+        if "quote" in value:
+            if (
+                isinstance(value.get("start"), int)
+                and isinstance(value.get("end"), int)
+                and value.get("source_batch_key")
+            ):
+                yield str(value.get("quote") or "")
+            return
+        for nested in value.values():
+            yield from cited_quotes(nested)
+
+    return any(
+        len(quote.split()) >= 5
+        and any(
+            re.search(rf"(?<!\w){re.escape(candidate)}(?!\w)", quote, re.IGNORECASE)
+            for candidate in names
+        )
+        for quote in cited_quotes(claims)
+    )
 
 
 def adjudication_status_for_score(

@@ -25,6 +25,7 @@ from app.schemas.books import (
     ManuscriptImportResult,
     ManuscriptReprocessBody,
     ManuscriptReprocessOut,
+    ManuscriptReprocessPreflightOut,
     ReadabilityMetricsOut,
     ReadabilityRequestBody,
 )
@@ -44,6 +45,7 @@ from app.services.manuscript_import_job_service import (
 )
 from app.services.manuscript_import_request_service import execute_manuscript_import_request
 from app.services.manuscript_reprocess_service import (
+    preview_manual_manuscript_reprocess,
     start_manual_chapter_reprocess,
     start_manual_manuscript_reprocess,
 )
@@ -409,6 +411,20 @@ async def manuscript_readability(
     require_author_access(current_user)
     _ = book
     return ReadabilityMetricsOut(**estimate_readability(body.text))
+
+
+@router.get(
+    "/{book_id}/manuscript/reprocess/preflight",
+    response_model=ManuscriptReprocessPreflightOut,
+)
+async def preview_manuscript_reprocess(
+    book_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return await preview_manual_manuscript_reprocess(
+        db=db, current_user=current_user, book_id=book_id
+    )
 
 
 @router.post("/{book_id}/manuscript/reprocess", response_model=ManuscriptReprocessOut)

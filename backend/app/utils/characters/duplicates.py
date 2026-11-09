@@ -276,7 +276,7 @@ async def refresh_character_duplicate_suggestions(
         )
         primary = ordered[0]
         for secondary in ordered[1:]:
-            if is_protected_character(secondary):
+            if is_protected_character(primary) or is_protected_character(secondary):
                 continue
             if await has_blocking_identity_constraint(
                 db,
@@ -326,6 +326,8 @@ async def refresh_character_duplicate_suggestions(
         target = sorted(full_matches, key=lambda item: int(item.mention_count or 0), reverse=True)[
             0
         ]
+        if is_protected_character(target):
+            continue
         if int(target.mention_count or 0) < int(alias_character.mention_count or 0):
             continue
         if await has_blocking_identity_constraint(

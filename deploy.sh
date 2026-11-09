@@ -143,6 +143,8 @@ if [[ "${ENABLE_DB_BACKUP:-1}" == "1" ]]; then
   pg_dump "${ALEMBIC_DATABASE_URL}" -F c -f "${BACKUP_DIR}/pre_deploy_$(date +%Y%m%d_%H%M%S).dump"
 fi
 
+SECURITY_REFRESH="$(date -u +%Y%m%dT%H%M%SZ)"
+export SECURITY_REFRESH
 ${COMPOSE} build --pull
 
 # One-time legacy cutoff cutover (see DEPLOY_AND_FREEZE.md).

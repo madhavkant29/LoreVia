@@ -1,9 +1,285 @@
 from __future__ import annotations
 
+import hashlib
+import re
 from collections.abc import Sequence
 from typing import Any
 
-from app.models.intelligence import CharacterRelationship, WorldElement
+from app.models.intelligence import CharacterRelationship, PlotThread, WorldElement
+
+
+def proactive_advisor_finding_id(finding: dict[str, Any]) -> str:
+    """Keep a supported check stable across evidence-group and wording changes."""
+    evidence = " ".join(str(finding.get("evidence_excerpt") or "").split()).casefold()
+    if not evidence:
+        raise ValueError("advisor_finding_missing_evidence")
+    finding_type = str(finding.get("type") or "").strip().casefold()
+    chapter = finding.get("chapter_ref")
+    chapter_key = str(chapter) if isinstance(chapter, int) and not isinstance(chapter, bool) else ""
+    identity = f"{finding_type}\x1f{chapter_key}\x1f{evidence}"
+    return f"proactive-{hashlib.sha256(identity.encode()).hexdigest()[:24]}"
+
+
+def advisor_clue_evidence(clues: object) -> list[str]:
+    """Keep the structured clue and payoff context from detailed summaries."""
+    if isinstance(clues, list):
+        values = clues
+    elif isinstance(clues, dict):
+        values = (
+            [clues]
+            if "clue" in clues
+            else [
+                {"clue": key, **(value if isinstance(value, dict) else {"why_it_matters": value})}
+                for key, value in clues.items()
+            ]
+        )
+    else:
+        return []
+    evidence: list[str] = []
+    for item in values:
+        if isinstance(item, str):
+            line = item.strip()
+        elif isinstance(item, dict):
+            if not isinstance(item.get("clue"), str) or not item["clue"].strip():
+                continue
+            line = " | ".join(
+                value.strip()
+                for field in ("clue", "foreshadows", "why_it_matters")
+                if isinstance(value := item.get(field), str) and value.strip()
+            )
+        else:
+            continue
+        if line:
+            evidence.append(line)
+    return evidence
+
+
+def build_advisor_chapter_evidence_blocks(
+    *,
+    chapter_number: int,
+    chapter_title: str | None,
+    content: str | None,
+    key_events: object,
+    clues: object = None,
+    max_chars: int = 850,
+    overlap: int = 100,
+) -> list[str]:
+    """Keep every summary detail in bounded blocks with a source chapter label."""
+    if max_chars < 1 or overlap < 0 or overlap >= max_chars:
+        raise ValueError("invalid_advisor_summary_section_size")
+    event_lines: list[str] = []
+    if isinstance(key_events, list):
+        for event in key_events:
+            if isinstance(event, str):
+                if event.strip():
+                    event_lines.append(event.strip())
+                continue
+            if not isinstance(event, dict):
+                continue
+            details = list(
+                dict.fromkeys(
+                    value
+                    for value in (
+                        str(event.get("event_title") or event.get("event") or "").strip(),
+                        str(event.get("description") or "").strip(),
+                        str(event.get("impact") or "").strip(),
+                    )
+                    if value
+                )
+            )
+            characters = event.get("involved_characters")
+            if isinstance(characters, list):
+                names = ", ".join(str(name).strip() for name in characters if str(name).strip())
+                if names:
+                    details.append(f"Involved: {names}")
+            facts = event.get("continuity_facts")
+            if isinstance(facts, list):
+                for fact in facts:
+                    if not isinstance(fact, dict):
+                        continue
+                    statement = " ".join(
+                        str(fact.get(field) or "").strip()
+                        for field in ("subject", "predicate", "value")
+                    ).strip()
+                    evidence = str(fact.get("evidence") or "").strip()
+                    if statement or evidence:
+                        details.append(
+                            "Continuity fact: "
+                            + statement
+                            + (f" (evidence: {evidence})" if evidence else "")
+                        )
+            if details:
+                event_lines.append(" | ".join(details))
+    summary = str(content or "").strip()
+    body = summary + ("\nKey events:\n" + "\n".join(event_lines) if event_lines else "")
+    clue_lines = advisor_clue_evidence(clues)
+    if clue_lines:
+        body += "\nClues:\n" + "\n".join(clue_lines)
+    if not body:
+        return []
+    prefix = f"Chapter {chapter_number} ({chapter_title or 'Untitled'}): "
+    blocks: list[str] = []
+    start = 0
+    while start < len(body):
+        end = min(start + max_chars, len(body))
+        if end < len(body):
+            boundary = body.rfind(" ", start + max_chars // 2, end)
+            if boundary > start + overlap:
+                end = boundary + 1
+        blocks.append(prefix + body[start:end])
+        if end == len(body):
+            break
+        start = end - overlap
+    return blocks
+
+
+def build_advisor_item_evidence_blocks(
+    prefix: str,
+    detail: str | None,
+    *,
+    separator: str = ". ",
+    max_chars: int = 600,
+    overlap: int = 80,
+) -> list[str]:
+    """Preserve an entire structured item while repeating its source label on each block."""
+    if max_chars < 1 or overlap < 0 or overlap >= max_chars:
+        raise ValueError("invalid_advisor_item_section_size")
+    header = prefix.strip()
+    if not header:
+        return []
+    body = str(detail or "").strip()
+    if not body:
+        return [header]
+    blocks: list[str] = []
+    start = 0
+    while start < len(body):
+        end = min(start + max_chars, len(body))
+        if end < len(body):
+            boundary = body.rfind(" ", start + max_chars // 2, end)
+            if boundary > start + overlap:
+                end = boundary + 1
+        blocks.append(header + separator + body[start:end])
+        if end == len(body):
+            break
+        start = end - overlap
+    return blocks
+
+
+def partition_advisor_scan_evidence(
+    *,
+    summaries: Sequence[str],
+    threads: Sequence[str],
+    relationships: Sequence[str],
+    world_elements: Sequence[str],
+) -> list[dict[str, list[str]]]:
+    """Scan every item in bounded groups with adjacent and chapter-matched context."""
+    categories = {
+        "summaries": (summaries, 4),
+        "threads": (threads, 8),
+        "relationships": (relationships, 5),
+        "world_elements": (world_elements, 6),
+    }
+    group_count = max((len(items) + size - 1) // size for items, size in categories.values())
+    summaries_by_chapter: dict[int, list[str]] = {}
+    for block in summaries:
+        match = re.match(r"Chapter\s+(\d+)\b", block, flags=re.IGNORECASE)
+        if match:
+            summaries_by_chapter.setdefault(int(match.group(1)), []).append(block)
+    groups: list[dict[str, list[str]]] = []
+    for index in range(group_count):
+        group: dict[str, list[str]] = {}
+        for name, (items, size) in categories.items():
+            current = list(items[index * size : (index + 1) * size])
+            if current and index > 0:
+                # The last item of the previous group lets the audit compare
+                # evidence that straddles a bounded group boundary.
+                current.insert(0, items[index * size - 1])
+            if name == "summaries" and not current and summaries:
+                related = [
+                    *threads[index * 8 : (index + 1) * 8],
+                    *relationships[index * 5 : (index + 1) * 5],
+                ]
+                chapter_refs = dict.fromkeys(
+                    int(match.group(1))
+                    for block in related
+                    if (
+                        match := re.search(
+                            r"\b(?:introduced\s+ch\.|at\s+chapter\s+)(\d+)\b",
+                            block,
+                            flags=re.IGNORECASE,
+                        )
+                    )
+                )
+                for chapter_ref in chapter_refs:
+                    matching = summaries_by_chapter.get(chapter_ref, [])
+                    if matching:
+                        current.append(matching[index % len(matching)])
+                    if len(current) == 4:
+                        break
+                if not current:
+                    current.append(summaries[index % len(summaries)])
+            group[name] = current
+        groups.append(group)
+    return groups
+
+
+def advisor_scan_output_token_budget(source_block_count: int) -> int:
+    """Leave room for multiple source-backed findings without unbounded output."""
+    if source_block_count < 0:
+        raise ValueError("invalid_advisor_source_block_count")
+    return min(8192, max(2048, 1024 + 256 * source_block_count))
+
+
+def build_open_thread_review_suggestions(
+    threads: Sequence[PlotThread],
+    statuses: dict[Any, str],
+    *,
+    total_chapters: int,
+    limit: int = 4,
+) -> list[dict[str, Any]]:
+    """Offer reviewable, source-attributed open threads without claiming a contradiction."""
+    suggestions: list[dict[str, Any]] = []
+    seen_titles: set[str] = set()
+    for thread in threads:
+        if len(suggestions) >= limit:
+            break
+        title = " ".join(str(thread.title or "").split()).strip()
+        normalized_title = title.casefold()
+        chapter = thread.last_mentioned_at or thread.introduced_at
+        if (
+            not title
+            or normalized_title in seen_titles
+            or statuses.get(thread.id)
+            not in {"introduced", "developing", "paused", "possibly_abandoned", "forgotten"}
+            or int(thread.importance or 0) < 6
+            or int(getattr(thread, "mention_count", 0) or 0) < 2
+            or not isinstance(chapter, int)
+            or not 1 <= chapter <= total_chapters
+        ):
+            continue
+        seen_titles.add(normalized_title)
+        suggestions.append(
+            {
+                "id": f"thread-review-{thread.id}",
+                "type": "future_direction",
+                "severity": "direction",
+                "title": f'Review open thread: "{title}"',
+                "description": (
+                    f"This tracked thread was last mentioned in chapter {chapter} and remains open. "
+                    "Check whether its next step or payoff is intentional."
+                    + (
+                        f" Recorded context: {' '.join(thread.description.split())[:180]}"
+                        if thread.description
+                        else ""
+                    )
+                ),
+                "chapter_ref": chapter,
+                "action_label": "Review thread evidence",
+                "ask_prompt": f'What does the manuscript actually establish about "{title}", and does it need a later payoff?',
+                "source": "heuristic",
+            }
+        )
+    return suggestions
 
 
 def build_relationship_drift_suggestions(

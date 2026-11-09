@@ -12,6 +12,7 @@ import {
 import { invalidateQueryKeys } from "@/lib/query/queryClient"
 import { normalizeBookRouteId } from "@/lib/utils/bookRoutes"
 import type { Book, BookCollaborator, BookEvents, BookNote, BookNotePage, BookOverviewPayload, BookProcessing, BookSelector, BookSeries, BookWorkType, CanonFact, ChapterConsistencyReport, ChapterSceneOrder, ChapterVersion, ChapterVersionDetail, CollaboratorActivity, CollaborationPermissions, CollaborationRole, CollaborationScope, ContinuityFinding, ContinuityScan, EmotionalArcOverview, ImportPreview, ManuscriptAnnotation, ManuscriptBootstrapPayload, ManuscriptWorkspaceTree, NovelEpubMetadata, NovelExportPreset, NovelFrontMatter, NovelImagePlacement, NovelScene, NovelScenePage, ReaderBootstrapPayload, VaultGraph, VaultNoteRelations, VaultPreview, VaultNote, VaultNotePage, VaultNoteSaveResult, PaginatedSeries, PreWritingCheck, ReadabilityMetrics, RevisionIntelligence, RevisionRound, RevisionRoundComparison, RevisionTagSet, RevisionTagTarget, SavedQuote, SavedQuotePage, SceneMetadata, SceneVersion, SceneVersionDetail, SeriesBible, StoryHealth, UserStats, WorkflowBridgePreview, WorkspaceSearchFilters, WorkspaceSearchPage, WorkspaceSearchResult, WriterWorkspace } from "@/types/book"
+import type { ManuscriptReprocessPreflight } from "@/types/book"
 import type {
   Character,
   CharacterAliasRecord,
@@ -1501,7 +1502,10 @@ export const booksApi = {
     if (workType) form.append("work_type", workType)
     return apiClient.post<ImportPreview>("/books/upload/preview", form).then(r => r.data)
   },
-  reprocessManuscript: (bookId: string) =>
+  previewManuscriptReprocess: (bookId: string) =>
+    apiClient.get<ManuscriptReprocessPreflight>(bookPath(bookId, "/manuscript/reprocess/preflight"))
+      .then(r => r.data),
+  reprocessManuscript: (bookId: string, previewFingerprint: string) =>
     apiClient.post<{
       book_id: string
       status: string
@@ -1513,7 +1517,10 @@ export const booksApi = {
       processed_words_remaining: number
     }>(
       bookPath(bookId, "/manuscript/reprocess"),
-      { confirm_upload_charge: true }
+      {
+        confirm_upload_charge: true,
+        preview_fingerprint: previewFingerprint,
+      }
     ).then(r => {
       invalidateBookCache(bookId)
       return r.data

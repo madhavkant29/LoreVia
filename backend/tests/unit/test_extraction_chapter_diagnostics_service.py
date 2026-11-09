@@ -66,6 +66,7 @@ async def test_build_chapter_character_extraction_diagnostics_accumulates_totals
         book,
         chapter_number=3,
         extraction_batch_texts=["a", "b"],
+        source_coverage={"complete": True, "source_characters": 2},
         extraction_failed_batches=1,
         extraction_fallback_batches=1,
         extraction_fallback_character_count=2,
@@ -94,6 +95,10 @@ async def test_build_chapter_character_extraction_diagnostics_accumulates_totals
     character_diagnostics = diagnostics["character_extraction"]
 
     assert character_diagnostics["total_batches"] == 2
+    assert character_diagnostics["source_coverage"] == {
+        "complete": True,
+        "source_characters": 2,
+    }
     assert character_diagnostics["extracted_candidates"] == 5
     assert character_diagnostics["duplicate_suggestions"] == 1
     assert character_diagnostics["identity_auto_aliases"] == 7

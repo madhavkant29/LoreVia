@@ -50,6 +50,20 @@ def normalize_character_visibility_state(value: object | None) -> str | None:
     return cleaned if cleaned in VALID_CHARACTER_VISIBILITY_STATES else None
 
 
+def is_author_curated_character(character: Character) -> bool:
+    """Treat manual edits and explicit repair protection as authoritative profile data."""
+    metadata = getattr(character, "analysis_metadata", None)
+    metadata = metadata if isinstance(metadata, dict) else {}
+    return bool(
+        getattr(character, "is_manual", False)
+        or metadata.get("user_curated")
+        or metadata.get("user_reviewed")
+        or metadata.get("protected_from_repair")
+        or getattr(character, "approval_state", None) == CHARACTER_APPROVAL_PROTECTED
+        or getattr(character, "approval_source", None) == CHARACTER_APPROVAL_SOURCE_MANUAL_REVIEW
+    )
+
+
 def normalize_character_approval_state(value: object | None) -> str | None:
     cleaned = str(value or "").strip().casefold()
     return cleaned if cleaned in VALID_CHARACTER_APPROVAL_STATES else None

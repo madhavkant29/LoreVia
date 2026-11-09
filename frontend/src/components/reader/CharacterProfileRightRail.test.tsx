@@ -24,7 +24,7 @@ describe("CharacterProfileRightRail", () => {
     const view = renderRail({ onOpenRelationships })
 
     expect(view.textContent).toContain("Continuity alerts")
-    expect(view.textContent).toContain("Profile completeness")
+    expect(view.textContent).toContain("Profile coverage")
     expect(view.textContent).toContain("Open questions")
     expect(view.textContent).toContain("Grounded profile")
     expect(view.textContent).toContain("1 connected ties")
@@ -41,16 +41,39 @@ describe("CharacterProfileRightRail", () => {
     clickButton(view, "Refresh")
     expect(onRefreshEvidence).toHaveBeenCalledOnce()
   })
+
+  it("uses stored extraction confidence rather than optional profile completeness for the confidence bar", () => {
+    const view = renderRail({ storedConfidence: 0.92, healthScore: 13 })
+
+    expect(view.textContent).toContain("Extraction confidence")
+    expect(view.textContent).toContain("High confidence")
+    expect(view.textContent).toContain("92%")
+    expect(view.querySelector('[style="width: 92%;"]')?.classList.contains("bg-emerald-600")).toBe(true)
+  })
+
+  it("labels grounding coverage separately when no extraction confidence is stored", () => {
+    const view = renderRail({ groundingCoverage: 0.64, healthScore: 13 })
+
+    expect(view.textContent).toContain("Grounding coverage")
+    expect(view.textContent).toContain("64% source-backed")
+    expect(view.textContent).not.toContain("Low confidence")
+  })
 })
 
 function renderRail({
   onOpenRelationships = vi.fn(),
   onRefreshEvidence = vi.fn(),
   selectedTab = "insights",
+  storedConfidence,
+  groundingCoverage,
+  healthScore = 84,
 }: {
   onOpenRelationships?: () => void
   onRefreshEvidence?: () => void
   selectedTab?: "insights" | "evidence"
+  storedConfidence?: number
+  groundingCoverage?: number
+  healthScore?: number
 } = {}) {
   container = document.createElement("div")
   document.body.appendChild(container)
@@ -73,6 +96,9 @@ function renderRail({
           archetype: null,
           arc_summary: null,
           relationship_summaries: ["Kael alliance"],
+          analysis_metadata: storedConfidence === undefined && groundingCoverage === undefined
+            ? undefined
+            : { canonical_confidence: storedConfidence, grounding_coverage: groundingCoverage },
         }}
         connections={[{
           source: "character-1",
@@ -86,7 +112,7 @@ function renderRail({
         evidence={[{ chapter_num: 3, chapter_title: "Map room", relevance: 0.9, summary: "Grounded clue", text: "Mira studies the map." }]}
         evidenceError={null}
         evidenceLoading={false}
-        health={{ score: 84, tone: "strong", summary: "Grounded profile", issues: ["Review one open relationship"] }}
+        health={{ score: healthScore, tone: "strong", summary: "Grounded profile", issues: ["Review one open relationship"] }}
         isDark={false}
         mergeSuggestionCount={1}
         partitioning={false}

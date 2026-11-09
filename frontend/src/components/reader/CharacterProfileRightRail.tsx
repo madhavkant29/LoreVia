@@ -63,12 +63,17 @@ export const CharacterProfileRightRail = memo(function CharacterProfileRightRail
     ...(character.arc_tracker?.diagnostics ?? []),
     ...health.issues,
   ].slice(0, 3)
-  const storedConfidence = character.analysis_metadata?.canonical_confidence
-    ?? character.analysis_metadata?.grounding_coverage
-  const hasStoredConfidence = typeof storedConfidence === "number" && Number.isFinite(storedConfidence)
-  const confidence = hasStoredConfidence
-    ? Math.max(0, Math.min(100, Math.round(storedConfidence <= 1 ? storedConfidence * 100 : storedConfidence)))
+  const canonicalConfidence = character.analysis_metadata?.canonical_confidence
+  const groundingCoverage = character.analysis_metadata?.grounding_coverage
+  const hasCanonicalConfidence = typeof canonicalConfidence === "number" && Number.isFinite(canonicalConfidence)
+  const hasGroundingCoverage = typeof groundingCoverage === "number" && Number.isFinite(groundingCoverage)
+  const storedMetric = hasCanonicalConfidence ? canonicalConfidence : hasGroundingCoverage ? groundingCoverage : null
+  const confidence = storedMetric !== null
+    ? Math.max(0, Math.min(100, Math.round(storedMetric <= 1 ? storedMetric * 100 : storedMetric)))
     : health.score
+  const confidenceBarClass = hasCanonicalConfidence
+    ? confidence >= 80 ? "bg-emerald-600" : confidence >= 55 ? "bg-violet-600" : "bg-amber-500"
+    : "bg-violet-600"
   const openQuestions = buildOpenQuestions(character, connections, evidence)
   const revisionNotes = buildRevisionNotes(character, health, mergeSuggestionCount)
   const evidenceBars = buildEvidenceBars(evidence)
@@ -119,18 +124,18 @@ export const CharacterProfileRightRail = memo(function CharacterProfileRightRail
             </div>
           </SidebarSurface>
 
-          <SidebarSurface isDark={isDark} title={hasStoredConfidence ? "Extraction confidence" : "Profile completeness"}>
+          <SidebarSurface isDark={isDark} title={hasCanonicalConfidence ? "Extraction confidence" : hasGroundingCoverage ? "Grounding coverage" : "Profile coverage"}>
             <div>
               <div className="flex items-baseline justify-between gap-3">
                 <p className={`text-sm font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>
-                  {hasStoredConfidence
+                  {hasCanonicalConfidence
                     ? confidence >= 80 ? "High confidence" : confidence >= 55 ? "Medium confidence" : "Low confidence"
-                    : `${confidence}% complete`}
+                    : hasGroundingCoverage ? `${confidence}% source-backed` : `${confidence}% recorded`}
                 </p>
                 <span className={`text-sm font-semibold ${isDark ? "text-slate-300" : "text-stone-700"}`}>{confidence}%</span>
               </div>
               <div className={`mt-2 h-1.5 overflow-hidden rounded-full ${isDark ? "bg-white/10" : "bg-stone-200"}`}>
-                <div className={health.tone === "strong" ? "h-full bg-emerald-600" : health.tone === "moderate" ? "h-full bg-violet-600" : "h-full bg-amber-500"} style={{ width: `${confidence}%` }} />
+                <div className={`h-full ${confidenceBarClass}`} style={{ width: `${confidence}%` }} />
               </div>
               <p className={`mt-2 text-xs leading-5 ${isDark ? "text-slate-400" : "text-stone-600"}`}>{health.summary}</p>
             </div>

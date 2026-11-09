@@ -272,17 +272,22 @@ export function useManuscriptSaveActions({
     }
   }
 
-  async function confirmReprocessManuscript() {
+  async function confirmReprocessManuscript(previewFingerprint: string) {
     if (!book || reprocessing) return
     setReprocessing(true)
     setStatusMessage(null)
     try {
-      const result = await booksApi.reprocessManuscript(book.id)
+      const result = await booksApi.reprocessManuscript(book.id, previewFingerprint)
       setShowReprocessConfirm(false)
       setStatusMessage(`Reprocessing started for ${result.chapters_queued} chapter${result.chapters_queued === 1 ? "" : "s"}. ${result.processed_words_reserved.toLocaleString()} processed words are reserved and will settle chapter by chapter.`)
       await loadBase()
-    } catch {
-      setStatusMessage("Reprocess failed. Check your processed-word allowance and try again.")
+    } catch (error) {
+      if (axios.isAxiosError(error) && error.response?.status === 409) {
+        setShowReprocessConfirm(false)
+        setStatusMessage("Reprocessing could not start because the preview or project state changed. Reopen to refresh the preflight.")
+      } else {
+        setStatusMessage("Reprocess failed. Check your processed-word allowance and try again.")
+      }
     } finally {
       setReprocessing(false)
     }

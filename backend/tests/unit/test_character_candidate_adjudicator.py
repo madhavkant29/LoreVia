@@ -78,6 +78,45 @@ def test_person_candidates_promote_with_strong_human_evidence(name):
     assert adjudication.character_score >= 60
 
 
+def test_cited_named_profile_claim_promotes_repeated_person_without_invented_traits():
+    evidence = {
+        "mention_count": 2,
+        "has_dialogue_or_action": True,
+        "appears_multiple_times": True,
+        "profile_claims": {
+            "goal": {
+                "quote": "Mara Vale promised to protect the gate.",
+                "start": 0,
+                "end": 39,
+                "source_batch_key": "book:1:1",
+            }
+        },
+    }
+
+    cited = adjudicate_character_candidate("Mara Vale", confidence=0.95, evidence=evidence)
+    uncited = adjudicate_character_candidate(
+        "Mara Vale", confidence=0.95, evidence={**evidence, "profile_claims": {}}
+    )
+    unrelated_quote = adjudicate_character_candidate(
+        "Mara Vale",
+        confidence=0.95,
+        evidence={
+            **evidence,
+            "profile_claims": {
+                "goal": {
+                    **evidence["profile_claims"]["goal"],
+                    "quote": "The gate was closed before dawn.",
+                }
+            },
+        },
+    )
+
+    assert cited.adjudication_status == ADJUDICATION_PROMOTED_CHARACTER
+    assert "cited_profile_person_evidence" in cited.reason_codes
+    assert uncited.adjudication_status == ADJUDICATION_QUARANTINED
+    assert unrelated_quote.adjudication_status == ADJUDICATION_QUARANTINED
+
+
 def test_honorific_alias_forms_share_comparison_name():
     assert normalized_comparison_name("Dr. Kemp") == normalized_comparison_name("Doctor Kemp")
     assert normalized_comparison_name("Kemp") == "kemp"

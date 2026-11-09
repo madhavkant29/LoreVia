@@ -10,6 +10,7 @@ import { useParams, useRouter } from "next/navigation"
 import { ContextualUpgradePrompt } from "@/components/billing/ContextualUpgradePrompt"
 import { CreateFab } from "@/components/overview/CreateFab"
 import { ActivationExperience } from "@/components/reader/ActivationExperience"
+import { ReviewReadyDialog } from "@/components/reader/ReviewReadyDialog"
 import { WorkspaceModeSwitcher } from "@/components/reader/WorkspaceModeSwitcher"
 import { SUPPORT_HELP_EVENT } from "@/components/ui/ShortcutHelp"
 import { ErrorCard } from "@/components/ui/ErrorCard"
@@ -25,9 +26,15 @@ import { useAuthStore } from "@/lib/stores/authStore"
 import { useBookModeStore } from "@/lib/stores/bookModeStore"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 import { getBookRouteSegment, normalizeBookRouteId } from "@/lib/utils/bookRoutes"
-import { normalizeProcessingStatus } from "@/lib/utils/processingStatus"
+import {
+  getProcessingSummary,
+  normalizeProcessingStatus,
+  storyUnitName,
+  storyUnitPrefix,
+  storyUnitTitle,
+} from "@/lib/utils/processingStatus"
 import { buildGoalCalendarSavePatch, findRevisionTaskSource, patchRevisionIntelligenceItem } from "@/lib/utils/revisionIntelligence"
-import type { Book, BookOverviewPayload, GoalCalendarItem, ReaderBootstrapPayload, RevisionIntelligence, UserStats, WriterWorkspace } from "@/types/book"
+import type { BookOverviewPayload, GoalCalendarItem, ReaderBootstrapPayload, RevisionIntelligence, UserStats, WriterWorkspace } from "@/types/book"
 import type { RecentActivityItem } from "@/types/ux"
 
 const AuthorWorkspaceDashboard = dynamic(
@@ -61,59 +68,6 @@ type ReaderBookmarkSnapshot = {
   chapterTitle: string | null
   scrollPct: number
   savedAt: string
-}
-
-function storyUnitName(workType?: Book["work_type"], plural = false) {
-  if (workType === "screenplay") return plural ? "scenes" : "scene"
-  return plural ? "chapters" : "chapter"
-}
-
-function storyUnitTitle(workType?: Book["work_type"]) {
-  return workType === "screenplay" ? "Scene" : "Chapter"
-}
-
-function storyUnitPrefix(workType?: Book["work_type"]) {
-  return workType === "screenplay" ? "Sc." : "Ch."
-}
-
-function formatEtaLabel(seconds?: number | null) {
-  if (typeof seconds !== "number" || Number.isNaN(seconds)) return null
-  if (seconds <= 0) return "almost done"
-
-  const minutes = Math.max(1, Math.round(seconds / 60))
-  if (minutes < 60) return `${minutes} min left`
-
-  const hours = Math.max(1, Math.round(minutes / 60))
-  return `${hours} hr left`
-}
-
-function getProcessingSummary(book: Book | null) {
-  const processing = book?.processing
-  if (!processing) return null
-
-  const normalized = normalizeProcessingStatus(processing, book)
-  const stage = normalized?.label ?? (processing.stage ?? processing.status ?? "").toString().trim()
-  const completed = normalized?.chaptersCompleted ?? null
-  const total = normalized?.chaptersTotal ?? book?.total_chapters
-  const storedProgress = normalized?.progressPct ?? book?.progress_pct
-  const progress = completed !== null && total && completed < total && storedProgress === 100
-    ? Math.round((completed / total) * 100)
-    : storedProgress
-  const eta = formatEtaLabel(processing.eta_seconds)
-  const chapterLabel =
-    processing.last_chapter_number
-      ? `${storyUnitPrefix(book?.work_type)} ${processing.last_chapter_number}${processing.last_chapter_title ? ` - ${processing.last_chapter_title}` : ""}`
-      : null
-
-  const parts = [
-    stage ? stage.replace(/_/g, " ") : null,
-    completed !== null && total ? `${completed}/${total} ${storyUnitName(book?.work_type, true)}` : null,
-    typeof progress === "number" ? `${Math.round(progress)}%` : null,
-    eta,
-    chapterLabel,
-  ].filter(Boolean)
-
-  return parts.length > 0 ? parts.join(" / ") : null
 }
 
 function formatDateKey(date: Date) {
@@ -618,6 +572,7 @@ export default function BookOverviewPage() {
 
   return (
     <div data-book-overview className="min-h-screen bg-background text-foreground">
+      <ReviewReadyDialog book={book} bookId={bookId} enabled={shouldShowAuthorWorkspace} hasReviewMaterial={chapterReports.length > 0} />
       <div className="mx-auto max-w-[100rem] space-y-5 px-4 pb-28 pt-5 sm:px-6 lg:px-8 xl:space-y-6">
         <AuthorToolsNav
           bookId={bookId}

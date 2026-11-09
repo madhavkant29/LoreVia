@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import json
 import logging
 import uuid
+from collections.abc import Awaitable, Callable
 from typing import Any
 
+from fastapi import HTTPException
 from openai import APIConnectionError, APIStatusError, APITimeoutError, OpenAIError
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
@@ -19,18 +22,25 @@ from app.core.redis import (
 from app.models.book import Book, Chapter
 from app.models.character import Character, CharacterState
 from app.models.intelligence import ChapterSummary, CharacterRelationship, PlotThread, WorldElement
+from app.services.advisor_proactive_scan_service import (
+    request_proactive_scan_result,
+    run_bounded_scan_groups,
+)
 from app.utils.advisor_prompt_templates import PROACTIVE_SCAN_SYSTEM, PROACTIVE_SCAN_USER
 from app.utils.advisor_prompt_utils import make_editorial_cache_key, safe_prompt_str
-from app.utils.advisor_result_utils import (
-    build_fallback_advisor_suggestions,
-    normalize_proactive_scan_result,
-)
+from app.utils.advisor_result_utils import normalize_proactive_scan_result
+from app.utils.advisor_route_errors import advisor_scan_failure_category
 from app.utils.advisor_story_context_utils import build_story_context
 from app.utils.advisor_suggestions_utils import (
+    advisor_clue_evidence,
+    build_advisor_chapter_evidence_blocks,
+    build_advisor_item_evidence_blocks,
+    build_open_thread_review_suggestions,
     build_relationship_drift_suggestions,
     build_world_drift_suggestions,
+    partition_advisor_scan_evidence,
+    proactive_advisor_finding_id,
 )
-from app.utils.llm_usage_utils import create_tracked_chat_completion
 from app.utils.plot_thread_utils import derive_plot_thread_status, is_plot_thread_open
 
 log = logging.getLogger(__name__)
@@ -40,6 +50,8 @@ ADVISOR_SCAN_FALLBACK_ERRORS = (
     APIStatusError,
     APITimeoutError,
     OpenAIError,
+    HTTPException,
+    SQLAlchemyError,
     TimeoutError,
     AttributeError,
     IndexError,
@@ -55,6 +67,9 @@ async def build_advisor_suggestions_payload(
     book: Book,
     user_id: uuid.UUID,
     skip_llm: bool = False,
+    force_audit: bool = False,
+    cache_only: bool = False,
+    on_audit_progress: Callable[[int, int], Awaitable[None]] | None = None,
 ) -> dict[str, Any]:
     """Run the full heuristic + optional LLM advisor scan and return the result dict."""
     book_id = book.id
@@ -412,41 +427,34 @@ async def build_advisor_suggestions_payload(
             }
         )
 
-    recent_summaries = (
+    detailed_summaries = (
         await db.execute(
             select(ChapterSummary.clues, Chapter.number, Chapter.title)
             .join(Chapter, Chapter.id == ChapterSummary.chapter_id)
             .where(
                 Chapter.book_id == book_id,
-                ChapterSummary.mode == "short",
-                ChapterSummary.clues.isnot(None),
+                ChapterSummary.mode == "detailed",
             )
             .order_by(Chapter.number.asc())
-            .limit(10)
         )
     ).all()
     clue_count = 0
-    if recent_summaries:
+    if detailed_summaries:
         scan_basis.append("chapter summaries")
     else:
         data_gaps.append("chapter summaries")
 
     seen_clues: set[str] = set()
-    for clues, chapter_num, chapter_title in recent_summaries:
-        if not clues:
-            continue
-        clue_list = (
-            clues
-            if isinstance(clues, list)
-            else list(clues.values())
-            if isinstance(clues, dict)
-            else []
-        )
-        clue_count += len(clue_list)
-        for clue in clue_list[:2]:
-            clue_str = str(clue)[:120]
-            if clue_str not in seen_clues:
-                seen_clues.add(clue_str)
+    clue_evidence_by_chapter: dict[int, list[str]] = {}
+    for clues, chapter_num, chapter_title in detailed_summaries:
+        clue_lines = advisor_clue_evidence(clues)
+        clue_evidence_by_chapter.setdefault(chapter_num, []).extend(clue_lines)
+        clue_count += len(clue_lines)
+        for clue in clue_lines:
+            clue_key = " ".join(clue.casefold().split())
+            if clue_key not in seen_clues and len(seen_clues) < 3:
+                seen_clues.add(clue_key)
+                clue_str = clue[:120]
                 suggestions.append(
                     {
                         "id": f"clue-{book_id}-{chapter_num}-{len(seen_clues)}",
@@ -462,10 +470,6 @@ async def build_advisor_suggestions_payload(
                         "ask_prompt": f"Has the clue from chapter {chapter_num} been resolved? '{clue_str}'",
                     }
                 )
-            if len(seen_clues) >= 3:
-                break
-        if len(seen_clues) >= 3:
-            break
 
     thread_statuses = {
         thread.id: derive_plot_thread_status(
@@ -482,11 +486,16 @@ async def build_advisor_suggestions_payload(
     ]
     open_thread_count = len(open_threads)
 
+    thread_review_suggestions = build_open_thread_review_suggestions(
+        open_threads, thread_statuses, total_chapters=total_ch
+    )
+    suggestions.extend(thread_review_suggestions)
+
     for thread in [
         item
         for item in all_threads
         if item.status == "contradicted" or thread_statuses[item.id] == "contradicted"
-    ][:2]:
+    ]:
         suggestions.append(
             {
                 "id": f"contradicted-{thread.id}",
@@ -516,7 +525,12 @@ async def build_advisor_suggestions_payload(
     heuristic_count = len(suggestions)
     proactive_audit_applied = False
     audit_summary: str | None = None
-    if not skip_llm and heuristic_count < 3 and (recent_summaries or open_threads or world_rows):
+    audit_failure_category: str | None = None
+    audit_groups_total = 0
+    audit_groups_completed = 0
+    if not skip_llm and (
+        force_audit or cache_only or heuristic_count - len(thread_review_suggestions) < 3
+    ):
         detailed_summary_rows = (
             await db.execute(
                 select(
@@ -528,7 +542,6 @@ async def build_advisor_suggestions_payload(
                     ChapterSummary.mode.in_(["short", "detailed"]),
                 )
                 .order_by(Chapter.number.desc(), ChapterSummary.mode.asc())
-                .limit(10)
             )
         ).all()
         recent_summary_blocks: list[str] = []
@@ -537,172 +550,266 @@ async def build_advisor_suggestions_payload(
             if chapter_num in seen_summary_chapters:
                 continue
             seen_summary_chapters.add(chapter_num)
-            key_bits: list[str] = []
-            if isinstance(key_events, list):
-                for item in key_events[:3]:
-                    if isinstance(item, dict):
-                        key_bits.append(
-                            " ".join(
-                                str(item.get("event_title") or item.get("event") or "").split()
-                            ).strip()
-                        )
-            key_line = "; ".join(item for item in key_bits if item)
-            recent_summary_blocks.append(
-                f"Chapter {chapter_num} ({chapter_title or 'Untitled'}): "
-                f"{' '.join(str(content or '').split())[:240]}"
-                + (f" Key events: {key_line[:180]}" if key_line else "")
+            recent_summary_blocks.extend(
+                build_advisor_chapter_evidence_blocks(
+                    chapter_number=chapter_num,
+                    chapter_title=chapter_title,
+                    content=content,
+                    key_events=key_events,
+                    clues=clue_evidence_by_chapter.get(chapter_num),
+                )
             )
-            if len(recent_summary_blocks) >= 4:
-                break
 
         open_thread_blocks = [
-            f"- {thread.title} [{thread_statuses[thread.id]}]"
-            + (f" introduced ch.{thread.introduced_at}" if thread.introduced_at else "")
-            + (
-                f": {' '.join(str(thread.description or '').split())[:160]}"
-                if thread.description
-                else ""
+            block
+            for thread in open_threads
+            for block in build_advisor_item_evidence_blocks(
+                f"- {thread.title} [{thread_statuses[thread.id]}]"
+                + (f" introduced ch.{thread.introduced_at}" if thread.introduced_at else ""),
+                thread.description,
+                separator=": ",
             )
-            for thread in open_threads[:5]
         ]
         relationship_blocks = [
-            f"- {character_names.get(rel.character_a_id, 'Unknown')} / {character_names.get(rel.character_b_id, 'Unknown')}: "
-            f"{rel.rel_type.replace('_', ' ')} at chapter {rel.from_chapter}"
-            + (f". {' '.join(str(rel.description or '').split())[:140]}" if rel.description else "")
-            for rel in relationship_rows[-5:]
+            block
+            for rel in relationship_rows
+            for block in build_advisor_item_evidence_blocks(
+                f"- {character_names.get(rel.character_a_id, 'Unknown')} / {character_names.get(rel.character_b_id, 'Unknown')}: "
+                f"{rel.rel_type.replace('_', ' ')} at chapter {rel.from_chapter}",
+                rel.description,
+            )
         ]
         world_watch_blocks = [
-            f"- {element.name} [{element.element_type}] usage={element.usage_count}"
-            + (
-                f" gap={round(float(element.gap_score), 2)}"
-                if element.gap_score is not None
-                else ""
+            block
+            for element in world_rows
+            for block in build_advisor_item_evidence_blocks(
+                f"- {element.name} [{element.element_type}] usage={element.usage_count}"
+                + (
+                    f" gap={round(float(element.gap_score), 2)}"
+                    if element.gap_score is not None
+                    else ""
+                ),
+                element.description,
             )
-            + (
-                f". {' '.join(str(element.description or '').split())[:160]}"
-                if element.description
-                else ""
-            )
-            for element in world_rows[:6]
         ]
-        story_context = await build_story_context(db, book_id, total_ch)
-        proactive_cache_key = make_editorial_cache_key(
-            f"scan:{book_id}:{total_ch}",
-            "\n".join(recent_summary_blocks + open_thread_blocks + world_watch_blocks),
-            heuristic_count,
+        evidence_groups = partition_advisor_scan_evidence(
+            summaries=recent_summary_blocks,
+            threads=open_thread_blocks,
+            relationships=relationship_blocks,
+            world_elements=world_watch_blocks,
         )
+        audit_groups_total = len(evidence_groups)
+        if on_audit_progress is not None:
+            await on_audit_progress(0, audit_groups_total)
         cache_version = await get_book_cache_version(str(book.id))
-        proactive_result = await get_proactive_scan_cache(
-            str(book.id),
-            proactive_cache_key,
-            version=cache_version,
-        )
-        if proactive_result is None:
-            if settings.OPENAI_API_KEY and settings.OPENAI_INTEL_MODEL:
-                client = get_openai_client()
-                try:
-                    response = await create_tracked_chat_completion(
-                        client=client,
-                        feature="advisor_proactive_scan",
-                        model=settings.OPENAI_INTEL_MODEL,
-                        db=db,
-                        user_id=user_id,
-                        book_id=book.id,
-                        temperature=0.2,
-                        max_tokens=900,
-                        response_format={"type": "json_object"},
-                        messages=[
-                            {
-                                "role": "system",
-                                "content": PROACTIVE_SCAN_SYSTEM.format(
-                                    title=safe_prompt_str(book.title),
-                                    story_context=safe_prompt_str(story_context),
-                                ),
-                            },
-                            {
-                                "role": "user",
-                                "content": PROACTIVE_SCAN_USER.format(
-                                    recent_summaries="\n".join(recent_summary_blocks)
-                                    or "No recent summaries available.",
-                                    open_threads="\n".join(open_thread_blocks)
-                                    or "No open threads available.",
-                                    relationships="\n".join(relationship_blocks)
-                                    or "No relationship transitions available.",
-                                    world_watch="\n".join(world_watch_blocks)
-                                    or "No world elements available.",
-                                ),
-                            },
-                        ],
-                    )
-                    proactive_result = normalize_proactive_scan_result(
-                        response.choices[0].message.content or "{}"
-                    )
-                    await set_proactive_scan_cache(
-                        str(book.id),
-                        proactive_cache_key,
-                        proactive_result,
-                        expected_version=cache_version,
-                    )
-                except ADVISOR_SCAN_FALLBACK_ERRORS:
-                    proactive_result = {
-                        "findings": [],
-                        "overall_note": "Proactive audit was unavailable, so this scan is showing heuristic-only results.",
-                    }
-            else:
-                proactive_result = {
-                    "findings": [],
-                    "overall_note": "Proactive audit is unavailable until AI scan settings are configured.",
-                }
-
-        proactive_findings = (proactive_result or {}).get("findings") or []
-        for index, finding in enumerate(proactive_findings):
-            suggestions.append(
-                {
-                    "id": f"proactive-{index}-{finding['type']}",
-                    **finding,
-                    "source": "proactive_audit",
-                }
+        group_results: dict[int, dict[str, Any]] = {}
+        pending_groups: list[tuple[int, tuple[dict[str, list[str]], list[str], str]]] = []
+        finished_groups = 0
+        for group_index, group in enumerate(evidence_groups):
+            source_blocks = [item for items in group.values() for item in items]
+            proactive_cache_key = make_editorial_cache_key(
+                f"scan:v4:{book_id}:{total_ch}:{group_index}",
+                "\n".join(source_blocks),
+                heuristic_count,
             )
-        proactive_audit_applied = bool(proactive_findings)
-        audit_summary = (proactive_result or {}).get("overall_note") or None
+            proactive_result = await get_proactive_scan_cache(
+                str(book.id), proactive_cache_key, version=cache_version
+            )
+            if proactive_result is not None:
+                try:
+                    if proactive_result.get("partial"):
+                        raise ValueError("advisor_scan_cached_partial_result")
+                    proactive_result = normalize_proactive_scan_result(
+                        json.dumps(proactive_result),
+                        strict=True,
+                        source_blocks=source_blocks,
+                    )
+                except (TypeError, ValueError) as exc:
+                    proactive_result = None
+                    if cache_only:
+                        audit_failure_category = "invalid_ai_response"
+                    log.warning(
+                        "advisor_proactive_scan_cache_invalid group=%s error_type=%s",
+                        group_index + 1,
+                        type(exc).__name__,
+                    )
+            if proactive_result is None:
+                if cache_only:
+                    continue
+                if not (settings.OPENAI_API_KEY and settings.OPENAI_INTEL_MODEL):
+                    audit_failure_category = "not_configured"
+                    continue
+                pending_groups.append((group_index, (group, source_blocks, proactive_cache_key)))
+                continue
+            group_results[group_index] = proactive_result
+            audit_groups_completed += 1
+            finished_groups += 1
+            if on_audit_progress is not None:
+                await on_audit_progress(finished_groups, audit_groups_total)
+
+        if pending_groups:
+            try:
+                story_context = await build_story_context(db, book_id, total_ch)
+                # All SQL reads are complete before parallel provider requests.
+                await db.commit()
+                client = get_openai_client()
+            except ADVISOR_SCAN_FALLBACK_ERRORS as exc:
+                if isinstance(exc, SQLAlchemyError):
+                    await db.rollback()
+                audit_failure_category = advisor_scan_failure_category(exc)
+                log.warning(
+                    "advisor_proactive_scan_setup_unavailable error_type=%s category=%s",
+                    type(exc).__name__,
+                    audit_failure_category,
+                )
+                for _ in pending_groups:
+                    finished_groups += 1
+                    if on_audit_progress is not None:
+                        await on_audit_progress(finished_groups, audit_groups_total)
+            else:
+
+                async def scan_one(
+                    group_index: int,
+                    request_data: tuple[dict[str, list[str]], list[str], str],
+                ) -> tuple[dict[str, Any] | None, str | None]:
+                    group, source_blocks, proactive_cache_key = request_data
+                    try:
+                        proactive_result = await request_proactive_scan_result(
+                            client=client,
+                            db=db,
+                            user_id=user_id,
+                            book_id=book.id,
+                            model=settings.OPENAI_INTEL_MODEL,
+                            source_blocks=source_blocks,
+                            messages=[
+                                {
+                                    "role": "system",
+                                    "content": PROACTIVE_SCAN_SYSTEM.format(
+                                        title=safe_prompt_str(book.title),
+                                        story_context=safe_prompt_str(story_context),
+                                    ),
+                                },
+                                {
+                                    "role": "user",
+                                    "content": PROACTIVE_SCAN_USER.format(
+                                        recent_summaries="\n".join(group["summaries"])
+                                        or "No recent summaries available.",
+                                        open_threads="\n".join(group["threads"])
+                                        or "No open threads available.",
+                                        relationships="\n".join(group["relationships"])
+                                        or "No relationship transitions available.",
+                                        world_watch="\n".join(group["world_elements"])
+                                        or "No world elements available.",
+                                    ),
+                                },
+                            ],
+                        )
+                        if not proactive_result.get("partial"):
+                            await set_proactive_scan_cache(
+                                str(book.id),
+                                proactive_cache_key,
+                                proactive_result,
+                                expected_version=cache_version,
+                            )
+                        return proactive_result, None
+                    except ADVISOR_SCAN_FALLBACK_ERRORS as exc:
+                        category = advisor_scan_failure_category(exc)
+                        log.warning(
+                            "advisor_proactive_scan_unavailable group=%s error_type=%s category=%s",
+                            group_index + 1,
+                            type(exc).__name__,
+                            category,
+                        )
+                        return None, category
+
+                async def record_group_completion(
+                    group_index: int,
+                    outcome: tuple[dict[str, Any] | None, str | None],
+                ) -> None:
+                    nonlocal audit_failure_category, audit_groups_completed, finished_groups
+                    proactive_result, category = outcome
+                    if category:
+                        audit_failure_category = category
+                    if proactive_result is not None:
+                        group_results[group_index] = proactive_result
+                        if proactive_result.get("partial"):
+                            audit_failure_category = "invalid_ai_response"
+                            log.warning(
+                                "advisor_proactive_scan_partial group=%s category=%s",
+                                group_index + 1,
+                                audit_failure_category,
+                            )
+                        else:
+                            audit_groups_completed += 1
+                    finished_groups += 1
+                    if on_audit_progress is not None:
+                        await on_audit_progress(finished_groups, audit_groups_total)
+
+                await run_bounded_scan_groups(
+                    pending_groups,
+                    scan_one=scan_one,
+                    on_complete=record_group_completion,
+                    concurrency=max(1, min(2, settings.LLM_MAX_CONCURRENT_CALLS_PER_USER)),
+                )
+
+        for group_index in sorted(group_results):
+            proactive_result = group_results[group_index]
+            proactive_audit_applied = True
+            for finding in proactive_result.get("findings") or []:
+                suggestions.append(
+                    {
+                        "id": proactive_advisor_finding_id(finding),
+                        **finding,
+                        "source": "proactive_audit",
+                    }
+                )
+            if proactive_result.get("overall_note"):
+                audit_summary = proactive_result["overall_note"]
+        if audit_failure_category:
+            audit_summary = (
+                f"AI audit completed {audit_groups_completed} of {audit_groups_total} evidence groups; "
+                "remaining groups can be retried. Heuristic checks are still shown."
+            )
+        elif cache_only and audit_groups_completed < audit_groups_total:
+            audit_summary = (
+                f"AI audit has reviewed {audit_groups_completed} of {audit_groups_total} evidence groups. "
+                "Refresh checks to scan the remaining groups."
+            )
 
     for item in suggestions:
         item.setdefault("source", "heuristic")
 
     deduped_suggestions: list[dict[str, Any]] = []
-    seen_keys: set[tuple[str, str]] = set()
+    seen_keys: set[tuple[str, str, str]] = set()
+    seen_ids: set[str] = set()
     for item in suggestions:
+        finding_id = str(item.get("id") or "")
         dedupe_key = (
             " ".join(str(item.get("title") or "").split()).strip().lower(),
             " ".join(str(item.get("description") or "").split()).strip().lower(),
+            " ".join(str(item.get("evidence_excerpt") or "").split()).strip().lower(),
         )
-        if dedupe_key in seen_keys:
+        if finding_id in seen_ids or dedupe_key in seen_keys:
             continue
+        seen_ids.add(finding_id)
         seen_keys.add(dedupe_key)
         deduped_suggestions.append(item)
     suggestions = deduped_suggestions
 
+    if (
+        proactive_audit_applied
+        and audit_groups_total > 1
+        and audit_groups_completed == audit_groups_total
+        and audit_failure_category is None
+    ):
+        supported_count = sum(item.get("source") == "proactive_audit" for item in suggestions)
+        audit_summary = (
+            f"AI audit reviewed all {audit_groups_total} evidence groups and found "
+            f"{supported_count} distinct supported check{'s' if supported_count != 1 else ''}. "
+            "See the findings below."
+        )
+
     fallback_applied = False
-    if not suggestions:
-        focus_thread = None
-        if open_threads:
-            thread = open_threads[0]
-            focus_thread = {
-                "title": thread.title,
-                "introduced_at": thread.introduced_at,
-                "description": thread.description,
-            }
-        suggestions = [
-            {**item, "source": "fallback"}
-            for item in build_fallback_advisor_suggestions(
-                book_title=book.title,
-                total_chapters=total_ch,
-                character_count=character_count,
-                open_thread_count=open_thread_count,
-                focus_thread=focus_thread,
-            )
-        ]
-        fallback_applied = True
 
     severity_order = {"warning": 0, "direction": 1, "opportunity": 2, "info": 3}
     suggestions.sort(key=lambda s: severity_order.get(s["severity"], 4))
@@ -727,5 +834,8 @@ async def build_advisor_suggestions_payload(
             "scan_basis": scan_basis,
             "data_gaps": data_gaps,
             "audit_summary": audit_summary,
+            "audit_failure_category": audit_failure_category,
+            "audit_groups_total": audit_groups_total,
+            "audit_groups_completed": audit_groups_completed,
         },
     }

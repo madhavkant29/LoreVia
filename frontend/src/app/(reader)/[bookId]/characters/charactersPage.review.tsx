@@ -1,3 +1,4 @@
+import { useState } from "react"
 import { candidateAdjudicationBadges } from "@/lib/utils/characterAdjudication"
 import type { CharacterCandidate, CharacterRelationshipCandidate } from "@/types/character"
 import type { SearchResult } from "@/types/reader"
@@ -14,9 +15,8 @@ type ReviewEvidenceCache = Record<string, { chapter: number; results: SearchResu
 type CharacterReviewTabProps = {
   candidateActionId: string | null
   evidenceCache: ReviewEvidenceCache
-  filteredPendingCandidatesCount: number
+  pendingCandidates: CharacterCandidate[]
   relationshipCandidates: CharacterRelationshipCandidate[]
-  selectedCandidate: CharacterCandidate | null
   hasSelectedCharacter: boolean
   isDark: boolean
   onAttachCandidate: (candidate: CharacterCandidate) => void
@@ -29,9 +29,8 @@ type CharacterReviewTabProps = {
 export function CharacterReviewTab({
   candidateActionId,
   evidenceCache,
-  filteredPendingCandidatesCount,
+  pendingCandidates,
   relationshipCandidates,
-  selectedCandidate,
   hasSelectedCharacter,
   isDark,
   onAttachCandidate,
@@ -40,6 +39,13 @@ export function CharacterReviewTab({
   onPromoteCandidate,
   onRejectCandidate,
 }: CharacterReviewTabProps) {
+  const [selectedCandidateId, setSelectedCandidateId] = useState<string | null>(null)
+  const selectedCandidateIndex = Math.max(
+    pendingCandidates.findIndex((candidate) => candidate.id === selectedCandidateId),
+    0,
+  )
+  const selectedCandidate = pendingCandidates[selectedCandidateIndex] ?? null
+
   return (
     <div className="p-5">
       <div className="space-y-5">
@@ -52,8 +58,14 @@ export function CharacterReviewTab({
             </p>
           </div>
           {selectedCandidate ? (
-            <div className={`rounded-md border px-4 py-3 text-sm ${isDark ? "border-[#202a38] bg-[#0c1119] text-slate-300" : "border-stone-200 bg-white text-stone-600"}`}>
-              {`1 of ${Math.max(filteredPendingCandidatesCount, 1)} candidates`}
+            <div className={`flex items-center gap-3 rounded-md border px-4 py-3 text-sm ${isDark ? "border-[#202a38] bg-[#0c1119] text-slate-300" : "border-stone-200 bg-white text-stone-600"}`}>
+              <button type="button" aria-label="Previous candidate" disabled={selectedCandidateIndex === 0} onClick={() => setSelectedCandidateId(pendingCandidates[selectedCandidateIndex - 1].id)} className={`${actionButtonClasses(isDark)} disabled:opacity-50`}>
+                Previous
+              </button>
+              <span aria-live="polite">{`${selectedCandidateIndex + 1} of ${pendingCandidates.length} candidates`}</span>
+              <button type="button" aria-label="Next candidate" disabled={selectedCandidateIndex >= pendingCandidates.length - 1} onClick={() => setSelectedCandidateId(pendingCandidates[selectedCandidateIndex + 1].id)} className={`${actionButtonClasses(isDark)} disabled:opacity-50`}>
+                Next
+              </button>
             </div>
           ) : null}
         </div>

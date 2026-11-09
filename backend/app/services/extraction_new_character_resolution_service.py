@@ -14,8 +14,8 @@ from app.services.extraction_character_persistence_service import (
     _promote_new_character_from_entity,
     _record_cluster_member_candidates,
     _record_entity_cluster_mentions,
+    reconcile_cross_chapter_candidates,
 )
-from app.services.extraction_character_reporting_service import _embed_new_character_candidates
 from app.utils.characters.constants import CHARACTER_CANDIDATE_SUPPRESSED
 
 
@@ -35,22 +35,14 @@ async def promote_or_match_new_character_entities(
     character_key_cache: dict[uuid.UUID, set[str]],
     pending_first_chapter_candidates: dict[uuid.UUID, list[str]],
     pending_first_chapter_updates: dict[uuid.UUID, Character],
-    pending_new_entities: list[tuple[dict[str, Any], set[uuid.UUID], str | None]],
+    pending_new_entities: list[tuple[dict[str, Any], set[uuid.UUID], str | None, list[float]]],
     saved_character_count: int,
     quarantined_candidate_count: int,
     ambiguous_entity_count: int,
 ) -> NewCharacterResolutionResult:
-    new_entity_embeddings = await _embed_new_character_candidates(
-        [(entity, blocked_ids) for entity, blocked_ids, _source_batch_key in pending_new_entities],
-        db=db,
-        user_id=book.user_id,
-        book_id=book.id,
-    )
-    for (entity, blocked_ids, entity_source_batch_key), emb in zip(
-        pending_new_entities, new_entity_embeddings
-    ):
+    for entity, blocked_ids, entity_source_batch_key, emb in pending_new_entities:
         if not emb:
-            continue
+            raise RuntimeError("character_embedding_result_incomplete")
         matching_ids = _find_character_ids_in_cache(
             existing_characters,
             str(entity.get("name") or ""),
@@ -162,6 +154,13 @@ async def promote_or_match_new_character_entities(
             source_batch_key=entity_source_batch_key,
         )
         saved_character_count += 1
+        await reconcile_cross_chapter_candidates(
+            db,
+            book_id=book.id,
+            chapter_number=chapter_number,
+            entity=entity,
+            character_id=promoted.id,
+        )
         await _record_entity_cluster_mentions(
             db,
             book_id=book.id,

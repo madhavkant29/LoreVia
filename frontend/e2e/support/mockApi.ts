@@ -34,6 +34,7 @@ type MockOptions = {
   readerBootstrapProfile?: "critical"
   betaReaderStale?: boolean
   chapterReports?: boolean
+  reviewReadyRun?: boolean
   zeroProjects?: boolean
   seriesBooks?: boolean
 }
@@ -2244,23 +2245,17 @@ const selectedCharacterVoiceConsistency = {
 
 const weakAttributionVoiceConsistency = {
   review: {
-    overall_verdict: "Grete's emotional line still reads coherently, but the attribution signal is thin in this excerpt.",
+    status: "insufficient_evidence",
+    overall_verdict: "There is not enough independently attributed dialogue to judge Grete's voice yet.",
     issues: [],
   },
+  voice_mode: "dialogue",
   retrieved_passages: [],
-  characters_reviewed: ["Grete"],
-  warnings: ["Dialogue could not be confidently attributed to Grete; the review used the full submitted passage instead."],
-  character_matches: [
-    {
-      character_name: "Grete",
-      match_score: 61,
-      baseline_sample_size: 4,
-      sample_dialogue_count: 1,
-      strongest_signals: ["higher emotional pressure", "broader phrasing"],
-      closest_other_character: "Gregor",
-      closest_other_score: 41,
-    },
-  ],
+  characters_reviewed: [],
+  characters_detected: ["Grete"],
+  warnings: ["Grete: no attributed dialogue in this passage could be confidently identified; no voice verdict was made for this character."],
+  character_matches: [],
+  coverage: { processed_ranges: [], total_characters: 86 },
 }
 
 const aiBetaReaderReport = {
@@ -2391,6 +2386,13 @@ function json(route: Route, body: unknown, status = 200) {
   })
 }
 
+function voiceStreamResult(route: Route, body: unknown) {
+  return route.fulfill({
+    contentType: "text/event-stream",
+    body: `event: stage\ndata: {"message":"Reviewing the full passage..."}\n\nevent: done\ndata: ${JSON.stringify(body)}\n\n`,
+  })
+}
+
 function notFound(route: Route) {
   return json(route, { detail: "Not found" }, 404)
 }
@@ -2443,6 +2445,8 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
   const manuscriptProcessingMode = options.manuscriptProcessing ?? "default"
   const firstImpressionMode = options.firstImpression ?? "complete"
   let betaReaderJobPolls = 0
+  let voiceChapterJob: Record<string, unknown> | null = null
+  let voiceChapterPolls = 0
   let betaReaderRevisionCreated = false
   const mockConversationMessages: DirectMessage[] = [
     {
@@ -2666,6 +2670,13 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
   mockBook.work_type = options.workType ?? mockBook.work_type
   mockBook.mode = options.bookMode ?? mockBook.mode
   mockBook.workspace_shell = options.workspaceShell ?? mockBook.workspace_shell
+  if (options.reviewReadyRun) {
+    mockBook.processing = {
+      ...(mockBook.processing ?? {}),
+      processing_run_id: "completed-review-run",
+      is_fully_ready: true,
+    }
+  }
   let mockWriterWorkspace = JSON.parse(JSON.stringify(writerWorkspace))
   let mockNotifications = JSON.parse(JSON.stringify(notifications))
   let mockWorkspaceTree = JSON.parse(JSON.stringify(workspaceTree))
@@ -2741,6 +2752,29 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
     },
   })
 
+  const mockChapterReports = options.chapterReports ? [
+    {
+      chapter_number: 1,
+      chapter_title: "Ashfall",
+      summary: "Nora reaches the gate, meets Kael, and acts on a blood-oath rule before its source is clear.",
+      new_characters: [{ name: "Nora Vale" }, { name: "Kael" }],
+      relationship_changes: ["Nora and Kael move from suspicion to a reluctant alliance."],
+      plot_threads_opened: ["Who taught Nora the blood-oath rule?"],
+      plot_threads_resolved: [],
+      continuity_flags: ["Nora appears to know the gate rule before Chapter 2 explains how she learned it."],
+    },
+    {
+      chapter_number: 2,
+      chapter_title: "The Ember Gate",
+      summary: "Kael explains the oath and the pair cross the bridge ahead of the ashfall.",
+      new_characters: [],
+      relationship_changes: [],
+      plot_threads_opened: [],
+      plot_threads_resolved: ["The immediate gate crossing"],
+      continuity_flags: [],
+    },
+  ] : []
+
   const buildReaderBootstrap = () => ({
     profile: options.readerBootstrapProfile,
     overview: buildBookOverview(),
@@ -2748,7 +2782,7 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
     saved_quotes: [],
     stats: buildBooksStats(options.zeroProjects ? null : mockBook, options.zeroProjects ? null : mockChapterList, mockUser.daily_word_goal),
     characters: mockCharacterBibleCharacters,
-    chapter_reports: [],
+    chapter_reports: mockChapterReports,
     prewriting_check: preWritingCheck,
     story_health: storyHealth,
     writer_workspace: mockWriterWorkspace,
@@ -3613,6 +3647,21 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
       })
     }
 
+    if (path === "/api/v1/books/book-1/manuscript/reprocess/preflight" && method === "GET") {
+      return json(route, {
+        book_id: "book-1",
+        ready: true,
+        chapters_total: 3,
+        processed_words_to_reserve: Math.max(0, Number(mockBook.total_words ?? 0) || 0),
+        protected_characters: 0,
+        replaceable_characters: 7,
+        missing_source_chapters: [],
+        blockers: [],
+        preview_fingerprint: "a".repeat(64),
+        limitation: "This preflight shows replacement scope, not the new cast.",
+      })
+    }
+
     if (path === "/api/v1/books/book-1/manuscript/reprocess" && method === "POST") {
       return json(route, {
         book_id: "book-1",
@@ -3995,28 +4044,7 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
     }
 
     if (path === "/api/v1/books/book-1/chapter-reports" && method === "GET") {
-      return json(route, options.chapterReports ? [
-        {
-          chapter_number: 1,
-          chapter_title: "Ashfall",
-          summary: "Nora reaches the gate, meets Kael, and acts on a blood-oath rule before its source is clear.",
-          new_characters: [{ name: "Nora Vale" }, { name: "Kael" }],
-          relationship_changes: ["Nora and Kael move from suspicion to a reluctant alliance."],
-          plot_threads_opened: ["Who taught Nora the blood-oath rule?"],
-          plot_threads_resolved: [],
-          continuity_flags: ["Nora appears to know the gate rule before Chapter 2 explains how she learned it."],
-        },
-        {
-          chapter_number: 2,
-          chapter_title: "The Ember Gate",
-          summary: "Kael explains the oath and the pair cross the bridge ahead of the ashfall.",
-          new_characters: [],
-          relationship_changes: [],
-          plot_threads_opened: [],
-          plot_threads_resolved: ["The immediate gate crossing"],
-          continuity_flags: [],
-        },
-      ] : [])
+      return json(route, mockChapterReports)
     }
 
     if (path === "/api/v1/books/book-1/pre-writing-check" && method === "GET") {
@@ -4966,7 +4994,38 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
       })
     }
 
-    if (path === "/api/v1/intelligence/book-1/advisor/voice-consistency" && method === "POST") {
+    if (path === "/api/v1/intelligence/book-1/advisor/voice-chapters/latest" && method === "GET") {
+      if (voiceChapterJob) {
+        voiceChapterPolls += 1
+        if (voiceChapterPolls === 2) voiceChapterJob = { ...voiceChapterJob, status: "running", progress: { completed: 1, total: 2 } }
+        if (voiceChapterPolls >= 3) voiceChapterJob = {
+          ...voiceChapterJob,
+          status: "complete",
+          progress: { completed: 2, total: 2 },
+          result: {
+            status: "partial_evidence", work_total: 2, work_completed: 2,
+            narrator_identified: false, unreviewed_ranges: [],
+            coverage: { processed_ranges: [{ start: 0, end: 80 }], unattributed_ranges: [], unattributed_quoted_ranges: [{ start: 72, end: 80 }], total_characters: 80 },
+            voices: [
+              { character_id: "char-gregor", character_name: "Gregor", voice_mode: "dialogue", status: "complete", issues: [], warnings: [], coverage: { processed_ranges: [{ start: 0, end: 60 }], compared_ranges: [{ start: 5, end: 25 }], total_characters: 80 } },
+              { character_id: "char-grete", character_name: "Grete", voice_mode: "dialogue", status: "partial_evidence", issues: [], warnings: ["Only one attributed speech sample was available."], coverage: { processed_ranges: [{ start: 40, end: 80 }], compared_ranges: [{ start: 45, end: 65 }], total_characters: 80 } },
+            ],
+          },
+        }
+      }
+      return json(route, voiceChapterJob)
+    }
+    if (path === "/api/v1/intelligence/book-1/advisor/voice-chapters" && method === "POST") {
+      const body = route.request().postDataJSON() as { chapter_number: number }
+      voiceChapterJob = { job_id: "voice-chapter-job-1", status: "queued", chapter_number: body.chapter_number, progress: { completed: 0, total: 2 }, next_resume_at: null, result: null, error: null }
+      voiceChapterPolls = 0
+      return json(route, voiceChapterJob, 202)
+    }
+    if (path === "/api/v1/intelligence/book-1/advisor/voice-chapters/jobs/voice-chapter-job-1" && method === "GET") {
+      return json(route, voiceChapterJob)
+    }
+    if ((path === "/api/v1/intelligence/book-1/advisor/voice-consistency" || path === "/api/v1/intelligence/book-1/advisor/voice-consistency-stream") && method === "POST") {
+      const respond = (body: unknown) => path.endsWith("-stream") ? voiceStreamResult(route, body) : json(route, body)
       if (voiceConsistencyMode === "backend-error") {
         return route.fulfill({
           status: 503,
@@ -4975,19 +5034,19 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
         })
       }
       if (voiceConsistencyMode === "weak-attribution") {
-        return json(route, weakAttributionVoiceConsistency)
+        return respond(weakAttributionVoiceConsistency)
       }
       if (voiceConsistencyMode === "selected-character") {
-        return json(route, selectedCharacterVoiceConsistency)
+        return respond(selectedCharacterVoiceConsistency)
       }
       const payload = route.request().postDataJSON() as { character_id?: string } | null
       if (payload?.character_id === "char-gregor") {
-        return json(route, selectedCharacterVoiceConsistency)
+        return respond(selectedCharacterVoiceConsistency)
       }
       if (payload?.character_id === "char-grete") {
-        return json(route, weakAttributionVoiceConsistency)
+        return respond(weakAttributionVoiceConsistency)
       }
-      return json(route, voiceConsistency)
+      return respond(voiceConsistency)
     }
 
     if (path === "/api/v1/intelligence/book-1/advisor/beta-reader/reports" && method === "GET") {

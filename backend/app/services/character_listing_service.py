@@ -70,10 +70,22 @@ async def list_book_characters_for_viewer(
             Character.id,
             Character.book_id,
             Character.name,
+            Character.aliases,
             Character.role,
             Character.first_chapter,
             Character.last_seen_chapter,
             Character.mention_count,
+            Character.trait_state,
+            Character.personality_tags,
+            Character.motivations,
+            Character.fears,
+            Character.goal,
+            Character.lie_they_believe,
+            Character.backstory_wound,
+            Character.arc_type,
+            Character.arc_summary,
+            Character.archetype,
+            Character.growth_events,
             Character.analysis_metadata,
             Character.visibility_state,
             Character.approval_state,
@@ -82,11 +94,9 @@ async def list_book_characters_for_viewer(
             Character.merged_into_character_id,
             Character.is_manual,
         ]
-        if "aliases" in requested_fields:
-            projected_columns.append(Character.aliases)
-        if "status" in requested_fields:
-            projected_columns.extend((Character.arc_summary, Character.growth_events))
-        character_query = character_query.options(load_only(*projected_columns))
+        # Visibility scoring can inspect profile evidence for legacy rows even
+        # when callers request only id/name. Never let async ORM lazy-load here.
+        character_query = character_query.options(load_only(*projected_columns, raiseload=True))
     else:
         eager_options = []
         if fields_requested(fields, "alias_records"):

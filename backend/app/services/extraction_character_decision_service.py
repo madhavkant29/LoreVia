@@ -3,21 +3,73 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
+from sqlalchemy import select
+
 from app.engine.character.entity_filters import (
     CharacterPersistenceDecision,
     character_persistence_decision,
+    entity_words,
 )
+from app.models.character import CharacterCandidate
+from app.models.operations import AiQualityEvent
 from app.services.character_identity.classification import CandidateKind, classify_candidate_kind
 from app.utils.characters.candidates import (
     can_auto_persist_character_candidate,
     decide_character_candidate_disposition,
 )
-from app.utils.characters.identity import is_role_only_character_name
+from app.utils.characters.identity import is_role_only_character_name, normalize_character_name
 from app.utils.characters.presentation import build_character_dossier_summary
+from app.utils.characters.profile_evidence import profile_claim_records
 from app.utils.characters.review import record_character_candidate
 
 AUTO_SAVE_CONFIDENCE = 0.78
 MIN_EXISTING_UPDATE_CONFIDENCE = 0.55
+
+
+async def load_author_review_holds(
+    db, *, book_id: uuid.UUID, chapter_number: int | None
+) -> dict[str, str]:
+    """Find names the author rejected, marked as places, or demoted for review."""
+    filters = [
+        CharacterCandidate.book_id == book_id,
+        CharacterCandidate.status.in_(("pending", "suppressed", "rejected")),
+    ]
+    if chapter_number is not None:
+        filters.append(CharacterCandidate.chapter_number == chapter_number)
+    candidates = (await db.execute(select(CharacterCandidate).where(*filters))).scalars().all()
+    rejected_ids = [str(candidate.id) for candidate in candidates if candidate.status == "rejected"]
+    historical_rejections = (
+        set(
+            (
+                await db.scalars(
+                    select(AiQualityEvent.entity_id).where(
+                        AiQualityEvent.book_id == book_id,
+                        AiQualityEvent.entity_type == "character_candidate",
+                        AiQualityEvent.entity_id.in_(rejected_ids),
+                        AiQualityEvent.actor_user_id.is_not(None),
+                        AiQualityEvent.outcome == "rejected",
+                    )
+                )
+            ).all()
+        )
+        if rejected_ids
+        else set()
+    )
+    holds: dict[str, str] = {}
+    for candidate in candidates:
+        name = normalize_character_name(candidate.proposed_name)
+        if not name:
+            continue
+        if candidate.rejection_reason == "author_marked_place":
+            holds[name] = "author_marked_place"
+        elif str(candidate.source_batch_key or "").startswith("manual-demote:"):
+            holds[name] = "manual_demoted_for_review"
+        elif candidate.status == "rejected" and (
+            "author_rejected_candidate" in (candidate.reason_codes or [])
+            or str(candidate.id) in historical_rejections
+        ):
+            holds[name] = "author_rejected_candidate"
+    return holds
 
 
 def _entity_evidence(entity: dict) -> dict:
@@ -165,6 +217,42 @@ def _should_update_existing_character(entity: dict) -> bool:
     )
 
 
+def _can_update_exact_existing_profile(entity: dict, existing_name: str) -> bool:
+    """Allow cited profile evidence for a unique exact full-name roster match."""
+    name = str(entity.get("name") or "")
+    normalized_name = normalize_character_name(name)
+    if (
+        len(entity_words(name)) < 2
+        or normalized_name != normalize_character_name(existing_name)
+        or is_role_only_character_name(name)
+        or classify_candidate_kind(name) == CandidateKind.TITLE_NAME
+        or _entity_verifier_band(entity) != "accept"
+        or float(entity.get("confidence") or 0) < MIN_EXISTING_UPDATE_CONFIDENCE
+    ):
+        return False
+    evidence = _entity_evidence(entity)
+    if (
+        evidence.get("profile_enrichment_status") != "complete"
+        or evidence.get("source_mention_count_verified") is not True
+        or int(evidence.get("mention_count") or 0) < 1
+        or evidence.get("ambiguous_full_name_fragment") is True
+        or entity.get("anti_merge_names")
+    ):
+        return False
+    if any(
+        normalize_character_name(str(candidate)) != normalized_name
+        for candidate in [*(entity.get("aliases") or []), *(evidence.get("cluster_names") or [])]
+    ):
+        return False
+    dossier = _entity_dossier_summary(entity)
+    return bool(
+        not dossier.get("resolver_ambiguity_count")
+        and not dossier.get("conflict_signal_count")
+        and not dossier.get("non_person_signal_count")
+        and profile_claim_records(entity)
+    )
+
+
 def _has_character_profile_signal(entity: dict) -> bool:
     traits = entity.get("traits")
     if isinstance(traits, dict) and any(
@@ -208,6 +296,8 @@ def _entity_requires_manual_review(entity: dict) -> str | None:
         return "mention_verifier_rejected"
     if classify_candidate_kind(entity.get("name")) == CandidateKind.TITLE_NAME:
         return "title_name_requires_review"
+    if classify_candidate_kind(entity.get("name")) == CandidateKind.ROLE_DESCRIPTOR:
+        return "role_descriptor_requires_review"
 
     evidence = _entity_evidence(entity)
     cluster_names = [

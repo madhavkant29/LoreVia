@@ -69,11 +69,18 @@ describe("books api", () => {
     expect(invalidateQueryKeysMock).toHaveBeenCalledWith("reader:book-1:")
   })
 
-  it("confirms upload charge when reprocessing manuscript", async () => {
-    await booksApi.reprocessManuscript("book-1")
+  it("loads the required manuscript reprocess preflight", async () => {
+    await booksApi.previewManuscriptReprocess("book-1")
+
+    expect(getMock).toHaveBeenCalledWith("/books/book-1/manuscript/reprocess/preflight")
+  })
+
+  it("sends the preflight fingerprint with a confirmed manuscript reprocess", async () => {
+    await booksApi.reprocessManuscript("book-1", "a".repeat(64))
 
     expect(postMock).toHaveBeenCalledWith("/books/book-1/manuscript/reprocess", {
       confirm_upload_charge: true,
+      preview_fingerprint: "a".repeat(64),
     })
     expect(invalidateQueryKeysMock).toHaveBeenCalledWith("book:book-1:")
   })

@@ -8,29 +8,37 @@ import { intelligenceApi, MAX_ADVISOR_PASSAGE_CHARS } from "@/lib/api/intelligen
 import { asQueryKey, bookCacheKey, readerCacheKey } from "@/lib/query/cacheKeys"
 import { getApiErrorDetail } from "@/lib/utils/apiErrors"
 import { saveContextualVaultNote } from "@/lib/utils/notes"
-import { buildVoiceIssueNote, buildVoiceReviewNote, buildVoiceReviewSceneDraft } from "@/lib/utils/voiceWorkspace"
+import { applyVoiceFindingDecision, buildVoiceIssueNote, buildVoiceReviewNote, buildVoiceReviewSceneDraft, countVoiceSourceCharacters, focusedVoicePassage, voiceReviewErrorMessage } from "@/lib/utils/voiceWorkspace"
 import type { Character } from "@/types/character"
-import type { VoiceConsistencyIssue, VoiceConsistencyResponse } from "@/types/intelligence"
+import type { VoiceConsistencyIssue, VoiceConsistencyResponse, VoiceReviewDecision } from "@/types/intelligence"
 
-type Draft = { text: string; original: string; title: string }
+type Draft = { text: string; original: string; title: string; autoFocused?: boolean }
 export type VoiceResult = VoiceConsistencyResponse & {
-  source: { text: string; chapterNumber: number | null; chapterTitle: string; characterId: string | null; characterName: string }
+  source: { text: string; chapterNumber: number | null; chapterTitle: string; characterId: string | null; characterName: string; sceneContext: string; voiceMode: "dialogue" | "first_person_narration" }
 }
 
 export function useVoiceWorkspace(bookId: string) {
   const [selectedChapter, setSelectedChapter] = useState<number | null>(null)
   const [selectedCharacterId, setSelectedCharacterId] = useState<string | null>(null)
+  const [sceneContext, setSceneContext] = useState("")
+  const [voiceMode, setVoiceMode] = useState<"dialogue" | "first_person_narration">("dialogue")
   const [drafts, setDrafts] = useState<Record<string, Draft>>({ custom: { text: "", original: "", title: "Custom passage" } })
   const [result, setResult] = useState<VoiceResult | null>(null)
   const [reviewLoading, setReviewLoading] = useState(false)
+  const [reviewStage, setReviewStage] = useState<string | null>(null)
   const [reviewError, setReviewError] = useState<string | null>(null)
+  const [focusStatus, setFocusStatus] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [saveStatus, setSaveStatus] = useState<string | null>(null)
   const [saveError, setSaveError] = useState<string | null>(null)
+  const [decisionSavingKey, setDecisionSavingKey] = useState<string | null>(null)
+  const [decisionError, setDecisionError] = useState<string | null>(null)
   const initialized = useRef(false)
   const mounted = useRef(true)
   const reviewLock = useRef(false)
+  const reviewController = useRef<AbortController | null>(null)
   const saveLock = useRef(false)
+  const decisionLock = useRef(false)
   const dirty = Object.values(drafts).some((draft) => draft.text !== draft.original)
   const leaving = useRef(false)
   leaving.current = dirty || !!result || reviewLoading || saving
@@ -46,7 +54,7 @@ export function useVoiceWorkspace(bookId: string) {
       if (!window.confirm("Leave voice review? Passage edits and this review are kept only on this page. Save a snapshot before leaving if you need a copy.")) { event.preventDefault(); event.stopPropagation() }
     }
     window.addEventListener("beforeunload", unload); document.addEventListener("click", click, true)
-    return () => { mounted.current = false; window.removeEventListener("beforeunload", unload); document.removeEventListener("click", click, true) }
+    return () => { mounted.current = false; reviewController.current?.abort(); window.removeEventListener("beforeunload", unload); document.removeEventListener("click", click, true) }
   }, [])
 
   const bookQuery = useQuery({ queryKey: asQueryKey(bookCacheKey(bookId, "detail")), queryFn: () => booksApi.get(bookId), retry: false })
@@ -80,32 +88,67 @@ export function useVoiceWorkspace(bookId: string) {
     } })
   }, [chapterQuery.data, chaptersQuery.data, selectedChapter, sourceKey])
 
-  const selectChapter = (chapter: number | null) => { initialized.current = true; setSelectedChapter(chapter) }
+  const selectChapter = (chapter: number | null) => { initialized.current = true; setFocusStatus(null); setSelectedChapter(chapter) }
   const setText = (value: string) => {
     initialized.current = true
-    setDrafts((current) => current[sourceKey] ? { ...current, [sourceKey]: { ...current[sourceKey], text: value } } : current)
+    setFocusStatus(null)
+    setDrafts((current) => current[sourceKey] ? { ...current, [sourceKey]: { ...current[sourceKey], text: value, autoFocused: false } } : current)
   }
   const resetDraft = () => {
     if (!draft || !window.confirm("Discard edits to this passage and restore its original text?")) return
     setText(draft.original)
   }
-  const overLimit = text.trim().length > MAX_ADVISOR_PASSAGE_CHARS
-  const contextChanged = !!result && (result.source.text !== text.trim() || result.source.chapterNumber !== selectedChapter || result.source.characterId !== selectedCharacterId)
+  const overLimit = countVoiceSourceCharacters(text) > MAX_ADVISOR_PASSAGE_CHARS
+  const focusChapterVoice = (characterId: string | null, mode: "dialogue" | "first_person_narration", range?: { start: number; end: number }) => {
+    const original = draft?.original ?? chapterQuery.data?.text_content ?? ""
+    if (selectedChapter === null || !original) {
+      setFocusStatus("The saved chapter text is unavailable. Refresh the chapter before a focused review.")
+      return false
+    }
+    if (!range && countVoiceSourceCharacters(original) > MAX_ADVISOR_PASSAGE_CHARS) {
+      setSelectedCharacterId(characterId)
+      setVoiceMode(mode)
+      setFocusStatus("No cited range is available for this voice. Choose a passage from the chapter text before reviewing.")
+      return false
+    }
+    const excerpt = focusedVoicePassage(original, range, MAX_ADVISOR_PASSAGE_CHARS)
+    if (!excerpt) {
+      setFocusStatus("The saved chapter has changed since this result was produced. Refresh the chapter review.")
+      return false
+    }
+    if (draft && draft.text !== draft.original && !draft.autoFocused && countVoiceSourceCharacters(original) > MAX_ADVISOR_PASSAGE_CHARS) {
+      setFocusStatus("Your unsaved passage edits are preserved. Save or discard them before selecting a different chapter excerpt.")
+      return false
+    }
+    if (countVoiceSourceCharacters(original) > MAX_ADVISOR_PASSAGE_CHARS) {
+      setDrafts((current) => ({ ...current, [sourceKey]: { text: excerpt, original, title: draft?.title ?? chapterTitle, autoFocused: true } }))
+      setFocusStatus("A bounded excerpt from the saved chapter is selected below. Restore the full chapter with Discard passage edits.")
+    } else {
+      setFocusStatus(null)
+    }
+    setSelectedCharacterId(characterId)
+    setVoiceMode(mode)
+    return true
+  }
+  const contextChanged = !!result && (result.source.text !== text || result.source.chapterNumber !== selectedChapter || result.source.characterId !== selectedCharacterId || result.source.sceneContext !== sceneContext.trim() || result.source.voiceMode !== voiceMode)
   const chapterAvailable = selectedChapter === null || !!chaptersQuery.data?.chapters.some((chapter) => chapter.number === selectedChapter)
   const canReview = !!bookQuery.data && !bookQuery.isError && chapterAvailable && !!draft && !!text.trim() && !overLimit && (!selectedCharacterId || !!selectedCharacter)
 
   const runReview = async () => {
     if (reviewLock.current || saveLock.current || !canReview) return
-    reviewLock.current = true; setReviewLoading(true); setReviewError(null); setSaveStatus(null); setSaveError(null)
-    const source = { text: text.trim(), chapterNumber: selectedChapter, chapterTitle, characterId: selectedCharacterId, characterName: selectedCharacter?.name ?? "Auto-detect" }
+    reviewLock.current = true; setReviewLoading(true); setReviewStage("Connecting to voice review…"); setReviewError(null); setSaveStatus(null); setSaveError(null)
+    const controller = new AbortController()
+    reviewController.current = controller
+    const source = { text, chapterNumber: selectedChapter, chapterTitle, characterId: selectedCharacterId, characterName: selectedCharacter?.name ?? "Auto-detect", sceneContext: sceneContext.trim(), voiceMode }
     try {
-      const response = await intelligenceApi.voiceConsistencyReview(bookQuery.data!.id, source.text, { chapterNum: source.chapterNumber ?? undefined, characterId: source.characterId })
+      const response = await intelligenceApi.voiceConsistencyReviewStream(bookQuery.data!.id, source.text, { chapterNum: source.chapterNumber ?? undefined, characterId: source.characterId, ...(source.sceneContext ? { sceneContext: source.sceneContext } : {}), ...(source.voiceMode === "first_person_narration" ? { voiceMode: source.voiceMode } : {}) }, { signal: controller.signal, onStage: (message) => { if (mounted.current) setReviewStage(message) } })
       if (mounted.current) setResult({ ...response, source })
     } catch (error) {
-      if (mounted.current) setReviewError(getApiErrorDetail(error) ?? "Could not run the voice review right now. Please try again.")
+      if (mounted.current) setReviewError(voiceReviewErrorMessage(error))
     } finally {
       reviewLock.current = false
-      if (mounted.current) setReviewLoading(false)
+      if (reviewController.current === controller) reviewController.current = null
+      if (mounted.current) { setReviewLoading(false); setReviewStage(null) }
     }
   }
 
@@ -118,10 +161,10 @@ export function useVoiceWorkspace(bookId: string) {
       let path: string
       if (kind === "snapshot") {
         const tree = await booksApi.getWorkspaceTree(bookId)
-        const scene = buildVoiceReviewSceneDraft({ ...source, sourceText: source.text, overallVerdict: review.overall_verdict, issues: review.issues, existingPaths: (tree?.scene_groups ?? []).flatMap((group) => group.scenes.map((item) => item.path)) })
+        const scene = buildVoiceReviewSceneDraft({ ...source, sourceText: source.text, overallVerdict: review.overall_verdict, issues: review.issues, suppressedFindings: result.suppressed_findings, reviewStatus: review.status, existingPaths: (tree?.scene_groups ?? []).flatMap((group) => group.scenes.map((item) => item.path)) })
         path = (await booksApi.saveScene(bookId, { ...scene, body: `${scene.body}\n\nCharacter focus: ${source.characterName}${limitations}` })).path
       } else {
-        const note = kind === "issue" && issue ? buildVoiceIssueNote(issue) : buildVoiceReviewNote({ ...source, overallVerdict: review.overall_verdict, charactersReviewed: result.characters_reviewed, issues: review.issues, matches: result.character_matches ?? [] })
+        const note = kind === "issue" && issue ? buildVoiceIssueNote(issue) : buildVoiceReviewNote({ ...source, overallVerdict: review.overall_verdict, charactersReviewed: result.characters_reviewed, issues: review.issues, suppressedFindings: result.suppressed_findings, reviewStatus: review.status, matches: result.character_matches ?? [] })
         const context = `${source.chapterNumber === null ? "Custom passage" : `Chapter ${source.chapterNumber}: ${source.chapterTitle}`}\nCharacter focus: ${source.characterName}`
         path = (await saveContextualVaultNote({ bookId, title: note.title, content: `${context}\n\n${note.body}${limitations}`, context: "story_advisor", folderSegments: source.chapterNumber !== null ? ["Voice", `Chapter ${source.chapterNumber}`] : ["Voice"] })).path
       }
@@ -134,6 +177,22 @@ export function useVoiceWorkspace(bookId: string) {
     }
   }
 
-  return { bookQuery, chaptersQuery, charactersQuery, chapterQuery, selectedChapter, selectChapter, selectedCharacterId, setSelectedCharacterId, selectedCharacter, characters,
-    text, setText, chapterTitle, chapterAvailable, draft, resetDraft, dirty, result, contextChanged, overLimit, canReview, runReview, reviewLoading, reviewError, saving, saveStatus, saveError, save }
+  const decideFinding = async (issue: VoiceConsistencyIssue, decision: VoiceReviewDecision) => {
+    if (!issue.finding_key || decisionLock.current || reviewLock.current || !result) return
+    decisionLock.current = true
+    setDecisionSavingKey(issue.finding_key)
+    setDecisionError(null)
+    try {
+      await intelligenceApi.saveVoiceReviewDecision(bookQuery.data!.id, issue.finding_key, decision)
+      if (mounted.current) setResult((current) => current ? applyVoiceFindingDecision(current, issue.finding_key!, decision) : current)
+    } catch (error) {
+      if (mounted.current) setDecisionError(getApiErrorDetail(error) ?? "Could not save that decision. The finding remains available; please retry.")
+    } finally {
+      decisionLock.current = false
+      if (mounted.current) setDecisionSavingKey(null)
+    }
+  }
+
+  return { bookQuery, chaptersQuery, charactersQuery, chapterQuery, selectedChapter, selectChapter, selectedCharacterId, setSelectedCharacterId, selectedCharacter, characters, sceneContext, setSceneContext, voiceMode, setVoiceMode,
+    text, setText, chapterTitle, chapterAvailable, draft, resetDraft, dirty, focusChapterVoice, focusStatus, result, contextChanged, overLimit, canReview, runReview, reviewLoading, reviewStage, reviewError, saving, saveStatus, saveError, save, decideFinding, decisionSavingKey, decisionError }
 }

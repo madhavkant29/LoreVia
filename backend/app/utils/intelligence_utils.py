@@ -418,7 +418,8 @@ def compute_voice_metrics(dialogues: list[str]) -> dict[str, Any]:
             "dominant_markers": {},
             "signature_phrases": [],
         }
-    words = re.findall(r"[A-Za-z0-9']+", " ".join(cleaned))
+    word_pattern = r"[^\W_]+(?:['’][^\W_]+)*"
+    words = re.findall(word_pattern, " ".join(cleaned), flags=re.UNICODE)
     sentences = [
         part.strip()
         for dialogue in cleaned
@@ -428,7 +429,9 @@ def compute_voice_metrics(dialogues: list[str]) -> dict[str, Any]:
     lower_words = [word.lower() for word in words]
     total_words = max(1, len(words))
     unique_words = {word.lower() for word in words}
-    contractions = sum(1 for word in lower_words if word in VOICE_CONTRACTION_WORDS or "'" in word)
+    contractions = sum(
+        1 for word in lower_words if word in VOICE_CONTRACTION_WORDS or "'" in word or "’" in word
+    )
     question_rate = sum(dialogue.count("?") for dialogue in cleaned)
     exclamation_rate = sum(dialogue.count("!") for dialogue in cleaned)
     ellipsis_rate = sum(dialogue.count("...") for dialogue in cleaned)
@@ -438,7 +441,7 @@ def compute_voice_metrics(dialogues: list[str]) -> dict[str, Any]:
     emotional_rate = sum(1 for word in lower_words if word in VOICE_EMOTION_WORDS)
     avg_sentence_length = int(
         round(
-            sum(len(re.findall(r"[A-Za-z0-9']+", sentence)) for sentence in sentences)
+            sum(len(re.findall(word_pattern, sentence)) for sentence in sentences)
             / max(1, len(sentences))
         )
     )
@@ -454,7 +457,9 @@ def compute_voice_metrics(dialogues: list[str]) -> dict[str, Any]:
     }
     phrase_counts: dict[str, int] = {}
     for dialogue in cleaned:
-        for phrase in re.findall(r"\b[a-z']+\s+[a-z']+\b", dialogue.lower()):
+        for phrase in re.findall(
+            rf"\b{word_pattern}\s+{word_pattern}\b", dialogue.casefold(), flags=re.UNICODE
+        ):
             phrase_counts[phrase] = phrase_counts.get(phrase, 0) + 1
     signature_phrases = [
         phrase

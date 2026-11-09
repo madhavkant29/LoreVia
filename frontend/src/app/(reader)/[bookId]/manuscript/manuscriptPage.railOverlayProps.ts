@@ -95,7 +95,7 @@ type BuildManuscriptRailOverlayPropsParams = {
   onRemoveScene: (scene: Parameters<ManuscriptLeftRailProps["onRemoveScene"]>[0]) => Promise<void> | void
   onReorderScenesInChapter: (chapterNumber: number, sceneId: string, targetIndex: number) => Promise<void> | void
   onReprocessChapter: (chapterNumber: number) => Promise<void> | void
-  onReprocessConfirm: () => Promise<void> | void
+  onReprocessConfirm: (previewFingerprint: string) => Promise<void> | void
   onResetSceneDragState: ManuscriptLeftRailProps["onResetSceneDragState"]
   onRestoreChapterSnapshot: (versionId: string) => Promise<void> | void
   onRestoreSceneSnapshot: (versionId: string) => Promise<void> | void
@@ -253,7 +253,7 @@ export function buildManuscriptRailOverlayProps({
     onIncludeSceneMetadataOnExportChange,
     onIncludeTableOfContentsOnExportChange: setIncludeTableOfContentsOnExport,
     onReprocessCancel: () => setShowReprocessConfirm(false),
-    onReprocessConfirm: () => void onReprocessConfirm(),
+    onReprocessConfirm: (previewFingerprint) => void onReprocessConfirm(previewFingerprint),
     onRestoreSceneSnapshot: (versionId) => void onRestoreSceneSnapshot(versionId),
     onSave: () => void onSave(),
     onSaveScene: () => void onSaveScene(),

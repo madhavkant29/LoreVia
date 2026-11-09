@@ -12,6 +12,9 @@ const getWorkspaceTreeMock = vi.hoisted(() => vi.fn())
 const getChapterListMock = vi.hoisted(() => vi.fn())
 const getChapterMock = vi.hoisted(() => vi.fn())
 const voiceConsistencyReviewMock = vi.hoisted(() => vi.fn())
+const latestVoiceChapterReviewMock = vi.hoisted(() => vi.fn())
+const startVoiceChapterReviewMock = vi.hoisted(() => vi.fn())
+const saveVoiceReviewDecisionMock = vi.hoisted(() => vi.fn())
 const saveSceneMock = vi.hoisted(() => vi.fn())
 const saveNoteMock = vi.hoisted(() => vi.fn())
 
@@ -46,7 +49,15 @@ vi.mock("@/lib/api/reader", () => ({
 vi.mock("@/lib/api/intelligence", () => ({
   MAX_ADVISOR_PASSAGE_CHARS: 12_000,
   intelligenceApi: {
+    latestVoiceChapterReview: (...args: unknown[]) => latestVoiceChapterReviewMock(...args),
+    startVoiceChapterReview: (...args: unknown[]) => startVoiceChapterReviewMock(...args),
     voiceConsistencyReview: (...args: unknown[]) => voiceConsistencyReviewMock(...args),
+    voiceConsistencyReviewStream: (...args: unknown[]) => {
+      const handlers = args[3] as { onStage?: (message: string) => void } | undefined
+      handlers?.onStage?.("Reviewing the full passage…")
+      return voiceConsistencyReviewMock(...args.slice(0, 3))
+    },
+    saveVoiceReviewDecision: (...args: unknown[]) => saveVoiceReviewDecisionMock(...args),
   },
 }))
 
@@ -113,6 +124,9 @@ beforeEach(() => {
   getChapterListMock.mockReset()
   getChapterMock.mockReset()
   voiceConsistencyReviewMock.mockReset()
+  latestVoiceChapterReviewMock.mockReset().mockResolvedValue(null)
+  startVoiceChapterReviewMock.mockReset().mockResolvedValue({ job_id: "job-1", status: "queued", chapter_number: 1, progress: { completed: 0, total: 0 }, next_resume_at: null, result: null, error: null })
+  saveVoiceReviewDecisionMock.mockReset().mockResolvedValue({ finding_key: "a".repeat(64), decision: "intentional", note: null })
   saveSceneMock.mockReset()
 
   getBookMock.mockResolvedValue({
@@ -170,6 +184,376 @@ afterEach(() => {
 })
 
 describe("VoiceConsistencyPage", () => {
+  it("starts a saved chapter review without submitting the passage", async () => {
+    latestVoiceChapterReviewMock.mockResolvedValueOnce(null).mockResolvedValue({
+      job_id: "job-1", status: "queued", chapter_number: 1,
+      progress: { completed: 0, total: 3 }, next_resume_at: null, result: null, error: null,
+    })
+    renderPage()
+    await waitForContent("The Ember Gate")
+    const start = Array.from(container?.querySelectorAll("button") ?? []).find((button) => button.textContent === "Review chapter")
+    await act(async () => { start?.click(); await new Promise((resolve) => setTimeout(resolve, 10)) })
+    await waitForContent("Chapter review queued")
+    expect(startVoiceChapterReviewMock).toHaveBeenCalledWith("book-1", 1, false, false)
+    expect(voiceConsistencyReviewMock).not.toHaveBeenCalled()
+  })
+
+  it("shows paused chapter progress and offers a retry", async () => {
+    latestVoiceChapterReviewMock.mockResolvedValue({
+      job_id: "job-1", status: "paused", chapter_number: 1,
+      progress: { completed: 2, total: 5 }, next_resume_at: null, result: null,
+      error: "AI allowance is unavailable.",
+    })
+    renderPage()
+    await waitForContent("Chapter review paused")
+    expect(container?.textContent).toContain("2 of 5 voice sections reviewed")
+    const retry = Array.from(container?.querySelectorAll("button") ?? []).find((button) => button.textContent === "Retry chapter review")
+    await act(async () => { retry?.click(); await new Promise((resolve) => setTimeout(resolve, 10)) })
+    expect(startVoiceChapterReviewMock).toHaveBeenCalledWith("book-1", 1, true, false)
+  })
+
+  it("shows completed voice cards during an unfinished chapter review", async () => {
+    latestVoiceChapterReviewMock.mockResolvedValue({
+      job_id: "running-job", status: "running", chapter_number: 1,
+      progress: { completed: 1, total: 3 }, next_resume_at: null, error: null,
+      result: {
+        status: "partial_evidence",
+        voices: [{ character_id: "character-1", character_name: "Mara", voice_mode: "dialogue", status: "complete", issues: [], warnings: [], coverage: { compared_ranges: [{ start: 10, end: 42 }] } }],
+        coverage: { processed_ranges: [{ start: 0, end: 50 }], unattributed_ranges: [{ start: 50, end: 100 }], unattributed_quoted_ranges: [], total_characters: 100 },
+        narrator_identified: false, narration_present: false,
+        unreviewed_ranges: [{ start: 50, end: 100 }],
+      },
+    })
+    renderPage()
+    await waitForContent("Reviewing chapter")
+    expect(container?.textContent).toContain("1 of 3 voice sections reviewed")
+    expect(container?.textContent).toContain("Mara · Dialogue")
+    expect(container?.textContent).toContain("This is not a clean verdict")
+  })
+
+  it("opens a reviewable focused excerpt from a chapter longer than the passage limit", async () => {
+    const source = "Intro ".repeat(2_500) + 'Gregor said, "The late signal is here."' + " Epilogue".repeat(500)
+    const quoteStart = Array.from(source.slice(0, source.indexOf("The late signal"))).length
+    getChapterMock.mockResolvedValue({ chapter_title: "The Ember Gate", text_content: source })
+    latestVoiceChapterReviewMock.mockResolvedValue({
+      job_id: "complete-job", status: "complete", chapter_number: 1,
+      progress: { completed: 1, total: 1 }, next_resume_at: null, error: null,
+      result: {
+        status: "complete", voices: [{ character_id: "char-gregor", character_name: "Gregor", voice_mode: "dialogue", status: "complete", issues: [], warnings: [], coverage: { processed_ranges: [{ start: quoteStart, end: quoteStart + 15 }], compared_ranges: [{ start: quoteStart, end: quoteStart + 15 }] } }],
+        coverage: { processed_ranges: [{ start: quoteStart, end: quoteStart + 15 }], unattributed_ranges: [], unattributed_quoted_ranges: [], total_characters: Array.from(source).length },
+        narrator_identified: false, narration_present: false, unreviewed_ranges: [],
+      },
+    })
+    renderPage()
+    await waitForContent("Gregor · Dialogue")
+    await waitForContent(`${Array.from(source).length.toLocaleString()} / 12,000`)
+    const focus = Array.from(container?.querySelectorAll("button") ?? []).find((button) => button.textContent === "Review focused passage")
+    await act(async () => { focus?.click() })
+    const editor = container?.querySelector('textarea[aria-label="Dialogue or chapter text for voice review"]') as HTMLTextAreaElement
+    expect(editor.value).toContain("The late signal is here")
+    expect(Array.from(editor.value).length).toBeLessThanOrEqual(12_000)
+    expect((container?.querySelector("#voice-character") as HTMLSelectElement).value).toBe("char-gregor")
+    const run = Array.from(container?.querySelectorAll("button") ?? []).find((button) => button.textContent === "Run voice review")
+    expect(run?.disabled).toBe(false)
+  })
+
+  it("preserves hand-edited passage text when choosing another voice excerpt", async () => {
+    const source = "Intro ".repeat(2_500) + 'Gregor said, "The late signal is here."'
+    getChapterMock.mockResolvedValue({ chapter_title: "The Ember Gate", text_content: source })
+    latestVoiceChapterReviewMock.mockResolvedValue({
+      job_id: "complete-job", status: "complete", chapter_number: 1,
+      progress: { completed: 1, total: 1 }, next_resume_at: null, error: null,
+      result: {
+        status: "partial_evidence", voices: [{ character_id: "char-gregor", character_name: "Gregor", voice_mode: "dialogue", status: "complete", issues: [], warnings: [], coverage: { processed_ranges: [{ start: 0, end: 20 }], compared_ranges: [{ start: 0, end: 20 }] } }],
+        coverage: { processed_ranges: [{ start: 0, end: 20 }], unattributed_ranges: [], unattributed_quoted_ranges: [], total_characters: Array.from(source).length },
+        narrator_identified: false, narration_present: false, unreviewed_ranges: [],
+      },
+    })
+    renderPage()
+    await waitForContent("Gregor · Dialogue")
+    await waitForContent(`${Array.from(source).length.toLocaleString()} / 12,000`)
+    const editor = container?.querySelector('textarea[aria-label="Dialogue or chapter text for voice review"]') as HTMLTextAreaElement
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(editor, "My unsaved revision")
+      editor.dispatchEvent(new Event("input", { bubbles: true }))
+    })
+    const focus = Array.from(container?.querySelectorAll("button") ?? []).find((button) => button.textContent === "Review focused passage")
+    await act(async () => { focus?.click() })
+    expect(editor.value).toBe("My unsaved revision")
+    expect(container?.textContent).toContain("Your unsaved passage edits are preserved")
+  })
+
+  it("starts a fresh review when the saved chapter already has a complete result", async () => {
+    latestVoiceChapterReviewMock.mockResolvedValue({
+      job_id: "completed-job", status: "complete", chapter_number: 1,
+      progress: { completed: 1, total: 1 }, next_resume_at: null,
+      result: { status: "insufficient_evidence", voices: [], coverage: { processed_ranges: [], total_characters: 100, unattributed_quoted_ranges: [] }, narrator_identified: false, unreviewed_ranges: [] },
+      error: null,
+    })
+    renderPage()
+    await waitForContent("Chapter review finished with limitations")
+    const again = Array.from(container?.querySelectorAll("button") ?? []).find((button) => button.textContent === "Review chapter again")
+    await act(async () => { again?.click(); await new Promise((resolve) => setTimeout(resolve, 10)) })
+    expect(startVoiceChapterReviewMock).toHaveBeenCalledWith("book-1", 1, false, true)
+  })
+
+  it("waits for an automatic retry instead of offering an immediate retry", async () => {
+    latestVoiceChapterReviewMock.mockResolvedValue({
+      job_id: "paused-job", status: "paused", chapter_number: 1,
+      progress: { completed: 1, total: 3 }, next_resume_at: new Date(Date.now() + 3600_000).toISOString(),
+      result: null, error: "AI processing is temporarily busy.",
+    })
+    renderPage()
+    await waitForContent("Chapter review paused")
+    const retry = Array.from(container?.querySelectorAll("button") ?? []).find((button) => button.textContent === "Automatic retry scheduled")
+    expect(retry?.disabled).toBe(true)
+    expect(startVoiceChapterReviewMock).not.toHaveBeenCalled()
+  })
+
+  it("explains the voice comparison when the info button is clicked", async () => {
+    renderPage()
+    await waitForContent("The Ember Gate")
+    const info = container?.querySelector<HTMLButtonElement>('button[aria-label="How Voice Consistency works"]')
+    expect(info?.getAttribute("aria-expanded")).toBe("false")
+    await act(async () => { info?.click() })
+    expect(info?.getAttribute("aria-expanded")).toBe("true")
+    expect(container?.querySelector('[role="tooltip"]')?.textContent).toContain("review runs in the background")
+    expect(container?.querySelector('[role="tooltip"]')?.textContent).toContain("entire saved chapter")
+    expect(container?.querySelector('[role="tooltip"]')?.textContent).toContain("Passage Auto-detect checks up to five known characters")
+    await act(async () => { container?.querySelector<HTMLButtonElement>('button[aria-label="Close help"]')?.click() })
+    expect(info?.getAttribute("aria-expanded")).toBe("false")
+  })
+
+  it("labels alternate-character similarity as evidence rather than identity proof", async () => {
+    voiceConsistencyReviewMock.mockResolvedValueOnce({
+      review: { status: "complete", overall_verdict: "No supported shift.", issues: [] },
+      retrieved_passages: [],
+      characters_reviewed: ["Gregor"],
+      character_matches: [{
+        character_name: "Gregor",
+        match_score: 42,
+        baseline_sample_size: 3,
+        baseline_word_count: 80,
+        sample_dialogue_count: 2,
+        strongest_signals: [],
+        closest_other_character: "Grete",
+        closest_other_score: 86,
+      }],
+      warnings: [],
+    })
+    renderPage()
+    await waitForContent("The Ember Gate")
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)) })
+    await clickButton("Run voice review")
+    await waitForContent("Closest alternate voice: Grete")
+    expect(container?.textContent).toContain("86% stylistic similarity")
+    expect(container?.textContent).toContain("supporting evidence, not proof of speaker identity")
+  })
+
+  it("records an intentional voice finding and keeps it out of active findings", async () => {
+    const issue = {
+      finding_key: "a".repeat(64), character_name: "Gregor", classification: "possible",
+      severity: "moderate", title: "Register shift", description: "His diction has shifted.",
+      submitted_excerpt: "I can still make this work.", baseline_excerpt: "I shall continue.",
+      baseline_chapter_number: 2, confidence: 0.7, revision_direction: "Keep the urgency.",
+      intentionality_prompt: "Is this deliberate?",
+    }
+    voiceConsistencyReviewMock.mockResolvedValueOnce({
+      review: { status: "complete", overall_verdict: "One possible shift.", issues: [issue] },
+      retrieved_passages: [], characters_reviewed: ["Gregor"], character_matches: [], warnings: [],
+    })
+    renderPage()
+    await waitForContent("The Ember Gate")
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)) })
+    await clickButton("Run voice review")
+    await waitForContent("Register shift")
+
+    await clickButton("Mark intentional")
+
+    expect(saveVoiceReviewDecisionMock).toHaveBeenCalledWith("book-1", issue.finding_key, "intentional")
+    expect(container?.textContent).toContain("Previously reviewed findings (1)")
+    expect(container?.textContent).toContain("marked intentional")
+    expect(container?.textContent).not.toContain("No supported character voice issues were found")
+  })
+
+  it("leaves a voice finding visible when saving its decision fails", async () => {
+    saveVoiceReviewDecisionMock.mockRejectedValueOnce(new Error("offline"))
+    voiceConsistencyReviewMock.mockResolvedValueOnce({
+      review: { status: "complete", overall_verdict: "One possible shift.", issues: [{
+        finding_key: "b".repeat(64), character_name: "Gregor", severity: "moderate",
+        title: "Register shift", description: "His diction has shifted.", intentionality_prompt: "Intentional?",
+      }] },
+      retrieved_passages: [], characters_reviewed: ["Gregor"], character_matches: [], warnings: [],
+    })
+    renderPage()
+    await waitForContent("The Ember Gate")
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)) })
+    await clickButton("Run voice review")
+    await waitForContent("Register shift")
+
+    await clickButton("Mark incorrect")
+
+    expect(container?.textContent).toContain("Could not save that decision")
+    expect(container?.textContent).toContain("Register shift")
+    expect(container?.textContent).toContain("Mark incorrect")
+  })
+
+  it("allows a selected narrator and sends scene context for first-person review", async () => {
+    renderPage()
+    await waitForContent("The Ember Gate")
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)) })
+    const modeSelect = container?.querySelector("#voice-mode") as HTMLSelectElement
+    const characterSelect = container?.querySelector("#voice-character") as HTMLSelectElement
+    const runButton = Array.from(container?.querySelectorAll("button") ?? []).find((button) => button.textContent?.includes("Run voice review"))
+    await act(async () => {
+      modeSelect.value = "first_person_narration"
+      modeSelect.dispatchEvent(new Event("change", { bubbles: true }))
+    })
+    expect(runButton?.disabled).toBe(false)
+    await act(async () => {
+      characterSelect.value = "char-gregor"
+      characterSelect.dispatchEvent(new Event("change", { bubbles: true }))
+    })
+    const contextField = container?.querySelector("#voice-scene-context") as HTMLTextAreaElement
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(contextField, "He is frightened.")
+      contextField.dispatchEvent(new Event("input", { bubbles: true }))
+    })
+    await act(async () => { runButton?.click(); await Promise.resolve() })
+    expect(voiceConsistencyReviewMock).toHaveBeenCalledWith("book-1", expect.any(String), {
+      chapterNum: 1, characterId: "char-gregor", voiceMode: "first_person_narration",
+      sceneContext: "He is frightened.",
+    })
+  })
+
+  it("submits first-person auto-detection without assigning a guessed narrator", async () => {
+    renderPage()
+    await waitForContent("The Ember Gate")
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)) })
+    const modeSelect = container?.querySelector("#voice-mode") as HTMLSelectElement
+    await act(async () => {
+      modeSelect.value = "first_person_narration"
+      modeSelect.dispatchEvent(new Event("change", { bubbles: true }))
+    })
+    expect(container?.textContent).toContain("We will not guess from “I” alone")
+    await clickButton("Run voice review")
+    expect(voiceConsistencyReviewMock).toHaveBeenCalledWith("book-1", expect.any(String), {
+      chapterNum: 1, characterId: null, voiceMode: "first_person_narration",
+    })
+  })
+
+  it("shows insufficient evidence without claiming a clean voice verdict", async () => {
+    voiceConsistencyReviewMock.mockResolvedValueOnce({
+      review: { status: "insufficient_evidence", overall_verdict: "More independent dialogue is needed.", issues: [] },
+      retrieved_passages: [], characters_reviewed: [], characters_detected: ["Gregor"], character_matches: [],
+      warnings: ["Gregor: only 1 attributed baseline excerpt outside this passage."],
+      coverage: { processed_ranges: [], total_characters: 42 },
+    })
+    renderPage()
+    await waitForContent("The Ember Gate")
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)) })
+    const runButton = Array.from(container?.querySelectorAll("button") ?? []).find((button) => button.textContent?.includes("Run voice review"))
+    await act(async () => { runButton?.click(); await Promise.resolve() })
+
+    expect(container?.textContent).toContain("Insufficient voice evidence")
+    expect(container?.textContent).toContain("No verdict was made")
+    expect(container?.textContent).toContain("Voice baselines compared: 0 of 1 detected characters")
+    expect(container?.textContent).toContain("no source sections reviewed")
+    expect(container?.textContent).not.toContain("No supported character voice issues were found")
+  })
+
+  it("labels a pronoun-attributed partial review as uncertain rather than clean", async () => {
+    voiceConsistencyReviewMock.mockResolvedValueOnce({
+      review: { status: "partial_evidence", overall_verdict: "Speaker attribution is tentative.", issues: [] },
+      retrieved_passages: [], characters_reviewed: ["Gregor"], characters_detected: ["Gregor", "Lina"], character_matches: [],
+      baseline_evidence: [{ character_name: "Gregor", sample_count: 3, word_count: 75, chapters: [1, 2], baseline_attribution_confidence: "contextual", attribution_confidence: "contextual" }],
+      warnings: ["Gregor: dialogue was linked through a nearby pronoun."],
+      coverage: { processed_ranges: [{ start: 0, end: 20 }], unattributed_ranges: [{ start: 20, end: 42 }], compared_ranges: [{ start: 5, end: 15 }], not_compared_ranges: [{ start: 0, end: 5 }, { start: 15, end: 42 }], unattributed_quoted_ranges: [{ start: 20, end: 30 }], total_characters: 42 },
+      coverage_by_character: [{ character_name: "Gregor", processed_ranges: [{ start: 0, end: 20 }], unattributed_ranges: [{ start: 20, end: 42 }], compared_ranges: [{ start: 5, end: 15 }], not_compared_ranges: [{ start: 0, end: 5 }, { start: 15, end: 42 }], total_characters: 42 }],
+    })
+    renderPage()
+    await waitForContent("The Ember Gate")
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)) })
+    const runButton = Array.from(container?.querySelectorAll("button") ?? []).find((button) => button.textContent?.includes("Run voice review"))
+    await act(async () => { runButton?.click(); await Promise.resolve() })
+
+    expect(container?.textContent).toContain("Partial voice review")
+    expect(container?.textContent).toContain("Voice baselines compared: 1 of 2 detected characters")
+    expect(container?.textContent).toContain("20 of 42 source characters were in reviewed sections")
+    expect(container?.textContent).toContain("only attributed voice samples were compared")
+    expect(container?.textContent).toContain("Exact voice comparison: 10 characters compared with the baseline; 32 source characters were not voice-compared")
+    expect(container?.textContent).toContain("22 characters had no attributable voice")
+    expect(container?.textContent).toContain("Gregor: 1 overlapping section(s) compared; 1 section(s) had no attributable voice and were not compared")
+    expect(container?.textContent).toContain("10 attributed voice characters compared")
+    expect(container?.textContent).toContain("10 quoted characters were not attributed to a reviewed voice")
+    expect(container?.textContent).toContain("Baseline attribution: contextual")
+    expect(container?.textContent).toContain("Current passage attribution: contextual")
+    expect(container?.textContent).toContain("not a complete verdict")
+    expect(container?.textContent).not.toContain("No supported character voice issues were found")
+  })
+
+  it("shows uncertain narrator baseline evidence without claiming a voice match", async () => {
+    voiceConsistencyReviewMock.mockResolvedValueOnce({
+      voice_mode: "first_person_narration",
+      review: { status: "partial_evidence", overall_verdict: "Narrator attribution in the baseline is tentative.", issues: [] },
+      retrieved_passages: [], characters_reviewed: ["Gregor"], character_matches: [],
+      baseline_evidence: [{ character_name: "Gregor", sample_count: 3, word_count: 140, chapters: [1, 2], baseline_attribution_confidence: "unverified_narrator", attribution_confidence: "user_selected_narrator" }],
+      warnings: ["Gregor: baseline chapters do not independently identify this narrator."],
+      coverage: { processed_ranges: [{ start: 0, end: 42 }], total_characters: 42 },
+    })
+    renderPage()
+    await waitForContent("The Ember Gate")
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)) })
+    await clickButton("Run voice review")
+    await waitForContent("Narrator attribution in the baseline is tentative")
+
+    expect(container?.textContent).toContain("Partial voice review")
+    expect(container?.textContent).toContain("Baseline attribution: unverified narrator")
+    expect(container?.textContent).toContain("Current passage attribution: user selected narrator")
+    expect(container?.textContent).toContain("No reliable match scores were available")
+    expect(container?.textContent).not.toContain("% match")
+  })
+
+  it("explains that sparse current dialogue cannot support a match percentage", async () => {
+    voiceConsistencyReviewMock.mockResolvedValueOnce({
+      review: { status: "partial_evidence", overall_verdict: "Current passage evidence is too limited for a reliable voice match.", issues: [] },
+      retrieved_passages: [], characters_reviewed: ["Gregor"], character_matches: [],
+      warnings: ["Gregor: at least 2 dialogue excerpts and 20 words are needed for a reliable voice match."],
+      coverage: { processed_ranges: [{ start: 0, end: 42 }], total_characters: 42 },
+    })
+    renderPage()
+    await waitForContent("The Ember Gate")
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)) })
+    await clickButton("Run voice review")
+    await waitForContent("Current passage evidence is too limited")
+
+    expect(container?.textContent).toContain("current passage evidence may be too limited")
+    expect(container?.textContent).toContain("No reliable match scores were available")
+    expect(container?.textContent).not.toContain("% match")
+  })
+
+  it("pairs submitted and baseline excerpts with source chapter", async () => {
+    voiceConsistencyReviewMock.mockResolvedValueOnce({
+      review: { status: "complete", overall_verdict: "One possible register shift.", issues: [{
+        character_name: "Gregor", classification: "possible", severity: "moderate", title: "Register shift",
+        description: "The newer line is more casual.", submitted_excerpt: "I can still make this work.",
+        baseline_excerpt: "I shall continue tomorrow.", baseline_chapter_number: 2, confidence: 0.7,
+        revision_direction: "Keep the urgency while checking diction.", intentionality_prompt: "Is this shift intentional?",
+      }] },
+      retrieved_passages: [], characters_reviewed: ["Gregor"], character_matches: [], warnings: [],
+      coverage: { processed_ranges: [{ start: 0, end: 42 }], total_characters: 42 },
+    })
+    renderPage()
+    await waitForContent("The Ember Gate")
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)) })
+    const runButton = Array.from(container?.querySelectorAll("button") ?? []).find((button) => button.textContent?.includes("Run voice review"))
+    await act(async () => { runButton?.click(); await Promise.resolve() })
+
+    expect(container?.textContent).toContain("Submitted passage: I can still make this work.")
+    expect(container?.textContent).toContain("Baseline, chapter 2: I shall continue tomorrow.")
+    expect(container?.textContent).toContain("70% evidence strength")
+  })
+
   it("defaults to auto-detect and sends the selected character when focused", async () => {
     renderPage()
     await waitForContent("The Ember Gate")
@@ -239,6 +623,7 @@ describe("VoiceConsistencyPage", () => {
     let resolve!: (value: unknown) => void
     voiceConsistencyReviewMock.mockImplementationOnce(() => new Promise((done) => { resolve = done }))
     await clickButton("Run voice review")
+    expect(container?.textContent).toContain("Reviewing the full passage…")
     await editPassage("Later revision")
     await act(async () => { resolve({ review: { overall_verdict: "Original review", issues: [] }, characters_reviewed: [], warnings: ["Limited evidence"], retrieved_passages: [] }) })
     await waitForContent("The editor or character focus has changed")

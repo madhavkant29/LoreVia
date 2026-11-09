@@ -23,7 +23,9 @@ from app.utils.retry_utils import LLM_MAX_RETRIES
 log = logging.getLogger("lorevia.embedder")
 
 _EMBEDDING_CLIENT: AsyncOpenAI | None = None
-_EMBEDDING_CLIENT_CACHE_KEY: tuple[int, int | None, str | None, int] | None = None
+_EMBEDDING_CLIENT_CACHE_KEY: (
+    tuple[int, asyncio.AbstractEventLoop | None, str | None, int] | None
+) = None
 
 
 def _embedding_retry_wait_seconds(retry_state: Any) -> float:
@@ -45,11 +47,15 @@ def get_client() -> AsyncOpenAI:
     global _EMBEDDING_CLIENT, _EMBEDDING_CLIENT_CACHE_KEY
 
     try:
-        loop_id = id(asyncio.get_running_loop())
+        loop = asyncio.get_running_loop()
     except RuntimeError:
-        loop_id = None
-    cache_key = (os.getpid(), loop_id, settings.OPENAI_API_KEY, id(AsyncOpenAI))
-    if _EMBEDDING_CLIENT is not None and _EMBEDDING_CLIENT_CACHE_KEY == cache_key:
+        loop = None
+    cache_key = (os.getpid(), loop, settings.OPENAI_API_KEY, id(AsyncOpenAI))
+    if (
+        _EMBEDDING_CLIENT is not None
+        and _EMBEDDING_CLIENT_CACHE_KEY == cache_key
+        and getattr(_EMBEDDING_CLIENT, "is_closed", lambda: False)() is not True
+    ):
         return _EMBEDDING_CLIENT
 
     # The explicit call-level retry below is the single retry owner.

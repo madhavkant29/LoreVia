@@ -8,6 +8,7 @@ import {
   bookCoverageLabel,
   chapterSpanCount,
 } from "./charactersPage.helpers"
+import { characterMentionCountKind } from "./charactersPage.mentionLabels"
 
 type CharacterMentionsTabProps = {
   character: Character
@@ -33,7 +34,7 @@ export function CharacterMentionsTab({
       <SurfaceCard title="Mention summary" isDark={isDark}>
         <dl className="grid gap-3 text-sm">
           <div className="grid grid-cols-[132px_minmax(0,1fr)] gap-3">
-            <dt className={isDark ? "text-slate-400" : "text-stone-600"}>Total mentions</dt>
+            <dt className={isDark ? "text-slate-400" : "text-stone-600"}>{characterMentionCountKind(character)}</dt>
             <dd className={isDark ? "text-white" : "text-stone-900"}>{character.mention_count ?? 0}</dd>
           </div>
           <div className="grid grid-cols-[132px_minmax(0,1fr)] gap-3">
@@ -49,6 +50,11 @@ export function CharacterMentionsTab({
             <dd className={isDark ? "text-white" : "text-stone-900"}>{chapterSpanCount(character)} / {bookCoverageLabel(character, totalChapters)}</dd>
           </div>
         </dl>
+        <p className={`mt-3 text-xs ${isDark ? "text-slate-400" : "text-stone-600"}`}>
+          {character.analysis_metadata?.mention_count_basis === "source_positions"
+            ? "Counts explicit names and supported aliases in the manuscript, not pronouns or unnamed references."
+            : "This older count is an estimate. Reprocess the stored manuscript to calculate source-backed named mentions."}
+        </p>
       </SurfaceCard>
 
       <SurfaceCard title="Open questions" isDark={isDark}>

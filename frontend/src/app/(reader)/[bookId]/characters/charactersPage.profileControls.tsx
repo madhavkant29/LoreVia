@@ -6,6 +6,7 @@ import {
   formatResolverStatus,
   graphVisibilityLabel,
   graphVisibilityReasonCopy,
+  hasImplicitRepairProtection,
   isProtectedCharacter,
 } from "./charactersPage.helpers"
 
@@ -118,8 +119,8 @@ export function CharacterReviewControlsCard({
           <button type="button" disabled={reviewNoteBusy} onClick={onSaveReviewNote} className={actionButtonClasses(isDark)}>
             {reviewNoteBusy ? "Saving..." : "Save review note"}
           </button>
-          <button type="button" disabled={reviewNoteBusy} onClick={onToggleProtectedFromRepair} className={actionButtonClasses(isDark)}>
-            {isProtectedCharacter(character) ? "Unprotect from repair" : "Protect from repair"}
+          <button type="button" disabled={reviewNoteBusy || hasImplicitRepairProtection(character)} onClick={onToggleProtectedFromRepair} className={actionButtonClasses(isDark)}>
+            {hasImplicitRepairProtection(character) ? "Protected by review or manual edits" : isProtectedCharacter(character) ? "Unprotect from repair" : "Protect from repair"}
           </button>
           <button type="button" disabled={saving} onClick={onDemoteSelectedCharacter} className={actionButtonClasses(isDark)}>
             {saving ? "Moving..." : "Demote to review"}

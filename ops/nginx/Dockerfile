@@ -1,4 +1,4 @@
-FROM nginx:1.30.4-alpine3.24@sha256:dc5069ad14f19660b141b21236140b91656bf89bbc3e2417c70ae650cd66104c
+FROM nginx:1.30.6-alpine3.24@sha256:0e52bd054126cdc040b1276c0af347aeb02a41b9cfe305d6094767ac30e97949
 
 # The upstream image can lag Alpine security package releases even when the
 # Nginx patch itself is current. Require the fixed expat release as well as

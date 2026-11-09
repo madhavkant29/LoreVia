@@ -1,9 +1,10 @@
-import { expect, test, type Page } from "@playwright/test"
+import { expect, test, type Page, type Route } from "@playwright/test"
 import { installMockApi } from "./support/mockApi"
 import { criticalAccessibilityViolations } from "./support/accessibility"
 
 const path = "/sky-of-ash--book-1/voice"
-const api = "**/api/v1/intelligence/*/advisor/voice-consistency"
+const api = "**/api/v1/intelligence/*/advisor/voice-consistency-stream"
+const streamReview = (route: Route, payload: unknown) => route.fulfill({ contentType: "text/event-stream", body: `event: stage\ndata: {"message":"Reviewing the full passage..."}\n\nevent: done\ndata: ${JSON.stringify(payload)}\n\n` })
 const input = (page: Page) => page.getByRole("textbox", { name: "Dialogue or chapter text for voice review" })
 const run = (page: Page) => page.getByRole("button", { name: "Run voice review", exact: true })
 const review = { review: { overall_verdict: "The submitted dialogue retains Nora's clipped cadence.", issues: [] }, characters_reviewed: ["Nora"], warnings: ["Only two baseline samples were available."], character_matches: [], retrieved_passages: [{ chapter_num: 2, chapter_title: "The Ember Gate", excerpt: "A baseline dialogue excerpt.", relevance: .8 }] }
@@ -12,6 +13,149 @@ test.beforeEach(async ({ page }) => {
   await installMockApi(page, { voiceConsistency: "selected-character" })
   await page.route("**/api/v1/books/book-1/scenes", (route) => route.request().method() === "POST" ? route.fulfill({ status: 201, json: { ...route.request().postDataJSON(), id: "voice-scene-1" } }) : route.fallback())
   await page.addInitScript(() => { if (!localStorage.getItem("lorevia-preferences")) localStorage.setItem("lorevia-preferences", JSON.stringify({ state: { theme: "dark" }, version: 0 })); document.cookie = "lorevia_analytics_consent=false; Path=/; SameSite=Lax" })
+})
+
+test("saved chapter review resumes after reload and shows separate voices", async ({ page }) => {
+  await page.goto(path)
+  await expect(page.getByRole("button", { name: "Review chapter", exact: true })).toBeEnabled()
+  await page.getByRole("button", { name: "Review chapter", exact: true }).click()
+  await expect(page.getByText("Chapter review queued")).toBeVisible()
+  await page.reload()
+  await expect(page.getByText("Reviewing chapter")).toBeVisible()
+  await expect(page.getByText("1 of 2 voice sections reviewed.")).toBeVisible()
+  await expect(page.getByText("Chapter review finished with limitations")).toBeVisible({ timeout: 10_000 })
+  await expect(page.getByRole("heading", { name: "Gregor · Dialogue" })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Grete · Dialogue" })).toBeVisible()
+  await expect(page.getByText(/1 quoted range without a supported speaker comparison/)).toBeVisible()
+  await page.getByRole("button", { name: "Review focused passage" }).first().click()
+  await expect(page.getByLabel("Character focus")).toHaveValue("char-gregor")
+})
+
+test("focused follow-up selects an attributable excerpt from a long saved chapter", async ({ page }) => {
+  const source = "Opening scene. ".repeat(1_100) + 'Gregor said, "The lantern must stay lit."'
+  const quoteStart = Array.from(source.slice(0, source.indexOf("The lantern must stay lit."))).length
+  await page.route((url) => url.pathname === "/api/v1/reader/book-1/chapter/2", (route) => route.fulfill({
+    json: { chapter_number: 2, chapter_title: "The Ember Gate", total_chapters: 3, text_content: source, text_url: null, html_content: null, characters: [], media: [] },
+  }))
+  await page.route((url) => url.pathname === "/api/v1/intelligence/book-1/advisor/voice-chapters/latest", (route) => route.fulfill({
+    json: {
+      job_id: "long-chapter-job", status: "complete", chapter_number: 2,
+      progress: { completed: 1, total: 1 }, next_resume_at: null, error: null,
+      result: {
+        status: "complete", work_total: 1, work_completed: 1, narrator_identified: false, unreviewed_ranges: [],
+        coverage: { processed_ranges: [{ start: quoteStart, end: quoteStart + 26 }], unattributed_ranges: [], unattributed_quoted_ranges: [], total_characters: Array.from(source).length },
+        voices: [{ character_id: "char-gregor", character_name: "Gregor", voice_mode: "dialogue", status: "complete", issues: [], warnings: [], coverage: { processed_ranges: [{ start: quoteStart, end: quoteStart + 26 }], compared_ranges: [{ start: quoteStart, end: quoteStart + 26 }], total_characters: Array.from(source).length } }],
+      },
+    },
+  }))
+  await page.goto(path)
+  await expect(input(page)).toHaveValue(source)
+  await page.getByRole("button", { name: "Review focused passage" }).click()
+  await expect(input(page)).toHaveValue(/The lantern must stay lit\./)
+  expect(Array.from(await input(page).inputValue()).length).toBeLessThanOrEqual(12_000)
+  await expect(page.getByLabel("Character focus")).toHaveValue("char-gregor")
+  await expect(run(page)).toBeEnabled()
+})
+
+test("completed chapter review starts a fresh job when requested", async ({ page }) => {
+  await page.route((url) => url.pathname === "/api/v1/intelligence/book-1/advisor/voice-chapters/latest", (route) => route.fulfill({
+    json: {
+      job_id: "completed-job", status: "complete", chapter_number: 2,
+      progress: { completed: 1, total: 1 }, next_resume_at: null, error: null,
+      result: {
+        status: "insufficient_evidence", voices: [],
+        coverage: { processed_ranges: [], unattributed_ranges: [{ start: 0, end: 50 }], unattributed_quoted_ranges: [], total_characters: 50 },
+        narrator_identified: false, unreviewed_ranges: [],
+      },
+    },
+  }))
+  let requestBody: Record<string, unknown> | null = null
+  await page.route((url) => url.pathname === "/api/v1/intelligence/book-1/advisor/voice-chapters" && url.search === "", (route) => {
+    requestBody = route.request().postDataJSON()
+    return route.fulfill({ status: 202, json: { job_id: "fresh-job", status: "queued", chapter_number: 2, progress: { completed: 0, total: 0 }, next_resume_at: null, result: null, error: null } })
+  })
+  await page.goto(path)
+  await expect(page.getByText("Chapter review finished with limitations")).toBeVisible()
+  await page.getByRole("button", { name: "Review chapter again" }).click()
+  expect(requestBody).toMatchObject({ chapter_number: 2, force_refresh: true })
+})
+
+test("scheduled chapter review retry cannot be triggered early", async ({ page }) => {
+  await page.route((url) => url.pathname === "/api/v1/intelligence/book-1/advisor/voice-chapters/latest", (route) => route.fulfill({
+    json: {
+      job_id: "paused-job", status: "paused", chapter_number: 2,
+      progress: { completed: 1, total: 3 }, next_resume_at: new Date(Date.now() + 3600_000).toISOString(),
+      result: null, error: "AI processing is temporarily busy.",
+    },
+  }))
+  await page.goto(path)
+  await expect(page.getByText("Chapter review paused")).toBeVisible()
+  await expect(page.getByRole("button", { name: "Automatic retry scheduled" })).toBeDisabled()
+})
+
+test("failed chapter review stays actionable on mobile in light and dark themes", async ({ page }) => {
+  await page.route((url) => url.pathname === "/api/v1/intelligence/book-1/advisor/voice-chapters/latest", (route) => route.fulfill({
+    json: { job_id: "failed-voice-job", status: "failed", chapter_number: 2, progress: { completed: 1, total: 2 }, next_resume_at: null, result: null, error: "A voice section could not be reviewed. Retry the chapter." },
+  }))
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto(path)
+  await expect(page.getByText("Chapter review stopped")).toBeVisible()
+  await expect(page.getByRole("button", { name: "Review chapter again" })).toBeEnabled()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy()
+  await page.evaluate(() => localStorage.setItem("lorevia-preferences", JSON.stringify({ state: { theme: "light" }, version: 0 })))
+  await page.reload()
+  await expect(page.getByText("Chapter review stopped")).toBeVisible()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy()
+})
+
+test("voice explanation opens by hover and click in dark and light themes", async ({ page }) => {
+  await page.goto(path)
+  const info = page.getByRole("button", { name: "How Voice Consistency works" })
+  await expect(info).toBeVisible()
+  await info.hover()
+  await expect(page.getByRole("tooltip")).toContainText("entire saved chapter")
+  await page.mouse.move(0, 0)
+  await expect(page.getByRole("tooltip")).toHaveCount(0)
+  await info.click()
+  await expect(page.getByRole("tooltip")).toContainText("Passage Auto-detect checks up to five known characters")
+  await page.evaluate(() => localStorage.setItem("lorevia-preferences", JSON.stringify({ state: { theme: "light" }, version: 0 })))
+  await page.reload()
+  await expect(info).toBeVisible()
+  await info.click()
+  await expect(page.getByRole("tooltip")).toContainText("Passage Auto-detect checks up to five known characters")
+})
+
+test("short current dialogue shows a tentative review without a match percentage", async ({ page }) => {
+  await page.route(api, (route) => streamReview(route, {
+    review: { status: "partial_evidence", overall_verdict: "Current passage evidence is too limited for a reliable voice match.", issues: [] },
+    characters_reviewed: ["Nora"], character_matches: [], retrieved_passages: [],
+    warnings: ["Nora: at least 2 excerpts and 20 words are needed for a reliable voice match."],
+    coverage: { processed_ranges: [{ start: 0, end: 42 }], total_characters: 42 },
+  }))
+  await page.goto(path)
+  await expect(run(page)).toBeEnabled()
+  await run(page).click()
+  await expect(page.getByRole("heading", { name: "Partial voice review" })).toBeVisible()
+  await expect(page.getByText(/current passage evidence may be too limited/)).toBeVisible()
+  await expect(page.getByText("No reliable match scores were available for this passage.")).toBeVisible()
+  await expect(page.getByText(/% match/)).toHaveCount(0)
+})
+
+test("voice review distinguishes compared sections from scanned sections with no attributed speech", async ({ page }) => {
+  await page.route(api, (route) => streamReview(route, {
+    review: { status: "partial_evidence", overall_verdict: "Only attributable dialogue was compared.", issues: [] },
+    characters_reviewed: ["Nora"], character_matches: [], retrieved_passages: [], warnings: [],
+    coverage: { processed_ranges: [{ start: 3200, end: 5000 }], unattributed_ranges: [{ start: 0, end: 3200 }], compared_ranges: [{ start: 4000, end: 4200 }], not_compared_ranges: [{ start: 0, end: 4000 }, { start: 4200, end: 5000 }], unattributed_quoted_ranges: [{ start: 4200, end: 4240 }], total_characters: 5000 },
+    coverage_by_character: [{ character_name: "Nora", processed_ranges: [{ start: 3200, end: 5000 }], unattributed_ranges: [{ start: 0, end: 3200 }], compared_ranges: [{ start: 4000, end: 4200 }], not_compared_ranges: [{ start: 0, end: 4000 }, { start: 4200, end: 5000 }], total_characters: 5000 }],
+  }))
+  await page.goto(path)
+  await expect(run(page)).toBeEnabled()
+  await run(page).click()
+  await expect(page.getByText(/1,800 of 5,000 source characters were in reviewed sections/)).toBeVisible()
+  await expect(page.getByText(/3,200 characters had no attributable voice/)).toBeVisible()
+  await expect(page.getByText(/Exact voice comparison: 200 characters compared with the baseline; 4,800 source characters were not voice-compared/)).toBeVisible()
+  await expect(page.getByText(/40 quoted characters were not attributed to a reviewed voice/)).toBeVisible()
+  await expect(page.getByText(/Nora: 1 overlapping section\(s\) compared; 1 section\(s\) had no attributable voice and were not compared/)).toBeVisible()
 })
 
 test("voice source and findings are readable at four widths and in both themes", async ({ page }, info) => {
@@ -56,7 +200,7 @@ test("voice drafts survive source changes, refresh, and declined discard or navi
 
 test("voice protects the full passage at the length boundary and saves the submitted snapshot", async ({ page }) => {
   let release!: () => void; const held = new Promise<void>((resolve) => { release = resolve }); const requests: { text: string }[] = []
-  await page.route(api, async (route) => { requests.push(route.request().postDataJSON()); await held; await route.fulfill({ json: review }) })
+  await page.route(api, async (route) => { requests.push(route.request().postDataJSON()); await held; await streamReview(route, review) })
   await page.goto(path); await expect(run(page)).toBeEnabled()
   await input(page).fill("x".repeat(12001)); await expect(run(page)).toBeDisabled()
   await expect(page.getByText(/shorten the passage before reviewing/)).toBeVisible()
@@ -76,9 +220,30 @@ test("voice protects the full passage at the length boundary and saves the submi
   await expect(page.getByText(/Saved review scene to/)).toBeVisible()
 })
 
+test("voice counts and submits every source character including surrounding whitespace", async ({ page }) => {
+  const requests: { text: string }[] = []
+  await page.route(api, (route) => {
+    requests.push(route.request().postDataJSON())
+    return streamReview(route, review)
+  })
+  await page.goto(path)
+  await page.getByLabel("Chapter or passage", { exact: true }).selectOption("")
+  const accepted = `  ${"x".repeat(11997)} `
+  await input(page).fill(`${accepted}x`)
+  await expect(run(page)).toBeDisabled()
+  await expect(page.getByText(/12,001 \/ 12,000 characters/)).toBeVisible()
+
+  await input(page).fill(accepted)
+  await expect(run(page)).toBeEnabled()
+  await run(page).click()
+  await expect(page.getByText(review.review.overall_verdict, { exact: true })).toBeVisible()
+  expect(requests).toHaveLength(1)
+  expect(requests[0].text).toBe(accepted)
+})
+
 test("voice retains earlier results through review failure and exposes evidence", async ({ page }) => {
   let fail = false
-  await page.route(api, (route) => route.fulfill(fail ? { status: 503, json: { detail: "Review temporarily unavailable." } } : { json: review }))
+  await page.route(api, (route) => fail ? route.fulfill({ status: 503, json: { detail: "Review temporarily unavailable." } }) : streamReview(route, review))
   await page.goto(path); await expect(run(page)).toBeEnabled(); await run(page).click()
   await expect(page.getByText(review.review.overall_verdict, { exact: true })).toBeVisible()
   await page.getByText("Manuscript evidence (1 passage)", { exact: true }).click()
@@ -88,6 +253,88 @@ test("voice retains earlier results through review failure and exposes evidence"
   await expect(page.getByText("Review temporarily unavailable.", { exact: true })).toBeVisible()
   await expect(page.getByText(review.review.overall_verdict, { exact: true })).toBeVisible()
   await expect(input(page)).toHaveValue("Another passage")
+})
+
+test("alternate voice similarity is shown as a clue rather than speaker proof", async ({ page }) => {
+  await page.route(api, (route) => streamReview(route, {
+    ...review,
+    character_matches: [{
+      character_name: "Nora",
+      match_score: 42,
+      baseline_sample_size: 4,
+      baseline_word_count: 82,
+      sample_dialogue_count: 2,
+      strongest_signals: [],
+      closest_other_character: "Mara",
+      closest_other_score: 86,
+    }],
+  }))
+  await page.goto(path)
+  await expect(run(page)).toBeEnabled()
+  await run(page).click()
+  await expect(page.getByText(/Closest alternate voice: Mara/)).toContainText(
+    "supporting evidence, not proof of speaker identity",
+  )
+})
+
+test("pronoun-attributed voice review remains visibly tentative", async ({ page }) => {
+  await page.route(api, (route) => streamReview(route, {
+    review: { status: "partial_evidence", overall_verdict: "Speaker attribution is tentative.", issues: [] },
+    characters_reviewed: ["Gregor"], character_matches: [], retrieved_passages: [],
+    baseline_evidence: [{ character_name: "Gregor", sample_count: 3, word_count: 75, chapters: [1, 2], attribution_confidence: "contextual" }],
+    warnings: ["Gregor: some dialogue was linked through a nearby pronoun."],
+    coverage: { total_characters: 120, processed_ranges: [{ start: 0, end: 120 }] },
+  }))
+  await page.goto(path)
+  await expect(run(page)).toBeEnabled()
+  await run(page).click()
+  await expect(page.getByRole("heading", { name: "Partial voice review" })).toBeVisible()
+  await expect(page.getByText(/Current passage attribution: contextual/)).toBeVisible()
+  await expect(page.getByText(/not a complete verdict/)).toBeVisible()
+  await expect(page.getByText(/No supported character voice issues were found/)).toHaveCount(0)
+})
+
+test("first-person narrator baseline with uncertain identity stays a partial review", async ({ page }) => {
+  await page.route(api, (route) => streamReview(route, {
+    voice_mode: "first_person_narration",
+    review: { status: "partial_evidence", overall_verdict: "Narrator attribution in the baseline is tentative.", issues: [] },
+    characters_reviewed: ["Gregor"], character_matches: [], retrieved_passages: [],
+    baseline_evidence: [{ character_name: "Gregor", sample_count: 3, word_count: 135, chapters: [1, 2], baseline_attribution_confidence: "unverified_narrator", attribution_confidence: "user_selected_narrator" }],
+    warnings: ["Gregor: baseline chapters do not independently identify this narrator."],
+    coverage: { total_characters: 120, processed_ranges: [{ start: 0, end: 120 }] },
+  }))
+  await page.goto(path)
+  await page.getByLabel("Character focus").selectOption("char-gregor")
+  await page.getByLabel("Voice to review").selectOption("first_person_narration")
+  await expect(run(page)).toBeEnabled()
+  await run(page).click()
+  await expect(page.getByRole("heading", { name: "Partial voice review" })).toBeVisible()
+  await expect(page.getByText(/Baseline attribution: unverified narrator/)).toBeVisible()
+  await expect(page.getByText(/Current passage attribution: user selected narrator/)).toBeVisible()
+  await expect(page.getByText("No reliable match scores were available for this passage.")).toBeVisible()
+  await expect(page.getByText(/% match/)).toHaveCount(0)
+})
+
+test("first-person auto-detect sends no guessed narrator and explains insufficient identity", async ({ page }) => {
+  const requests: Record<string, unknown>[] = []
+  await page.route(api, (route) => {
+    requests.push(route.request().postDataJSON())
+    return streamReview(route, {
+      voice_mode: "first_person_narration",
+      review: { status: "insufficient_evidence", overall_verdict: "The narrator could not be identified.", issues: [] },
+      characters_reviewed: [], characters_detected: [], character_matches: [], retrieved_passages: [],
+      warnings: ["The passage does not unambiguously name its first-person narrator. Select the narrator to review this voice; no identity was guessed."],
+      coverage: { total_characters: 52, processed_ranges: [], unattributed_ranges: [{ start: 0, end: 52 }] },
+    })
+  })
+  await page.goto(path)
+  await page.getByLabel("Voice to review").selectOption("first_person_narration")
+  await expect(run(page)).toBeEnabled()
+  await run(page).click()
+  await expect(page.getByText(/no identity was guessed/)).toBeVisible()
+  expect(requests).toHaveLength(1)
+  expect(requests[0].voice_mode).toBe("first_person_narration")
+  expect(requests[0]).not.toHaveProperty("character_id")
 })
 
 test("voice query failures offer independent retries without replacing custom drafts", async ({ page }) => {
@@ -120,7 +367,7 @@ test("voice chapter loading and errors do not masquerade as an empty passage", a
 })
 
 test("voice note and scene saves recover visibly and serialize writes", async ({ page }) => {
-  await page.route(api, (route) => route.fulfill({ json: review }))
+  await page.route(api, (route) => streamReview(route, review))
   let fail = true; let writes = 0; let release!: () => void; const held = new Promise<void>((resolve) => { release = resolve })
   await page.route((url) => url.pathname === "/api/v1/books/book-1/notes/vault", async (route) => {
     if (route.request().method() !== "PUT") return route.fallback()
@@ -147,7 +394,7 @@ test("voice note and scene saves recover visibly and serialize writes", async ({
 test("voice empty choices and long evidence stay usable on mobile", async ({ page }, info) => {
   await page.route((url) => url.pathname === "/api/v1/reader/book-1/chapters", (route) => route.fulfill({ json: { chapters: [], current_chapter: null } }))
   await page.route((url) => url.pathname === "/api/v1/books/book-1/characters", (route) => route.fulfill({ json: [] }))
-  await page.route(api, (route) => route.fulfill({ json: { ...review, review: { overall_verdict: "LongWord".repeat(100), issues: [] }, retrieved_passages: [{ chapter_num: 99, excerpt: "LongExcerpt".repeat(100), chapter_title: "Unavailable chapter", relevance: 0 }] } }))
+  await page.route(api, (route) => streamReview(route, { ...review, review: { overall_verdict: "LongWord".repeat(100), issues: [] }, retrieved_passages: [{ chapter_num: 99, excerpt: "LongExcerpt".repeat(100), chapter_title: "Unavailable chapter", relevance: 0 }] }))
   await page.setViewportSize({ width: 390, height: 1000 }); await page.goto(path)
   await expect(page.getByText(/No chapters yet/)).toBeVisible()
   await expect(page.getByText(/No character choices yet/)).toBeVisible()
@@ -164,7 +411,7 @@ test("voice empty choices and long evidence stay usable on mobile", async ({ pag
 test("voice finding notes keep the reviewed character after a focus change", async ({ page }) => {
   await page.goto(path); await expect(run(page)).toBeEnabled()
   await page.getByLabel("Character focus", { exact: true }).selectOption("char-gregor")
-  await run(page).click(); await expect(page.getByText("Reviewed: Gregor", { exact: true })).toBeVisible()
+  await run(page).click(); await expect(page.getByText("Reviewed voices: Gregor", { exact: true })).toBeVisible()
   await page.getByLabel("Character focus", { exact: true }).selectOption("char-grete")
   await expect(page.getByText(/The editor or character focus has changed/)).toBeVisible()
   await page.getByText("If this change is intentional", { exact: true }).focus(); await page.keyboard.press("Enter")
@@ -177,4 +424,69 @@ test("voice finding notes keep the reviewed character after a focus change", asy
   await expect(page.getByText(/Saved voice note to/)).toBeVisible()
   await page.getByRole("link", { name: "View review", exact: true }).click()
   await expect(page.getByRole("heading", { name: "Character voice", exact: true })).toBeFocused()
+})
+
+test("voice finding decisions persist across repeat reviews and failed saves remain actionable", async ({ page }) => {
+  const findingKey = "a".repeat(64)
+  let saved = false
+  let failSave = true
+  const issue = {
+    finding_key: findingKey,
+    character_name: "Gregor",
+    classification: "possible",
+    severity: "moderate",
+    title: "Gregor changes register",
+    description: "His new line is more colloquial than the cited baseline.",
+    submitted_excerpt: "No way, dude.",
+    baseline_excerpt: "I shall return before dawn.",
+    baseline_chapter_number: 1,
+    confidence: 0.7,
+    revision_direction: "Check whether the register shift is deliberate.",
+    intentionality_prompt: "Is this a deliberate response to fear?",
+  }
+  await page.route(api, (route) => streamReview(route, {
+    review: { status: "complete", overall_verdict: "One possible shift.", issues: saved ? [] : [issue] },
+    characters_reviewed: ["Gregor"],
+    warnings: [], character_matches: [], retrieved_passages: [],
+    suppressed_findings: saved ? [{ ...issue, decision: "intentional" }] : [],
+    coverage: { total_characters: 24, processed_ranges: [{ start: 0, end: 24 }] },
+  }))
+  await page.route(`**/api/v1/intelligence/*/advisor/voice-decisions/${findingKey}`, (route) => {
+    if (failSave) return route.fulfill({ status: 503, json: { detail: "Decision save unavailable." } })
+    saved = true
+    return route.fulfill({ json: { finding_key: findingKey, decision: "intentional", note: null } })
+  })
+
+  await page.goto(path)
+  await expect(run(page)).toBeEnabled()
+  await page.getByLabel("Character focus", { exact: true }).selectOption("char-gregor")
+  await run(page).click()
+  await expect(page.getByText(issue.title)).toBeVisible()
+  const savedNote = page.waitForRequest((request) => request.method() === "PUT" && new URL(request.url()).pathname === "/api/v1/books/book-1/notes/vault")
+  await page.getByRole("button", { name: `Save note: ${issue.title}` }).click()
+  const noteContent = (await savedNote).postDataJSON().content as string
+  expect(noteContent).toContain("**Submitted excerpt:** No way, dude.")
+  expect(noteContent).toContain("**Baseline excerpt (chapter 1):** I shall return before dawn.")
+  const savedSnapshot = page.waitForRequest((request) => request.method() === "POST" && new URL(request.url()).pathname === "/api/v1/books/book-1/scenes")
+  await page.getByRole("button", { name: "Save snapshot", exact: true }).click()
+  const snapshotBody = (await savedSnapshot).postDataJSON().body as string
+  expect(snapshotBody).toContain("**Submitted excerpt:** No way, dude.")
+  expect(snapshotBody).toContain("**Baseline excerpt (chapter 1):** I shall return before dawn.")
+  await page.getByRole("button", { name: "Mark intentional" }).click()
+  await expect(page.getByText("Decision save unavailable.")).toBeVisible()
+  await expect(page.getByText(issue.title)).toBeVisible()
+
+  failSave = false
+  await page.getByRole("button", { name: "Mark intentional" }).click()
+  await expect(page.getByText(/All findings from this review have recorded decisions/)).toBeVisible()
+  await expect(page.getByText("One possible shift.", { exact: true })).toHaveCount(0)
+  const decidedNote = page.waitForRequest((request) => request.method() === "PUT" && new URL(request.url()).pathname === "/api/v1/books/book-1/notes/vault")
+  await page.getByRole("button", { name: "Save review note", exact: true }).click()
+  const decidedContent = (await decidedNote).postDataJSON().content as string
+  expect(decidedContent).toContain("**Review decision:** intentional")
+  expect(decidedContent).toContain("**Baseline excerpt (chapter 1):** I shall return before dawn.")
+  expect(decidedContent).not.toContain("No voice issues were flagged")
+  await run(page).click()
+  await expect(page.getByText(/Previously reviewed findings \(1\)/)).toBeVisible()
+  await expect(page.getByRole("button", { name: "Mark intentional" })).toHaveCount(0)
 })

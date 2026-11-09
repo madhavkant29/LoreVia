@@ -2,11 +2,84 @@ import uuid
 from types import SimpleNamespace
 
 import pytest
+from sqlalchemy import select
 
+from app.engine.character.deduplicator import character_name_keys
+from app.models.book import Book
+from app.models.character import Character, CharacterRelationshipCandidate
+from app.models.intelligence import CharacterRelationship
+from app.models.user import User
 from app.services.extraction_relationship_service import (
+    _persist_relationship_records,
     _relationship_signature,
     load_persisted_relationship_signatures,
 )
+
+
+@pytest.mark.asyncio
+async def test_unverified_relationship_quote_creates_review_candidate_not_canon(db):
+    user = User(email="relationship-proof@lorevia.app", username="relproof", password_hash="hash")
+    db.add(user)
+    await db.flush()
+    book = Book(user_id=user.id, title="Source proof", format="manual", s3_key="books/proof.txt")
+    db.add(book)
+    await db.flush()
+    mara = Character(book_id=book.id, name="Mara Vale", first_chapter=1)
+    ilya = Character(book_id=book.id, name="Ilya Ren", first_chapter=1)
+    db.add_all([mara, ilya])
+    await db.flush()
+
+    persisted, unresolved, review_count = await _persist_relationship_records(
+        db,
+        book_id=book.id,
+        chapter_number=1,
+        existing_characters=[mara, ilya],
+        relationships=[
+            {
+                "character_a": "Mara Vale",
+                "character_b": "Ilya Ren",
+                "type": "sibling",
+                "description": "They are siblings.",
+                "label_evidence": {},
+                "source_quote_verified": False,
+                "source_batch_key": "book:1:1",
+            }
+        ],
+        key_cache={
+            mara.id: character_name_keys(mara.name, []),
+            ilya.id: character_name_keys(ilya.name, []),
+        },
+        persisted_signatures=set(),
+    )
+    await db.flush()
+
+    assert persisted == 0
+    assert review_count == 1
+    assert unresolved[0]["source_quote_verified"] is False
+    relationship_rows = (
+        (
+            await db.execute(
+                select(CharacterRelationship).where(CharacterRelationship.book_id == book.id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    candidates = (
+        (
+            await db.execute(
+                select(CharacterRelationshipCandidate).where(
+                    CharacterRelationshipCandidate.book_id == book.id
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert relationship_rows == []
+    assert len(candidates) == 1
+    assert candidates[0].status == "pending"
+    assert "relationship_source_quote_unverified" in candidates[0].reason_codes
 
 
 class _FakeResult:

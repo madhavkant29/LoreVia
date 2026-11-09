@@ -2120,6 +2120,18 @@ async def test_chapter_consistency_reports_load_full_context(db):
             ),
             ChapterSummary(
                 chapter_id=chapters[1].id,
+                mode="detailed",
+                content="Mara notices a brass key beside the sealed gate.",
+                clues=[
+                    {
+                        "clue": "A brass key beside the gate",
+                        "foreshadows": "A later locked door",
+                        "why_it_matters": "The key may open a way out",
+                    }
+                ],
+            ),
+            ChapterSummary(
+                chapter_id=chapters[1].id,
                 mode="editorial_note",
                 content=json.dumps(
                     [
@@ -2255,6 +2267,12 @@ async def test_chapter_consistency_reports_load_full_context(db):
     )
     assert advisor_scan["suggestions"]
     assert "characters" in advisor_scan["meta"]["scan_basis"]
+    assert "chapter summaries" in advisor_scan["meta"]["scan_basis"]
+    assert advisor_scan["meta"]["clue_count"] == 1
+    assert any(
+        item["type"] == "unresolved_clue" and "brass key" in item["description"]
+        for item in advisor_scan["suggestions"]
+    )
     assert any(item["type"] == "trait_contradiction" for item in advisor_scan["suggestions"])
 
 

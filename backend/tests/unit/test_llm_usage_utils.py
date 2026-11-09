@@ -13,13 +13,27 @@ from sqlalchemy.exc import SQLAlchemyError
 from app.models.user import LlmUsageEvent, User
 from app.utils import llm_usage_utils
 from app.utils.llm_usage_utils import (
+    LLMIncompleteResponseError,
     assert_manual_reprocess_token_capacity,
     create_tracked_chat_completion,
     create_tracked_embedding,
     llm_token_caps_for_user,
     manual_reprocess_token_caps_for_user,
+    require_complete_llm_response,
     summarize_llm_usage_for_user,
 )
+
+
+def test_structured_response_requires_an_explicit_provider_stop_reason():
+    require_complete_llm_response(SimpleNamespace(choices=[SimpleNamespace(finish_reason="stop")]))
+    for response in (
+        SimpleNamespace(choices=[]),
+        SimpleNamespace(choices=[SimpleNamespace(finish_reason="length")]),
+        SimpleNamespace(choices=[SimpleNamespace(finish_reason="content_filter")]),
+        SimpleNamespace(choices=[SimpleNamespace()]),
+    ):
+        with pytest.raises(LLMIncompleteResponseError, match="llm_response_incomplete"):
+            require_complete_llm_response(response)
 
 
 @pytest.fixture(autouse=True)
@@ -47,6 +61,27 @@ def test_llm_call_error_classification_retries_only_provider_failures():
     assert not llm_usage_utils.is_llm_call_error(ValueError("parse failure"))
 
 
+def test_short_llm_coordination_retry_delay_rejects_budget_and_long_backoffs():
+    retry_delay = llm_usage_utils.short_llm_coordination_retry_delay
+
+    assert retry_delay(HTTPException(429, "LLM capacity busy", headers={"Retry-After": "5"})) == 5
+    assert (
+        retry_delay(
+            HTTPException(503, "LLM coordination unavailable", headers={"Retry-After": "2"})
+        )
+        == 2
+    )
+    assert retry_delay(HTTPException(429, "LLM rate busy", headers={"Retry-After": "60"})) is None
+    assert (
+        retry_delay(HTTPException(429, {"kind": "llm_budget"}, headers={"Retry-After": "5"}))
+        is None
+    )
+    assert (
+        retry_delay(HTTPException(503, "LLM capacity busy", headers={"Retry-After": "nan"})) is None
+    )
+    assert retry_delay(HTTPException(429, "LLM capacity busy")) is None
+
+
 def test_public_llm_http_error_message_keeps_allowance_message():
     exc = HTTPException(
         429,
@@ -61,6 +96,30 @@ def test_public_llm_http_error_message_keeps_allowance_message():
         llm_usage_utils.public_llm_http_error_message(exc)
         == "Monthly AI capacity has been reached."
     )
+
+
+def test_public_llm_http_error_message_keeps_safe_provider_retry_message():
+    exc = HTTPException(
+        503,
+        {
+            "kind": "llm_provider",
+            "message": "The AI service connection was interrupted. Your passage is unchanged; retry shortly.",
+        },
+    )
+
+    assert "retry shortly" in llm_usage_utils.public_llm_http_error_message(exc)
+
+
+def test_public_llm_http_error_message_keeps_safe_manuscript_source_retry_message():
+    exc = HTTPException(
+        503,
+        {
+            "kind": "manuscript_source",
+            "message": "Stored manuscript text is temporarily unavailable. Please retry.",
+        },
+    )
+
+    assert "manuscript text" in llm_usage_utils.public_llm_http_error_message(exc)
 
 
 @pytest.mark.asyncio

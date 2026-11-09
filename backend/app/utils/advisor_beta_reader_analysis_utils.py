@@ -9,9 +9,9 @@ from typing import Any
 
 from app.utils.intelligence_utils import (
     compute_voice_metrics,
-    extract_dialogue_samples_by_character,
     score_voice_match,
 )
+from app.utils.voice_profile_samples import explicit_dialogue_by_character
 
 MAX_BETA_READER_BATCH_CHARS = 24_000
 MAX_BETA_READER_BATCH_CHAPTERS = 4
@@ -368,8 +368,10 @@ def build_scoped_voice_profiles(
         for character in characters
     ]
     dialogue_by_name: dict[str, list[str]] = {str(character.name): [] for character in characters}
-    for _, text in sorted(chapter_texts.items()):
-        attributed = extract_dialogue_samples_by_character(text, character_rows)
+    for chapter_number, text in sorted(chapter_texts.items()):
+        attributed = explicit_dialogue_by_character(
+            text, character_rows, chapter_number=chapter_number
+        )
         for name, samples in attributed.items():
             dialogue_by_name.setdefault(name, []).extend(samples)
 

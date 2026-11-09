@@ -198,9 +198,19 @@ async def _record_relationship_review_candidates(
         else ("ambiguous" if len(right_matches) > 1 else "missing")
     )
 
-    if left_name and right_name and (len(left_matches) != 1 or len(right_matches) != 1):
+    if (
+        left_name
+        and right_name
+        and (
+            len(left_matches) != 1
+            or len(right_matches) != 1
+            or rel.get("source_quote_verified") is False
+        )
+    ):
         reason_codes = [
-            "relationship_unresolved",
+            "relationship_source_quote_unverified"
+            if rel.get("source_quote_verified") is False
+            else "relationship_unresolved",
             f"character_a_{left_resolution}",
             f"character_b_{right_resolution}",
         ]
@@ -213,9 +223,17 @@ async def _record_relationship_review_candidates(
             else left_matches[0]
             if len(left_matches) == 1
             else None,
-            unresolved_side="both"
-            if len(left_matches) != 1 and len(right_matches) != 1
-            else ("character_a" if len(left_matches) != 1 else "character_b"),
+            unresolved_side=(
+                "source_quote"
+                if len(left_matches) == 1
+                and len(right_matches) == 1
+                and rel.get("source_quote_verified") is False
+                else "both"
+                if len(left_matches) != 1 and len(right_matches) != 1
+                else "character_a"
+                if len(left_matches) != 1
+                else "character_b"
+            ),
             resolution=f"{left_resolution}:{right_resolution}",
         )
         disposition = decide_relationship_candidate_disposition(
@@ -284,8 +302,12 @@ async def _persist_relationship_records(
         right_matches = _relationship_resolution_candidates(
             existing_characters, right_name, key_cache=key_cache, context_text=context_text
         )
+        quote_verified = rel.get("source_quote_verified") is True
         if (
-            len(left_matches) == 1
+            quote_verified
+            and isinstance(rel.get("label_evidence"), dict)
+            and rel["label_evidence"].get("quote")
+            and len(left_matches) == 1
             and len(right_matches) == 1
             and left_matches[0] != right_matches[0]
         ):
@@ -337,6 +359,7 @@ async def _persist_relationship_records(
             if isinstance(rel.get("evidence"), dict)
             else {},
             "source_batch_key": rel.get("source_batch_key"),
+            "source_quote_verified": quote_verified,
             "chapter_number": chapter_number,
             "character_a_matches": [str(item) for item in left_matches[:3]],
             "character_b_matches": [str(item) for item in right_matches[:3]],

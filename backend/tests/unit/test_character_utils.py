@@ -61,6 +61,19 @@ def test_build_character_analysis_payload_preserves_manual_character_reason():
     assert payload["quality_flags"] == []
 
 
+def test_build_character_analysis_payload_exposes_narrator_source_evidence():
+    character = Character(book_id=uuid.uuid4(), name="Arun Vale", first_chapter=2, mention_count=1)
+    citation = {"chapter_number": 2, "excerpt": "I told her I was Arun Vale"}
+    character.analysis_metadata = {"first_person_self_identification": citation}
+
+    assert (
+        build_character_analysis_payload(character)["first_person_self_identification"] == citation
+    )
+
+    character.analysis_metadata = {"first_person_self_identification": "invalid"}
+    assert build_character_analysis_payload(character)["first_person_self_identification"] is None
+
+
 def test_build_character_analysis_payload_marks_common_single_token_as_review_only():
     character = Character(
         book_id=uuid.uuid4(),

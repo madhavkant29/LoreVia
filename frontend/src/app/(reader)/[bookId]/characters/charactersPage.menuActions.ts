@@ -1,6 +1,6 @@
 import type { Character } from "@/types/character"
 import type { MenuAction } from "./charactersPage.components"
-import { isProtectedCharacter } from "./charactersPage.helpers"
+import { hasImplicitRepairProtection, isProtectedCharacter } from "./charactersPage.helpers"
 
 type ExportingState = false | "character" | "bible" | null | undefined
 
@@ -172,7 +172,8 @@ export function buildCharacterMenuActions({
       },
     },
     ...(isAuthorMode ? [{
-      label: isProtectedCharacter(character) ? "Remove repair protection" : "Protect from repair",
+      label: hasImplicitRepairProtection(character) ? "Protected by review or manual edits" : isProtectedCharacter(character) ? "Remove repair protection" : "Protect from repair",
+      disabled: hasImplicitRepairProtection(character),
       onClick: () => {
         onToggleProtectedFromRepair()
         onCloseCharacterMenu()

@@ -65,7 +65,8 @@ describe("CharactersPage", () => {
 
     await click("Open menu")
     await click("Open repair workspace")
-    await waitForText("Book reprocess preview")
+    await waitForText("Character identity repair preview")
+    await waitForText("This does not reread the manuscript or discover missing characters.")
     await click("Refresh preview")
     await click("Apply repair plan")
     await click("Repair relationship timelines")

@@ -22,12 +22,14 @@ async def preview_character_reprocess(
     book = await get_owned_book(db, book_id, current_user.id)
     require_author_access(current_user)
     _ensure_author_mode(book)
-    job = CharacterIdentityRepairJob(db, book_id=book.id)
+    job = CharacterIdentityRepairJob(
+        db,
+        book_id=book.id,
+        allow_merge_safe_pairs=allow_merge_safe_pairs,
+        allow_demote_obvious_noise=allow_demote_obvious_noise,
+    )
     plan = await job.preview()
-    payload = plan.to_payload()
-    payload["allow_merge_safe_pairs"] = allow_merge_safe_pairs
-    payload["allow_demote_obvious_noise"] = allow_demote_obvious_noise
-    return payload
+    return plan.to_payload()
 
 
 async def apply_character_reprocess(
@@ -41,14 +43,16 @@ async def apply_character_reprocess(
     book = await get_owned_book(db, book_id, current_user.id)
     require_author_access(current_user)
     _ensure_author_mode(book)
-    job = CharacterIdentityRepairJob(db, book_id=book.id)
+    job = CharacterIdentityRepairJob(
+        db,
+        book_id=book.id,
+        allow_merge_safe_pairs=allow_merge_safe_pairs,
+        allow_demote_obvious_noise=allow_demote_obvious_noise,
+    )
     result = await job.apply()
     await db.commit()
     await mark_book_cache_dirty(str(book.id))
-    payload = result.to_payload()
-    payload["allow_merge_safe_pairs"] = allow_merge_safe_pairs
-    payload["allow_demote_obvious_noise"] = allow_demote_obvious_noise
-    return payload
+    return result.to_payload()
 
 
 def _ensure_author_mode(book) -> None:

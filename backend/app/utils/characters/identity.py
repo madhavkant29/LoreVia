@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
+from typing import Any
 
 from app.utils.characters.constants import FAMILY_ROLE_WORDS, ROLE_ONLY_REFERENCE_WORDS
 from app.utils.characters.text import clean_string_list
@@ -16,6 +17,11 @@ TITLE_IDENTITY_GROUPS = {
     "ms": "female",
     "miss": "female",
     "mistress": "female",
+    "madame": "female",
+    "mme": "female",
+    "mademoiselle": "female",
+    "mlle": "female",
+    "monsieur": "male",
 }
 
 
@@ -70,7 +76,9 @@ NAME_TITLES = {
 
 def _leading_title(name: str | None) -> str:
     tokens = [token.casefold() for token in re.findall(r"[A-Za-z][A-Za-z'-]*", name or "")]
-    return tokens[0] if tokens and tokens[0] in NAME_TITLES else ""
+    if tokens and (tokens[0] in NAME_TITLES or tokens[0] in TITLE_IDENTITY_GROUPS):
+        return tokens[0]
+    return ""
 
 
 def partition_identity_key(name: str | None) -> str:
@@ -110,6 +118,33 @@ def filter_character_identity_aliases(
             continue
         filtered.append(alias)
     return filtered
+
+
+def has_explicit_full_name_alias_link(
+    full_name: str,
+    *,
+    aliases: Sequence[object] | None,
+    evidence: Mapping[str, Any] | None,
+    reason_codes: Sequence[object] | None = None,
+) -> bool:
+    """Require an explicit identity link before reconciling a first-name candidate."""
+    target = normalize_character_name(full_name)
+    if len(target.split()) < 2:
+        return False
+    evidence_map = evidence if isinstance(evidence, Mapping) else {}
+    reasons = [*(reason_codes or []), *(evidence_map.get("resolver_reasons") or [])]
+    if any(
+        "conflict" in str(reason).casefold() or "ambiguous" in str(reason).casefold()
+        for reason in reasons
+    ):
+        return False
+    anti_merge_names = evidence_map.get("anti_merge_names") or []
+    if any(normalize_character_name(str(name)) == target for name in anti_merge_names):
+        return False
+    entity = evidence_map.get("entity")
+    canonical = entity.get("canonical_name") if isinstance(entity, Mapping) else None
+    linked_names = [*(aliases or []), *(evidence_map.get("cluster_names") or []), canonical]
+    return any(normalize_character_name(str(name)) == target for name in linked_names if name)
 
 
 def _name_tokens(name: str | None) -> list[str]:

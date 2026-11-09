@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import time
+import uuid
 from datetime import UTC, datetime
 
 from app.utils.exception_boundaries import FATAL_TASK_BOUNDARY_EXCEPTIONS
@@ -10,6 +11,67 @@ from app.utils.worker_async_utils import run_worker_coro
 from app.workers.celery_app import celery_app
 
 log = logging.getLogger("lorevia.maintenance")
+
+
+@celery_app.task(
+    name="maintenance_tasks.resume_voice_chapter_reviews",
+    queue="maintenance",
+    ignore_result=True,
+)
+def resume_voice_chapter_reviews_task(*, limit: int = 50):
+    """Recover paused, abandoned, and stranded chapter reviews from their checkpoints."""
+
+    async def find_ready() -> list[str]:
+        from datetime import UTC, datetime, timedelta
+
+        from app.core.database import AsyncSessionLocal
+        from app.services.voice_chapter_review_jobs_service import (
+            voice_chapter_resume_candidates,
+        )
+
+        now = datetime.now(UTC)
+        ready: list[str] = []
+        async with AsyncSessionLocal() as db:
+            rows = (
+                (
+                    await db.execute(
+                        voice_chapter_resume_candidates(now, limit=limit).with_for_update(
+                            skip_locked=True
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            for job in rows:
+                state = dict(job.result_json or {})
+                updated = job.updated_at or now
+                if updated.tzinfo is None:
+                    updated = updated.replace(tzinfo=UTC)
+                if job.status == "paused":
+                    raw_resume = state.get("next_resume_at")
+                    if not raw_resume or datetime.fromisoformat(raw_resume) > now:
+                        continue
+                elif job.status == "queued" and now - updated < timedelta(minutes=5):
+                    continue
+                elif job.status == "running" and now - updated < timedelta(minutes=25):
+                    continue
+                job.status = "queued"
+                job.updated_at = now
+                ready.append(str(job.id))
+            await db.commit()
+        return ready
+
+    from app.utils.worker_async_utils import run_worker_coro
+    from app.workers.tasks.voice_chapter_tasks import review_voice_chapter_task
+
+    for job_id in run_worker_coro(find_ready()):
+        try:
+            review_voice_chapter_task.apply_async(
+                task_id=str(uuid.uuid4()), kwargs={"job_id": job_id}
+            )
+        except Exception:
+            log.exception("voice_chapter_resume_enqueue_failed job_id=%s", job_id)
 
 
 @celery_app.task(
@@ -344,6 +406,10 @@ def repair_processing_books_task(self, *, book_id: str | None = None, limit: int
             key_maintenance_cursor,
         )
         from app.models.book import Book
+        from app.services.book_freeze_service import (
+            book_created_before_cutoff,
+            load_persisted_freeze_cutoff,
+        )
         from app.services.editor_project_service import repair_stale_editor_processing_state
         from app.services.pipeline_state_service import (
             book_processing_has_blocking_failure,
@@ -433,6 +499,8 @@ def repair_processing_books_task(self, *, book_id: str | None = None, limit: int
 
                 repaired = 0
                 requeued = 0
+                legacy_freeze_cutoff = await load_persisted_freeze_cutoff(db)
+                held_for_legacy_freeze = 0
                 for book in books:
                     if book.status != "processing":
                         continue
@@ -455,6 +523,12 @@ def repair_processing_books_task(self, *, book_id: str | None = None, limit: int
                         and book.status == "processing"
                         and book_processing_has_blocking_failure(book)
                     ):
+                        if book_created_before_cutoff(book, legacy_freeze_cutoff):
+                            # The cutoff deliberately holds these books until
+                            # the one-time freeze. Repeating an error on every
+                            # sweep cannot recover or unblock them.
+                            held_for_legacy_freeze += 1
+                            continue
                         # Alertable signal: a book cannot finish on its own and
                         # the repair sweep cannot resolve it. Operators can find
                         # it by book_id without reading manuscript contents.
@@ -468,6 +542,7 @@ def repair_processing_books_task(self, *, book_id: str | None = None, limit: int
                     "checked": len(books),
                     "repaired": repaired,
                     "requeued": requeued,
+                    "held_for_legacy_freeze": held_for_legacy_freeze,
                     "wrapped_cursor": wrapped_cursor,
                     "duration_ms": round((time.perf_counter() - started_at) * 1000, 2),
                 }

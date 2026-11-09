@@ -30,18 +30,87 @@ from app.services.character_identity.resolver import (
     resolve_character_mention,
 )
 from app.services.character_identity.scoring import score_identity_evidence
+from app.utils.characters.candidates import (
+    decide_character_candidate_disposition,
+    recurring_role_review_supported,
+)
 from app.utils.characters.duplicates import score_duplicate_characters
+from app.utils.characters.identity import has_explicit_full_name_alias_link
+
+
+def test_full_name_alias_link_requires_explicit_nonconflicting_identity_evidence():
+    assert not has_explicit_full_name_alias_link("Mara Vale", aliases=[], evidence={})
+    assert not has_explicit_full_name_alias_link("Mara Vale", aliases=["Mara Voss"], evidence={})
+    assert has_explicit_full_name_alias_link("Mara Vale", aliases=["Mara Vale"], evidence={})
+    assert has_explicit_full_name_alias_link(
+        "Mara Vale", aliases=[], evidence={"cluster_names": ["Mara Vale"]}
+    )
+    assert not has_explicit_full_name_alias_link(
+        "Mara Vale",
+        aliases=["Mara Vale"],
+        evidence={"anti_merge_names": ["Mara Vale"]},
+    )
+    assert not has_explicit_full_name_alias_link(
+        "Mara Vale",
+        aliases=["Mara Vale"],
+        evidence={},
+        reason_codes=["ambiguous_roster_match"],
+    )
 
 
 def test_classify_candidate_kind_handles_cleanup_cases():
     assert classify_candidate_kind("Gregor Samsa") == CandidateKind.CANONICAL_NAME
     assert classify_candidate_kind("Gregor") == CandidateKind.ALIAS
     assert classify_candidate_kind("Mr. Samsa") == CandidateKind.TITLE_NAME
+    assert classify_candidate_kind("Madame Meursault") == CandidateKind.CANONICAL_NAME
+    assert classify_candidate_kind("Monsieur Meursault") == CandidateKind.CANONICAL_NAME
+    assert classify_candidate_kind("Mme Masson") == CandidateKind.CANONICAL_NAME
+    assert classify_candidate_kind("Madame") == CandidateKind.FRAGMENT
     assert classify_candidate_kind("Gregor's father") == CandidateKind.KINSHIP_DESCRIPTOR
     assert classify_candidate_kind("the cleaner") == CandidateKind.ROLE_DESCRIPTOR
+    for role in (
+        "the warden",
+        "the porter",
+        "the doorkeeper",
+        "the lawyer",
+        "the examining magistrate",
+        "examining magistrate",
+    ):
+        assert classify_candidate_kind(role) == CandidateKind.ROLE_DESCRIPTOR
+    assert classify_candidate_kind("Porter Vale") == CandidateKind.CANONICAL_NAME
     assert classify_candidate_kind("Mr") == CandidateKind.FRAGMENT
     assert classify_candidate_kind("he") == CandidateKind.PRONOUN
     assert classify_candidate_kind("the door") == CandidateKind.OBJECT_OR_PLACE
+
+
+def test_recurring_unnamed_role_reaches_review_only_with_verified_person_evidence():
+    evidence = {
+        "mention_count": 3,
+        "strong_mention_count": 2,
+        "source_mention_count_verified": True,
+        "has_attributed_speech": True,
+        "verifier": {"final": {"confidence_band": "accept"}},
+    }
+    assert recurring_role_review_supported("the guard", evidence) is True
+    assert recurring_role_review_supported("the warden", evidence) is True
+    assert recurring_role_review_supported("examining magistrate", evidence) is True
+    disposition = decide_character_candidate_disposition(
+        name="the guard",
+        confidence=0.9,
+        evidence=evidence,
+        reason_codes=["recurring_role_person_needs_review"],
+    )
+    assert disposition.status == "pending"
+    assert disposition.action == "queue_review"
+    assert recurring_role_review_supported("the guard", {**evidence, "mention_count": 1}) is False
+    assert (
+        recurring_role_review_supported(
+            "the guard", {**evidence, "source_mention_count_verified": False}
+        )
+        is False
+    )
+    assert recurring_role_review_supported("the guard", {**evidence, "verifier": {}}) is False
+    assert recurring_role_review_supported("the door", evidence) is False
 
 
 def test_identity_scoring_blocks_title_surname_false_positive():
@@ -114,6 +183,139 @@ async def test_repair_job_soft_merges_exact_duplicates_and_aliases_first_names(d
         )
     ).scalar_one_or_none()
     assert alias is not None
+
+
+@pytest.mark.asyncio
+async def test_repair_does_not_merge_or_alias_into_reviewed_character(db):
+    user = User(
+        email=f"repair-reviewed-{uuid.uuid4().hex[:8]}@example.com",
+        username=f"repair-reviewed-{uuid.uuid4().hex[:8]}",
+        password_hash="hash",
+    )
+    db.add(user)
+    await db.flush()
+    book = Book(
+        user_id=user.id,
+        title="Preserve reviewed identity",
+        format="pdf",
+        s3_key="books/reviewed-identity.pdf",
+        status="ready",
+        mode="author",
+    )
+    db.add(book)
+    await db.flush()
+    reviewed = Character(
+        book_id=book.id,
+        name="Mara Vale",
+        first_chapter=1,
+        mention_count=10,
+        analysis_metadata={"user_reviewed": True, "review_note": "Keep as written."},
+    )
+    duplicate = Character(book_id=book.id, name="Mara Vale", first_chapter=1, mention_count=1)
+    short_name = Character(book_id=book.id, name="Mara", first_chapter=1, mention_count=1)
+    db.add_all([reviewed, duplicate, short_name])
+    await db.flush()
+
+    job = CharacterIdentityRepairJob(db, book_id=book.id)
+    preview = await job.preview()
+    assert preview.planned_merges == []
+    assert preview.planned_aliases == []
+
+    applied = await job.apply()
+    await db.flush()
+    assert applied.auto_merged == 0
+    assert applied.auto_aliases == 0
+    assert reviewed.analysis_metadata["review_note"] == "Keep as written."
+    assert duplicate.merged_into_character_id is None
+    assert short_name.merged_into_character_id is None
+
+
+@pytest.mark.asyncio
+async def test_repair_preview_and_apply_do_not_merge_when_merge_option_is_disabled(db):
+    user = User(
+        email=f"repair-no-merge-{uuid.uuid4().hex[:8]}@example.com",
+        username=f"repair-no-merge-{uuid.uuid4().hex[:8]}",
+        password_hash="hash",
+    )
+    db.add(user)
+    await db.flush()
+    book = Book(
+        user_id=user.id,
+        title="Preserve distinct cast",
+        format="pdf",
+        s3_key="books/preserve-distinct-cast.pdf",
+        status="ready",
+        mode="author",
+    )
+    db.add(book)
+    await db.flush()
+    primary = Character(book_id=book.id, name="Grete", first_chapter=1, mention_count=5)
+    duplicate = Character(book_id=book.id, name="Grete", first_chapter=1, mention_count=1)
+    noise = Character(book_id=book.id, name="the door", first_chapter=1, mention_count=1)
+    db.add_all([primary, duplicate, noise])
+    await db.flush()
+
+    job = CharacterIdentityRepairJob(
+        db,
+        book_id=book.id,
+        allow_merge_safe_pairs=False,
+        allow_demote_obvious_noise=True,
+    )
+    preview = await job.preview()
+    assert preview.to_payload()["allow_merge_safe_pairs"] is False
+    assert preview.planned_merges == []
+    assert preview.planned_aliases == []
+    assert str(noise.id) in preview.planned_suppressions
+
+    applied = await job.apply()
+    await db.flush()
+    assert applied.auto_merged == 0
+    assert primary.merged_into_character_id is None
+    assert duplicate.merged_into_character_id is None
+    assert noise.visibility_state == "noise"
+
+
+@pytest.mark.asyncio
+async def test_repair_preview_and_apply_do_not_demote_when_demotion_option_is_disabled(db):
+    user = User(
+        email=f"repair-no-demote-{uuid.uuid4().hex[:8]}@example.com",
+        username=f"repair-no-demote-{uuid.uuid4().hex[:8]}",
+        password_hash="hash",
+    )
+    db.add(user)
+    await db.flush()
+    book = Book(
+        user_id=user.id,
+        title="Preserve suspect cast",
+        format="pdf",
+        s3_key="books/preserve-suspect-cast.pdf",
+        status="ready",
+        mode="author",
+    )
+    db.add(book)
+    await db.flush()
+    primary = Character(book_id=book.id, name="Grete", first_chapter=1, mention_count=5)
+    duplicate = Character(book_id=book.id, name="Grete", first_chapter=1, mention_count=1)
+    noise = Character(book_id=book.id, name="the door", first_chapter=1, mention_count=1)
+    db.add_all([primary, duplicate, noise])
+    await db.flush()
+
+    job = CharacterIdentityRepairJob(
+        db,
+        book_id=book.id,
+        allow_merge_safe_pairs=True,
+        allow_demote_obvious_noise=False,
+    )
+    preview = await job.preview()
+    assert preview.to_payload()["allow_demote_obvious_noise"] is False
+    assert (str(primary.id), str(duplicate.id)) in preview.planned_merges
+    assert preview.planned_suppressions == []
+
+    applied = await job.apply()
+    await db.flush()
+    assert applied.auto_suppressed == 0
+    assert duplicate.merged_into_character_id == primary.id
+    assert noise.visibility_state != "noise"
 
 
 @pytest.mark.asyncio
@@ -405,6 +607,13 @@ async def test_identity_resolver_suppresses_noise_and_resolves_aliases(db):
         surface_text="Gregor",
         evidence={},
     )
+    supported_alias_result = await resolve_character_mention(
+        db,
+        book_id=book.id,
+        chapter_number=1,
+        surface_text="Gregor",
+        evidence={"entity": {"aliases": ["Gregor Samsa"]}},
+    )
     exact_result = await resolve_character_mention(
         db,
         book_id=book.id,
@@ -423,8 +632,10 @@ async def test_identity_resolver_suppresses_noise_and_resolves_aliases(db):
 
     assert fragment_result.action == "auto_suppress"
     assert fragment_result.reason == "fragment_suppressed"
-    assert alias_result.action == "auto_alias"
-    assert alias_result.target_character_id == full_name.id
+    assert alias_result.action == "needs_review"
+    assert alias_result.target_character_id is None
+    assert supported_alias_result.action == "auto_alias"
+    assert supported_alias_result.target_character_id == full_name.id
     assert exact_result.action == "auto_merge"
     assert exact_result.target_character_id == full_name.id
     assert title_result.action == "needs_review"
@@ -512,6 +723,66 @@ async def test_identity_resolver_holds_ambiguous_first_name_for_review(db):
         .all()
     )
     assert aliases == []
+
+
+@pytest.mark.asyncio
+async def test_identity_resolver_keeps_recurring_unnamed_person_for_review(db):
+    user = User(email="recurring-role@example.com", username="recurring-role", password_hash="hash")
+    db.add(user)
+    await db.flush()
+    book = Book(
+        user_id=user.id,
+        title="Recurring role",
+        format="manual",
+        s3_key="books/recurring-role.txt",
+    )
+    db.add(book)
+    await db.flush()
+
+    evidence = {
+        "mention_count": 3,
+        "strong_mention_count": 2,
+        "source_mention_count_verified": True,
+        "has_attributed_speech": True,
+        "verifier": {"final": {"confidence_band": "accept"}},
+    }
+    recurring = await resolve_character_mention(
+        db,
+        book_id=book.id,
+        chapter_number=1,
+        surface_text="the guard",
+        evidence=evidence,
+    )
+    magistrate = await resolve_character_mention(
+        db,
+        book_id=book.id,
+        chapter_number=1,
+        surface_text="examining magistrate",
+        evidence=evidence,
+    )
+    one_off = await resolve_character_mention(
+        db,
+        book_id=book.id,
+        chapter_number=1,
+        surface_text="the nurse",
+        evidence={"mention_count": 1},
+    )
+
+    assert recurring.action == "needs_review"
+    assert recurring.reason == "recurring_role_person_needs_review"
+    assert magistrate.action == "needs_review"
+    assert magistrate.reason == "recurring_role_person_needs_review"
+    assert one_off.action == "auto_suppress"
+    suppressions = (
+        (
+            await db.execute(
+                select(CharacterSuppression).where(CharacterSuppression.book_id == book.id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert [item.normalized_text for item in suppressions] == ["the nurse"]
 
 
 @pytest.mark.asyncio
@@ -608,6 +879,11 @@ async def test_book_scope_alias_reconcile_attaches_pending_candidate_from_anothe
     db.add_all([candidate, mention])
     await db.flush()
 
+    assert await reconcile_pending_first_name_alias_candidates(db, book_id=book.id) == 0
+    assert candidate.status == "pending"
+    assert mention.matched_character_id is None
+
+    candidate.aliases = ["Gregor Samsa"]
     reconciled = await reconcile_pending_first_name_alias_candidates(db, book_id=book.id)
     await db.flush()
 
@@ -617,3 +893,32 @@ async def test_book_scope_alias_reconcile_attaches_pending_candidate_from_anothe
     assert candidate.reason_codes == ["first_name_alias_reconciled"]
     assert mention.matched_character_id == full_name.id
     assert mention.resolver_status == "auto_alias"
+
+    protected = Character(
+        book_id=book.id,
+        name="Mara Vale",
+        aliases=[],
+        first_chapter=1,
+        mention_count=4,
+        approval_state="protected",
+    )
+    db.add(protected)
+    await db.flush()
+    protected_candidate = CharacterCandidate(
+        book_id=book.id,
+        chapter_number=2,
+        raw_name="Mara",
+        proposed_name="Mara",
+        normalized_name="mara",
+        aliases=["Mara Vale"],
+        status="pending",
+        confidence=90,
+        reason_codes=["candidate_dossier_needs_review"],
+        evidence={},
+    )
+    db.add(protected_candidate)
+    await db.flush()
+
+    assert await reconcile_pending_first_name_alias_candidates(db, book_id=book.id) == 0
+    assert protected_candidate.status == "pending"
+    assert protected_candidate.matched_character_id is None

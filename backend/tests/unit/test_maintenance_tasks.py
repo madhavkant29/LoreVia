@@ -387,6 +387,69 @@ async def test_repair_processing_books_scan_uses_existing_book_columns(db, monke
 
 
 @pytest.mark.asyncio
+async def test_repair_processing_books_does_not_alert_for_legacy_freeze_hold(
+    db, monkeypatch, caplog
+):
+    cutoff = datetime.now(UTC) - timedelta(days=1)
+    user = User(
+        email=f"repair-hold-{uuid.uuid4().hex[:8]}@lorevia.app",
+        username=f"repairhold{uuid.uuid4().hex[:8]}",
+        password_hash="hash",
+    )
+    db.add(user)
+    await db.flush()
+    failure_state = {
+        "processing": {
+            "status": "processing",
+            "pipeline": {"analysis": {"status": "failed", "failed_chapters": [1]}},
+        }
+    }
+    legacy_book = Book(
+        user_id=user.id,
+        title="Legacy Processing",
+        format="txt",
+        s3_key="books/legacy.txt",
+        status="processing",
+        created_at=cutoff - timedelta(days=1),
+        writer_workspace=failure_state,
+    )
+    current_book = Book(
+        user_id=user.id,
+        title="Current Processing",
+        format="txt",
+        s3_key="books/current.txt",
+        status="processing",
+        created_at=cutoff + timedelta(hours=1),
+        writer_workspace=failure_state,
+    )
+    db.add_all([legacy_book, current_book])
+    await db.commit()
+
+    async def persisted_cutoff(_db):
+        return cutoff
+
+    monkeypatch.setattr(
+        "app.services.book_freeze_service.load_persisted_freeze_cutoff", persisted_cutoff
+    )
+    legacy_book_id = legacy_book.id
+    current_book_id = current_book.id
+    user_id = user.id
+    db.expunge_all()
+    _mock_async_session_local(monkeypatch, db)
+
+    with caplog.at_level("ERROR", logger="lorevia.maintenance"):
+        legacy_result = repair_processing_books_task.run(book_id=str(legacy_book_id))
+        current_result = repair_processing_books_task.run(book_id=str(current_book_id))
+
+    assert legacy_result["held_for_legacy_freeze"] == 1
+    assert current_result["held_for_legacy_freeze"] == 0
+    stuck_messages = [
+        record.message for record in caplog.records if "book_processing_stuck" in record.message
+    ]
+    assert stuck_messages == [f"book_processing_stuck book_id={current_book_id} user_id={user_id}"]
+
+
+@pytest.mark.asyncio
 async def test_cron_lock_prevents_double_execution(monkeypatch):
     async def _fake_cache_set_if_absent_lock_held(key, value, ttl):
         return False

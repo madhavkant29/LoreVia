@@ -3,6 +3,63 @@ import { installMockApi } from "./support/mockApi"
 import { criticalAccessibilityViolations } from "./support/accessibility"
 
 const route = "/sky-of-ash--book-1"
+
+test("completed author processing opens review destinations once without starting a scan", async ({ page }) => {
+  test.setTimeout(120_000)
+  await installMockApi(page, { bookMode: "author", workspaceShell: "author", reviewReadyRun: true, chapterReports: true })
+  let scanRequests = 0
+  page.on("request", (request) => {
+    if (request.url().includes("/advisor/suggestions/scan") && request.method() === "POST") scanRequests++
+  })
+
+  await page.goto(route)
+  const dialog = page.getByRole("dialog", { name: "Your manuscript is ready to review" })
+  await expect(dialog).toBeVisible()
+  await expect(dialog.getByRole("link", { name: "Recommended checks" })).toHaveAttribute("href", "/sky-of-ash--book-1/advisor?tab=scan")
+  await expect(dialog.getByRole("link", { name: "Chapter reports" })).toHaveAttribute("href", "/sky-of-ash--book-1/analysis?view=chapters")
+  expect(scanRequests).toBe(0)
+
+  await dialog.getByRole("link", { name: "Recommended checks" }).click()
+  await expect(page).toHaveURL(/\/advisor\?tab=scan$/, { timeout: 45_000 })
+  await page.goto(route)
+  await expect(dialog).toHaveCount(0)
+  expect(scanRequests).toBe(0)
+
+  await page.evaluate(() => localStorage.removeItem("lorevia:review-ready:book-1:completed-review-run"))
+  await page.reload()
+  await expect(dialog).toBeVisible()
+  await dialog.getByRole("link", { name: "Chapter reports" }).click()
+  // The chapter-report route may compile only after this late-suite navigation.
+  await expect(page).toHaveURL(/\/analysis\?view=chapters$/, { timeout: 45_000 })
+})
+
+test("completed processing without chapter reports does not show the review popup", async ({ page }) => {
+  await installMockApi(page, { bookMode: "author", workspaceShell: "author", reviewReadyRun: true })
+  await page.goto(route)
+  await expect(page.getByRole("dialog", { name: "Your manuscript is ready to review" })).toHaveCount(0)
+})
+
+test("review destinations remain accessible when browser storage blocks prompt persistence", async ({ page }) => {
+  await installMockApi(page, { bookMode: "author", workspaceShell: "author", reviewReadyRun: true, chapterReports: true })
+  await page.addInitScript(() => {
+    const read = Storage.prototype.getItem
+    const write = Storage.prototype.setItem
+    Storage.prototype.getItem = function (key) {
+      if (key.startsWith("lorevia:review-ready:")) throw new DOMException("Blocked", "SecurityError")
+      return read.call(this, key)
+    }
+    Storage.prototype.setItem = function (key, value) {
+      if (key.startsWith("lorevia:review-ready:")) throw new DOMException("Blocked", "SecurityError")
+      return write.call(this, key, value)
+    }
+  })
+  await page.goto(route)
+  const dialog = page.getByRole("dialog", { name: "Your manuscript is ready to review" })
+  await expect(dialog).toBeVisible()
+  await expect(dialog.getByRole("link", { name: "Recommended checks" })).toHaveAttribute("href", "/sky-of-ash--book-1/advisor?tab=scan")
+  await dialog.getByRole("button", { name: "Maybe later" }).click()
+  await expect(dialog).toHaveCount(0)
+})
 for (const mode of ["author", "reader"] as const) {
   test(`overview ${mode} keeps core actions readable across screen sizes`, async ({ page }, info) => {
     await installMockApi(page, { bookMode: mode, workspaceShell: mode, readerBootstrapProfile: "critical" })

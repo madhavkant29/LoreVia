@@ -22,6 +22,9 @@ import type {
   ProseTightenResponse,
   WhatsTheWordResponse,
   VoiceConsistencyResponse,
+  VoiceChapterReviewJob,
+  VoiceReviewDecision,
+  VoiceReviewDecisionResponse,
   BetaReaderAnalysisRequest,
   BetaReaderJobResponse,
   BetaReaderReportsResponse,
@@ -41,6 +44,8 @@ type AdvisorStreamHandlers = {
 type VoiceConsistencyOptions = {
   chapterNum?: number
   characterId?: string | null
+  sceneContext?: string | null
+  voiceMode?: "dialogue" | "first_person_narration"
 }
 
 function intelligencePath(bookId: string, suffix = "") {
@@ -290,18 +295,39 @@ export const intelligenceApi = {
     }, handlers),
   voiceConsistencyReview: (bookId: string, text: string, options?: VoiceConsistencyOptions) =>
     apiClient.post<VoiceConsistencyResponse>(intelligencePath(bookId, "/advisor/voice-consistency"), {
-      text: clampAdvisorPassage(text),
+      text,
       chapter_num: options?.chapterNum ?? null,
       ...(options?.characterId ? { character_id: options.characterId } : {}),
+      ...(options?.sceneContext ? { scene_context: options.sceneContext } : {}),
+      ...(options?.voiceMode ? { voice_mode: options.voiceMode } : {}),
     }).then(r => r.data),
   voiceConsistencyReviewStream: (bookId: string, text: string, options?: VoiceConsistencyOptions, handlers?: AdvisorStreamHandlers) =>
     requestSse<VoiceConsistencyResponse>(intelligencePath(bookId, "/advisor/voice-consistency-stream"), {
       payload: {
-        text: clampAdvisorPassage(text),
+        text,
         chapter_num: options?.chapterNum ?? null,
         ...(options?.characterId ? { character_id: options.characterId } : {}),
+        ...(options?.sceneContext ? { scene_context: options.sceneContext } : {}),
+        ...(options?.voiceMode ? { voice_mode: options.voiceMode } : {}),
       },
     }, handlers),
+  startVoiceChapterReview: (bookId: string, chapterNumber: number, retryPaused = false, forceRefresh = false) =>
+    apiClient.post<VoiceChapterReviewJob>(intelligencePath(bookId, "/advisor/voice-chapters"), {
+      chapter_number: chapterNumber,
+      retry_paused: retryPaused,
+      force_refresh: forceRefresh,
+    }).then((response) => response.data),
+  latestVoiceChapterReview: (bookId: string, chapterNumber: number) =>
+    apiClient.get<VoiceChapterReviewJob | null>(intelligencePath(bookId, "/advisor/voice-chapters/latest"), {
+      params: { chapter_number: chapterNumber },
+    }).then((response) => response.data),
+  voiceChapterReviewStatus: (bookId: string, jobId: string) =>
+    apiClient.get<VoiceChapterReviewJob>(intelligencePath(bookId, `/advisor/voice-chapters/jobs/${encodeURIComponent(jobId)}`)).then((response) => response.data),
+  saveVoiceReviewDecision: (bookId: string, findingKey: string, decision: VoiceReviewDecision) =>
+    apiClient.put<VoiceReviewDecisionResponse>(
+      intelligencePath(bookId, `/advisor/voice-decisions/${encodeURIComponent(findingKey)}`),
+      { decision },
+    ).then((response) => response.data),
   runBetaReader: (bookId: string, payload: BetaReaderAnalysisRequest) =>
     apiClient.post<BetaReaderRunResponse>(
       intelligencePath(bookId, "/advisor/beta-reader"),

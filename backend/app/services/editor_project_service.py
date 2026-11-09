@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+from copy import deepcopy
 from datetime import UTC, datetime
 from typing import Any
 
@@ -26,11 +27,13 @@ from app.models.character import (
     Character,
     CharacterCandidate,
     CharacterDuplicateSuggestion,
+    CharacterIdentityConstraint,
     CharacterMention,
     CharacterRelationshipCandidate,
     CharacterState,
     CharacterVoiceProfile,
 )
+from app.models.generation import BookDataGeneration
 from app.models.intelligence import (
     BookChunk,
     ChapterSummary,
@@ -256,7 +259,20 @@ async def _reset_characters_for_book(db: AsyncSession, book_id: uuid.UUID) -> di
             if char is not None:
                 char.mention_count = 0
                 char.last_seen_chapter = None
-                char.analysis_metadata = {}
+                metadata = (
+                    dict(char.analysis_metadata) if isinstance(char.analysis_metadata, dict) else {}
+                )
+                char.analysis_metadata = {
+                    key: metadata[key]
+                    for key in (
+                        "user_curated",
+                        "user_reviewed",
+                        "protected_from_repair",
+                        "review_note",
+                        "review_audit",
+                    )
+                    if key in metadata
+                }
                 char.growth_events = []
         else:
             await db.execute(delete(Character).where(Character.id == char_id))
@@ -282,13 +298,27 @@ async def _resolve_character_anchor_ids(db: AsyncSession, book_id: uuid.UUID) ->
             Character.book_id == book_id,
             or_(
                 Character.is_manual.is_(True),
+                Character.approval_state == "protected",
                 Character.approval_source == "manual_review",
                 Character.analysis_metadata["user_curated"].as_boolean().is_(True),
+                Character.analysis_metadata["user_reviewed"].as_boolean().is_(True),
                 Character.analysis_metadata["protected_from_repair"].as_boolean().is_(True),
             ),
         )
     )
     anchors.update(row[0] for row in manual_result.all())
+
+    manual_constraints = await db.execute(
+        select(
+            CharacterIdentityConstraint.left_character_id,
+            CharacterIdentityConstraint.right_character_id,
+        ).where(
+            CharacterIdentityConstraint.book_id == book_id,
+            CharacterIdentityConstraint.source == "manual",
+        )
+    )
+    for left_id, right_id in manual_constraints.all():
+        anchors.update((left_id, right_id))
 
     curated_rel_a = await db.execute(
         select(CharacterRelationship.character_a_id).where(
@@ -335,7 +365,7 @@ async def prepare_rebuild(
     )
 
     await ensure_active_generation(db, book_id=book.id)
-    await create_staging_generation(
+    staging_generation_id = await create_staging_generation(
         db,
         book_id=book.id,
         rebuild_run_id=rebuild_run_id,
@@ -345,6 +375,26 @@ async def prepare_rebuild(
     chapters = list(
         (await db.execute(select(Chapter).where(Chapter.book_id == book.id))).scalars().all()
     )
+    staging_generation = await db.get(BookDataGeneration, staging_generation_id)
+    if staging_generation is None:
+        raise RuntimeError("staging_generation_missing")
+    if staging_generation.chapter_state_snapshot is None:
+        staging_generation.chapter_state_snapshot = {
+            "rebuild_run_id": rebuild_run_id,
+            "chapters": {
+                str(chapter.id): {
+                    "content_version": chapter.content_version,
+                    "structure_version": chapter.structure_version,
+                    "number": chapter.number,
+                    "title": chapter.title,
+                    "s3_key": chapter.s3_key,
+                    "word_count": chapter.word_count,
+                    "processed": bool(chapter.processed),
+                    "analysis_state": deepcopy(chapter.analysis_state),
+                }
+                for chapter in chapters
+            },
+        }
     for chapter in chapters:
         chapter.processed = not bool(chapter.word_count and chapter.word_count > 0)
         chapter.analysis_state = {}
@@ -911,14 +961,21 @@ async def fail_rebuild_if_active(
     failed_rebuild_run_id = str(processing.get("rebuild_run_id"))
     from app.services.data_generation_service import (
         fail_staging_generation,
+        generation_id_for_rebuild,
         has_active_generation,
     )
 
-    await fail_staging_generation(
+    generation_failed = await fail_staging_generation(
         db,
         book_id=book.id,
         rebuild_run_id=failed_rebuild_run_id,
     )
+    if not generation_failed and await db.scalar(
+        select(BookDataGeneration.id).where(
+            BookDataGeneration.id == generation_id_for_rebuild(failed_rebuild_run_id)
+        )
+    ):
+        return False
     from app.services.processing_allowance_service import (
         AUTO_FIRST_REPROCESS_USAGE_KIND,
         MANUAL_REPROCESS_USAGE_KIND,
@@ -1002,14 +1059,21 @@ async def cancel_rebuild_for_manual_edit(
 
     from app.services.data_generation_service import (
         fail_staging_generation,
+        generation_id_for_rebuild,
         has_active_generation,
     )
 
-    await fail_staging_generation(
+    generation_failed = await fail_staging_generation(
         db,
         book_id=book.id,
         rebuild_run_id=str(rebuild_run_id),
     )
+    if not generation_failed and await db.scalar(
+        select(BookDataGeneration.id).where(
+            BookDataGeneration.id == generation_id_for_rebuild(str(rebuild_run_id))
+        )
+    ):
+        return False
 
     now = datetime.now(UTC)
     from app.services.processing_allowance_service import (

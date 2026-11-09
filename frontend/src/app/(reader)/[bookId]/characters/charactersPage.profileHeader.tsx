@@ -1,5 +1,6 @@
 import { CharacterProfileTabs, type CharacterProfileTab } from "@/components/reader/CharacterProfileTabs"
 import type { Character } from "@/types/character"
+import { characterMentionCountLabel } from "./charactersPage.mentionLabels"
 import {
   actionButtonClasses,
   OverflowMenu,
@@ -64,7 +65,7 @@ export function CharacterProfileHeader({
               formatRole(character.role),
               `Chapter ${character.first_chapter}`,
               `Last seen: Chapter ${character.last_seen_chapter ?? character.first_chapter}`,
-              `${character.mention_count ?? 0} mentions`,
+              characterMentionCountLabel(character),
               `${relationshipCount} relationships`,
             ].map((item, index) => (
               <span key={item} className="inline-flex items-center gap-3">

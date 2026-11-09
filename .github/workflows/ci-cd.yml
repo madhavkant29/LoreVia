@@ -162,7 +162,7 @@ jobs:
 
   frontend-e2e:
     name: Frontend E2E ${{ matrix.shard }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     strategy:
       fail-fast: false
@@ -304,6 +304,7 @@ jobs:
         tags: lorevia-backend-security:${{ github.sha }}
         build-args: |
           RELEASE_SHA=${{ github.sha }}
+          SECURITY_REFRESH=${{ github.run_id }}-${{ github.run_attempt }}
         cache-from: type=gha,scope=security-backend
         cache-to: type=gha,mode=max,scope=security-backend
 
@@ -337,6 +338,7 @@ jobs:
         tags: lorevia-worker-security:${{ github.sha }}
         build-args: |
           RELEASE_SHA=${{ github.sha }}
+          SECURITY_REFRESH=${{ github.run_id }}-${{ github.run_attempt }}
         cache-from: type=gha,scope=security-worker
         cache-to: type=gha,mode=max,scope=security-worker
 

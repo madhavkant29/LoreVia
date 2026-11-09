@@ -219,7 +219,7 @@ export function CharactersSidebarBody({
       {workspaceMode === "repair" ? (
         <div className="px-3 py-6">
           <div className={`rounded-md border px-4 py-5 ${isDark ? "border-[#17202c] bg-white/[0.02]" : "border-stone-200 bg-white"}`}>
-            <p className={isDark ? "text-sm text-slate-400" : "text-sm text-stone-600"}>Repair preview lists safe merges, obvious-noise demotions, and protected skips in the main workspace. Search here to narrow the queue before reprocessing.</p>
+            <p className={isDark ? "text-sm text-slate-400" : "text-sm text-stone-600"}>Identity repair preview lists safe merges, obvious-noise demotions, and protected skips in the main workspace. Search here to narrow the queue before applying cleanup.</p>
           </div>
         </div>
       ) : null}
@@ -228,6 +228,11 @@ export function CharactersSidebarBody({
         <div className={`mt-5 border-t px-3 pt-4 ${isDark ? "border-[#17202c]" : "border-stone-200"}`}>
           <p className={`text-xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-400" : "text-stone-600"}`}>Quarantine queue</p>
           <p className={`mt-1 text-xs ${isDark ? "text-slate-400" : "text-stone-600"}`}>{filteredPendingCandidates.length} candidates waiting for review</p>
+          {filteredPendingCandidates.length > 8 ? (
+            <p className={`mt-1 text-xs ${isDark ? "text-slate-400" : "text-stone-600"}`}>
+              Showing the first 8 here. Open the Review queue and use Previous/Next to inspect all {filteredPendingCandidates.length} candidates.
+            </p>
+          ) : null}
           <div className="mt-3 space-y-3">
             {filteredPendingCandidates.slice(0, 8).map((candidate) => (
               <div key={candidate.id} className={`rounded-md border px-3 py-3 ${isDark ? "border-[#17202c] bg-white/[0.02]" : "border-stone-200 bg-white"}`}>
