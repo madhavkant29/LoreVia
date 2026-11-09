@@ -125,7 +125,7 @@ async def embed_for_dedup(
 def normalize_character_name(name: str | None) -> str:
     if not name:
         return ""
-    normalized = re.sub(r"[^a-z0-9\s]", " ", name.lower())
+    normalized = re.sub(r"[^\w\s]", " ", name.casefold()).replace("_", " ")
     return re.sub(r"\s+", " ", normalized).strip()
 
 
@@ -151,7 +151,7 @@ def is_valid_alias(alias: str | None) -> bool:
     if not normalized or normalized in ALIAS_STOPWORDS:
         return False
 
-    words = re.findall(r"[A-Za-z][A-Za-z'-]*", candidate)
+    words = re.findall(r"[^\W\d_]+(?:[-'][^\W\d_]+)*", candidate)
     if not words:
         return False
     if len(words) == 1 and (len(words[0]) <= 3 or normalized in ALIAS_STOPWORDS):
@@ -202,6 +202,10 @@ def character_name_keys(name: str | None, aliases: Iterable[str] | None = None) 
         if not normalized:
             return
         keys.add(normalized)
+        # A possessive reference names another entity (for example, "Raymond's Arab").
+        # Its owner must not become a partial identity key for that entity.
+        if re.search(r"[\w][\'\u2019]s\s", candidate or "", flags=re.IGNORECASE):
+            return
         stripped = _strip_honorific_suffixes(candidate)
         if stripped:
             keys.add(stripped)
@@ -230,6 +234,12 @@ def names_equivalent(
 ) -> bool:
     if has_conflicting_title_identity(left_name, right_name):
         return False
+
+    possessive = r"[\w][\'\u2019]s\s"
+    if re.search(possessive, left_name or "", flags=re.IGNORECASE) or re.search(
+        possessive, right_name or "", flags=re.IGNORECASE
+    ):
+        return normalize_character_name(left_name) == normalize_character_name(right_name)
 
     left_keys = character_name_keys(left_name, left_aliases)
     right_keys = character_name_keys(right_name, right_aliases)
@@ -403,29 +413,23 @@ async def find_similar(
     excluded_ids: Iterable[uuid.UUID] | None = None,
 ) -> uuid.UUID | None:
     max_distance = max(0.0, 1 - threshold)
+    distance = Character.embedding.cosine_distance(embedding)
+    query = select(Character.id).where(
+        Character.book_id == book_id,
+        Character.embedding.is_not(None),
+        distance < max_distance,
+    )
+    excluded = set(excluded_ids or [])
+    if excluded:
+        query = query.where(Character.id.not_in(excluded))
     try:
-        result = await db.execute(
-            text("""
-                SELECT id, embedding <=> CAST(:emb AS vector) AS distance
-                FROM characters
-                WHERE book_id = :bid
-                  AND embedding IS NOT NULL
-                  AND embedding <=> CAST(:emb AS vector) < :max_distance
-                ORDER BY embedding <=> CAST(:emb AS vector) ASC
-                LIMIT 10
-            """),
-            {"emb": str(embedding), "bid": str(book_id), "max_distance": max_distance},
-        )
+        result = await db.execute(query.order_by(distance).limit(1))
     except ProgrammingError as exc:
         if 'type "vector" does not exist' in str(getattr(exc, "orig", exc)).lower():
             log.warning("find_similar_pgvector_unavailable book_id=%s", book_id)
             return None
         raise
-    excluded = {str(item) for item in (excluded_ids or [])}
-    for row in result.fetchall():
-        if str(row[0]) not in excluded:
-            return uuid.UUID(str(row[0]))
-    return None
+    return result.scalar_one_or_none()
 
 
 async def find_by_name_or_alias(

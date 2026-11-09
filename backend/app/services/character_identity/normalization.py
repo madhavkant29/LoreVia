@@ -44,7 +44,7 @@ def normalized_comparison_name(name: str | None) -> str:
     display_name = display_name_form(name)
     if not display_name:
         return ""
-    tokens = re.findall(r"[A-Za-z][A-Za-z'-]*", display_name)
+    tokens = re.findall(r"[^\W\d_]+(?:[-'][^\W\d_]+)*", display_name)
     normalized_tokens: list[str] = []
     for token in tokens:
         normalized = token.casefold().strip(".")
@@ -57,7 +57,7 @@ def normalize_name(name: str | None) -> str:
         return ""
     tokens = [
         token
-        for token in re.findall(r"[A-Za-z][A-Za-z'-]*", name)
+        for token in re.findall(r"[^\W\d_]+(?:[-'][^\W\d_]+)*", name)
         if token.casefold() not in NAME_TITLES
     ]
     return " ".join(tokens).casefold().strip()

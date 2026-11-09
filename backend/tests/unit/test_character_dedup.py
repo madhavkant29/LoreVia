@@ -4,6 +4,8 @@ from types import SimpleNamespace
 import pytest
 from sqlalchemy import select
 
+from app.core.database import _apply_book_generation_visibility
+from app.engine.character import deduplicator
 from app.engine.character.entity_filters import VISIBILITY_THRESHOLD, character_visibility_score
 from app.engine.character.profile_builder import build_description
 from app.models.book import Book, Chapter
@@ -16,6 +18,7 @@ from app.models.intelligence import (
     WikiEntry,
 )
 from app.models.user import User
+from app.services.data_generation_service import generation_scope
 from app.utils.characters import partitioning as character_partitioning
 from app.utils.characters.extraction import (
     _entity_mentions_linked_in_text,
@@ -39,6 +42,8 @@ from app.utils.characters.similarity import (
     description_similarity,
     name_similarity,
 )
+
+ORIGINAL_FIND_SIMILAR = deduplicator.find_similar
 
 
 def test_name_similarity_scores_shared_surname_high():
@@ -128,6 +133,70 @@ def test_names_equivalent_matches_reversed_japanese_name_order():
     from app.engine.character.deduplicator import names_equivalent
 
     assert names_equivalent("Akira Kajou", [], "Kajou Akira", []) is True
+
+
+def test_possessive_reference_does_not_merge_with_its_owner():
+    from app.engine.character.deduplicator import (
+        character_name_keys,
+        names_equivalent,
+        resolve_character_match_ids,
+    )
+
+    raymond_id = uuid.uuid4()
+    assert not names_equivalent("Raymond's Arab", [], "Raymond Sintès", [])
+    assert not character_name_keys("Raymond's Arab") & character_name_keys("Raymond Sintès")
+    assert (
+        resolve_character_match_ids(
+            "Raymond's Arab", [], [(raymond_id, "Raymond Sintès", ["Raymond"])]
+        )
+        == []
+    )
+    assert names_equivalent("Raymond Sintès", [], "Raymond Sintès", [])
+
+
+def test_generic_review_reason_does_not_claim_character_identity_conflict():
+    summary = build_character_dossier_summary(
+        name="Marie",
+        aliases=[],
+        evidence={"resolver_status": "clustered", "mention_count": 51},
+        reason_codes=["candidate_dossier_needs_review"],
+    )
+    assert summary["resolver_ambiguity_count"] == 0
+    assert "conflicts_with_existing_character" not in summary["strict_auto_reason_codes"]
+
+
+def test_embedding_match_uses_generation_scoped_character_query():
+    character_id = uuid.uuid4()
+    blocked_id = uuid.uuid4()
+    book_id = uuid.uuid4()
+
+    class SessionStub:
+        statement = None
+
+        async def execute(self, statement):
+            self.statement = statement
+            return SimpleNamespace(scalar_one_or_none=lambda: character_id)
+
+    db = SessionStub()
+    coroutine = ORIGINAL_FIND_SIMILAR(db, book_id, [0.1] * 1536, excluded_ids=[blocked_id])
+    with pytest.raises(StopIteration) as finished:
+        coroutine.send(None)
+    result = finished.value.value
+    assert result == character_id
+    assert db.statement.column_descriptions[0]["entity"] is Character
+    compiled = db.statement.compile()
+    assert "characters.id NOT IN" in str(compiled)
+    assert blocked_id in compiled.params.values() or [blocked_id] in compiled.params.values()
+    state = SimpleNamespace(
+        execution_options={},
+        is_select=True,
+        is_update=False,
+        is_delete=False,
+        statement=db.statement,
+    )
+    with generation_scope(str(uuid.uuid4())):
+        _apply_book_generation_visibility(state)
+        assert "characters.generation_id" in str(state.statement.compile())
 
 
 def test_resolve_character_match_ids_prefers_honorific_and_alias_variants():
@@ -409,6 +478,86 @@ def test_cluster_character_entities_keeps_distinct_nearby_names_separate():
     clustered = cluster_character_entities(entities)
 
     assert [item["name"] for item in clustered] == ["Gregor Samsa", "Grete"]
+
+
+def test_cluster_keeps_distinct_single_names_separate_even_with_suggested_alias():
+    entities = [
+        {
+            "name": "Paris",
+            "aliases": ["Marie"],
+            "confidence": 0.8,
+            "evidence": {"mention_count": 4},
+        },
+        {
+            "name": "Marie",
+            "aliases": [],
+            "confidence": 0.9,
+            "evidence": {"mention_count": 51},
+        },
+    ]
+
+    clustered = cluster_character_entities(entities)
+    assert [item["name"] for item in clustered] == ["Paris", "Marie"]
+
+
+def test_distinct_single_names_do_not_prevent_supported_full_name_cluster():
+    entities = [
+        {"name": "Paris", "aliases": ["Marie"], "evidence": {"mention_count": 4}},
+        {
+            "name": "Marie",
+            "aliases": [],
+            "evidence": {
+                "mention_count": 51,
+                "strong_mention_count": 25,
+                "has_dialogue_or_action": True,
+            },
+        },
+        {
+            "name": "Marie Cardona",
+            "aliases": [],
+            "evidence": {"mention_count": 1, "has_dialogue_or_action": False},
+        },
+    ]
+
+    clustered = cluster_character_entities(entities)
+
+    assert [item["name"] for item in clustered] == ["Paris", "Marie Cardona"]
+    assert "Marie" in clustered[1]["aliases"]
+    assert "Paris" not in clustered[1]["aliases"]
+    assert clustered[1]["evidence"]["strong_mention_count"] == 25
+    assert clustered[1]["evidence"]["has_dialogue_or_action"] is True
+    assert (
+        build_character_dossier_summary(
+            name=clustered[1]["name"],
+            aliases=clustered[1]["aliases"],
+            evidence=clustered[1]["evidence"],
+        )["strict_auto_eligible"]
+        is True
+    )
+
+
+def test_suggested_alias_does_not_merge_a_different_name_with_a_full_name():
+    source = "Paris met Marie Cardona at the station."
+    clustered = cluster_character_entities(
+        [
+            {"name": "Paris", "aliases": ["Marie"], "_source_text": source},
+            {"name": "Marie Cardona", "aliases": [], "_source_text": source},
+        ]
+    )
+
+    assert [item["name"] for item in clustered] == ["Paris", "Marie Cardona"]
+
+
+def test_possessive_reference_stays_separate_when_both_names_share_a_passage():
+    source = "Raymond Sintès argued with Raymond's Arab."
+    clustered = cluster_character_entities(
+        [
+            {"name": "Raymond Sintès", "aliases": ["Raymond"], "_source_text": source},
+            {"name": "Raymond's Arab", "aliases": [], "_source_text": source},
+        ]
+    )
+
+    assert [item["name"] for item in clustered] == ["Raymond Sintès", "Raymond's Arab"]
 
 
 def test_cluster_character_entities_prefers_full_name_over_repeated_given_name():

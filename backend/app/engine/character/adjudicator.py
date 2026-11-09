@@ -402,6 +402,11 @@ def score_character_likeness(
     if visibility >= 2:
         score += 10
         reasons.append("visibility_score_person_like")
+    elif classify_candidate_kind(name) == CandidateKind.OBJECT_OR_PLACE:
+        # Nearby dialogue can be about a place. Let visibility's soft common
+        # word penalty outweigh incidental person-context signals.
+        score -= min(35, max(0, 2 - visibility) * 5)
+        reasons.append("low_visibility_place_reference")
 
     words = [word.casefold() for word in entity_words(name)]
     if (

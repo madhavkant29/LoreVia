@@ -56,6 +56,25 @@ def test_place_candidates_are_classified_without_promotion(name):
     assert adjudication.rejection_reason == "likely_place"
 
 
+@pytest.mark.parametrize("name", ["Home", "The Home"])
+def test_institutional_home_stays_a_place_despite_incidental_human_signals(name):
+    adjudication = adjudicate_character_candidate(
+        name,
+        evidence={
+            "mention_count": 9,
+            "has_dialogue_or_action": True,
+            "snippets": [f"Someone said they had returned to {name}."],
+        },
+    )
+
+    assert adjudication.adjudication_status in {
+        ADJUDICATION_QUARANTINED,
+        ADJUDICATION_PLACE,
+        ADJUDICATION_OBJECT,
+    }
+    assert "low_visibility_place_reference" in adjudication.reason_codes
+
+
 @pytest.mark.parametrize("name", ["Doctor Kemp", "Thomas Marvel", "Teddy Henfrey"])
 def test_person_candidates_promote_with_strong_human_evidence(name):
     adjudication = adjudicate_character_candidate(

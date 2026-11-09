@@ -81,6 +81,9 @@ def test_classify_candidate_kind_handles_cleanup_cases():
     assert classify_candidate_kind("Mr") == CandidateKind.FRAGMENT
     assert classify_candidate_kind("he") == CandidateKind.PRONOUN
     assert classify_candidate_kind("the door") == CandidateKind.OBJECT_OR_PLACE
+    assert classify_candidate_kind("Home") == CandidateKind.OBJECT_OR_PLACE
+    assert classify_candidate_kind("The Home") == CandidateKind.OBJECT_OR_PLACE
+    assert classify_candidate_kind("Céleste") == CandidateKind.ALIAS
 
 
 def test_recurring_unnamed_role_reaches_review_only_with_verified_person_evidence():

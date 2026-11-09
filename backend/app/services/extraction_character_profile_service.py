@@ -72,6 +72,7 @@ async def extract_profile_from_packet(
         f"Source passage:\n{source_text}"
     )
     retry_instruction = ""
+    partial_profile: dict[str, Any] | None = None
     for _attempt in range(2):
         try:
             raw = await complete_with_fallback(
@@ -122,13 +123,7 @@ async def extract_profile_from_packet(
             )
             continue
         grounded, citations = ground_character_profile_claims(profile, source_text)
-        if not profile_claims_complete(profile, grounded):
-            retry_instruction = (
-                "\nValidation feedback: At least one nonempty claim lacked a verbatim "
-                "quote from the supplied source passage. Remove unsupported claims or "
-                "provide an exact source quote for each claim."
-            )
-            continue
+        complete = profile_claims_complete(profile, grounded)
         try:
             mapped_citations = (
                 map_profile_citations_to_source(citations, packet["segments"])
@@ -141,11 +136,24 @@ async def extract_profile_from_packet(
                 "evidence passage, not from a generated header or across passages."
             )
             continue
-        return {
+        result = {
             **grounded,
             "_source_batch_key": packet["source_batch_key"],
             "evidence": {"profile_claims": mapped_citations},
         }
+        if complete:
+            return result
+        # Keep independently verified claims if the retry also fails. The batch
+        # stays visibly partial, and unsupported claims are never persisted.
+        if mapped_citations:
+            partial_profile = {**result, "_profile_partial_invalid_response": True}
+        retry_instruction = (
+            "\nValidation feedback: At least one nonempty claim lacked a verbatim "
+            "quote from the supplied source passage. Remove unsupported claims or "
+            "provide an exact source quote for each claim."
+        )
+    if partial_profile is not None:
+        return partial_profile
     raise CharacterProfileFormatError("character_profile_invalid_or_unsupported_response")
 
 
@@ -195,6 +203,10 @@ async def enrich_chapter_character_profiles(
             continue
         if isinstance(result, Exception):
             raise result
+        if result.pop("_profile_partial_invalid_response", False):
+            invalid_responses_by_entity[entity_index] = (
+                invalid_responses_by_entity.get(entity_index, 0) + 1
+            )
         profiles_by_entity.setdefault(entity_index, []).append(result)
 
     if invalid_responses_by_entity:
