@@ -578,6 +578,11 @@ def build_character_analysis_payload(char: Character) -> dict[str, Any]:
             if isinstance(metadata.get("first_person_self_identification"), dict)
             else None
         ),
+        "first_person_addressed_as": (
+            metadata.get("first_person_addressed_as")
+            if isinstance(metadata.get("first_person_addressed_as"), dict)
+            else None
+        ),
         "visibility_state": visibility_state,
         "approval_state": approval_state,
         "approval_source": approval_source,

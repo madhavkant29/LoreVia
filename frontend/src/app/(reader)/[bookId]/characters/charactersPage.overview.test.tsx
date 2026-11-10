@@ -3,12 +3,15 @@ import { renderToStaticMarkup } from "react-dom/server"
 import { CharacterOverviewIdentityCards } from "./charactersPage.overview"
 import { character } from "./charactersPage.testData"
 
-function identityMarkup(citation?: { chapter_number: number; excerpt: string }) {
+function identityMarkup(citation?: { chapter_number: number; excerpt: string }, addressed?: { chapter_number: number; excerpt: string; attribution_confidence: "contextual" }) {
   return renderToStaticMarkup(
     <CharacterOverviewIdentityCards
       character={character({
         name: "Arun Vale",
-        analysis_metadata: citation ? { first_person_self_identification: citation } : {},
+        analysis_metadata: {
+          ...(citation ? { first_person_self_identification: citation } : {}),
+          ...(addressed ? { first_person_addressed_as: addressed } : {}),
+        },
       })}
       chapterAppearanceText={(chapter) => `Chapter ${chapter}`}
       evidenceCount={0}
@@ -33,5 +36,13 @@ describe("CharacterOverviewIdentityCards narrator evidence", () => {
 
   it("does not suggest a narrator without source evidence", () => {
     expect(identityMarkup()).not.toContain("Narrator evidence")
+    expect(identityMarkup()).not.toContain("Narrator clue")
+  })
+
+  it("shows a direct address as a tentative clue without claiming narrator identity", () => {
+    const markup = identityMarkup(undefined, { chapter_number: 2, excerpt: "you here, Monsieur Vale", attribution_confidence: "contextual" })
+    expect(markup).toContain("Narrator clue")
+    expect(markup).toContain("This alone does not confirm the first-person narrator")
+    expect(markup).not.toContain("Narrator evidence")
   })
 })

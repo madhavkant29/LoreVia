@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from app.utils.characters.profile_evidence import source_quote_span
@@ -25,3 +26,52 @@ def grounded_relationship_evidence(
         "source_start": span[0],
         "source_end": span[1],
     }
+
+
+def relationship_quote_anchors_participants(
+    quote: object, character_a: object, character_b: object
+) -> bool:
+    """Require both named participants in a quote before saving an inferred tie."""
+    text = str(quote or "")
+    if not text.strip():
+        return False
+
+    def spans(name: object) -> list[tuple[int, int]]:
+        words = str(name or "").split()
+        if not words:
+            return []
+        variants = [" ".join(words)]
+        title_words = {
+            "mr",
+            "mrs",
+            "ms",
+            "miss",
+            "mme",
+            "madame",
+            "monsieur",
+            "dr",
+            "doctor",
+            "sir",
+            "lady",
+            "the",
+            "old",
+        }
+        if len(words) > 1 and words[0].casefold() == "old":
+            variants.append(words[-1])
+        elif len(words) > 1 and words[0].casefold() not in title_words:
+            variants.append(words[0])
+        matches: list[tuple[int, int]] = []
+        for variant in variants:
+            joined = r"\s+".join(re.escape(part) for part in variant.split())
+            pattern = rf"(?<!\w){joined}(?!\w)"
+            matches.extend(
+                (match.start(), match.end())
+                for match in re.finditer(pattern, text, flags=re.IGNORECASE)
+            )
+        return matches
+
+    return any(
+        left_end <= right_start or right_end <= left_start
+        for left_start, left_end in spans(character_a)
+        for right_start, right_end in spans(character_b)
+    )

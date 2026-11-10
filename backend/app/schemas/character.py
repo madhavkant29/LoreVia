@@ -30,6 +30,7 @@ class CharacterOut(BaseModel):
         resolver_status: str | None = None
         review_note: str | None = None
         first_person_self_identification: dict | None = None
+        first_person_addressed_as: dict | None = None
         visibility_state: str | None = None
         approval_state: str | None = None
         approval_source: str | None = None

@@ -43,7 +43,16 @@ async def test_unverified_relationship_quote_creates_review_candidate_not_canon(
                 "label_evidence": {},
                 "source_quote_verified": False,
                 "source_batch_key": "book:1:1",
-            }
+            },
+            {
+                "character_a": "Mara Vale",
+                "character_b": "Ilya Ren",
+                "type": "friend",
+                "description": "They are friends.",
+                "label_evidence": {"quote": "They are friends."},
+                "source_quote_verified": True,
+                "source_batch_key": "book:1:2",
+            },
         ],
         key_cache={
             mara.id: character_name_keys(mara.name, []),
@@ -54,8 +63,9 @@ async def test_unverified_relationship_quote_creates_review_candidate_not_canon(
     await db.flush()
 
     assert persisted == 0
-    assert review_count == 1
+    assert review_count == 2
     assert unresolved[0]["source_quote_verified"] is False
+    assert unresolved[1]["relationship_participants_anchored"] is False
     relationship_rows = (
         (
             await db.execute(
@@ -77,9 +87,14 @@ async def test_unverified_relationship_quote_creates_review_candidate_not_canon(
         .all()
     )
     assert relationship_rows == []
-    assert len(candidates) == 1
-    assert candidates[0].status == "pending"
-    assert "relationship_source_quote_unverified" in candidates[0].reason_codes
+    assert len(candidates) == 2
+    assert all(candidate.status == "pending" for candidate in candidates)
+    assert any(
+        "relationship_source_quote_unverified" in candidate.reason_codes for candidate in candidates
+    )
+    assert any(
+        "relationship_participants_unanchored" in candidate.reason_codes for candidate in candidates
+    )
 
 
 class _FakeResult:

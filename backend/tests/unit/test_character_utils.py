@@ -74,6 +74,18 @@ def test_build_character_analysis_payload_exposes_narrator_source_evidence():
     character.analysis_metadata = {"first_person_self_identification": "invalid"}
     assert build_character_analysis_payload(character)["first_person_self_identification"] is None
 
+    addressed = {
+        "chapter_number": 2,
+        "excerpt": "you here, Monsieur Vale",
+        "attribution_confidence": "contextual",
+    }
+    character.analysis_metadata = {"first_person_addressed_as": addressed}
+    payload = build_character_analysis_payload(character)
+    assert (
+        CharacterOut.CharacterAnalysisOut.model_validate(payload).first_person_addressed_as
+        == addressed
+    )
+
 
 def test_character_analysis_payload_and_schema_expose_profile_claims():
     character = Character(book_id=uuid.uuid4(), name="Mara", first_chapter=1, mention_count=2)

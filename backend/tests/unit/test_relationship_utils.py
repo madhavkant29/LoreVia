@@ -469,7 +469,20 @@ async def test_reconcile_extracted_relationships_repairs_generated_rows_and_pres
         description="Gregor cares for his sister.",
         status="suppressed",
         reason_codes=["character_b_missing"],
-        evidence={},
+        evidence={
+            "source_quote_verified": True,
+            "relationship": {"label_evidence": {"quote": "Gregor helped Grete escape."}},
+        },
+    )
+    unverified_candidate = CharacterRelationshipCandidate(
+        book_id=book.id,
+        chapter_number=1,
+        raw_character_a="Gregor",
+        raw_character_b="Grete",
+        rel_type="rival",
+        status="suppressed",
+        reason_codes=["relationship_source_quote_unverified"],
+        evidence={"source_quote_verified": False, "relationship": {"label_evidence": {}}},
     )
     invalid_auto_candidate = CharacterRelationshipCandidate(
         book_id=book.id,
@@ -486,7 +499,14 @@ async def test_reconcile_extracted_relationships_repairs_generated_rows_and_pres
         evidence={"relationship_auto_reconciled": True},
     )
     db.add_all(
-        [generated_hidden, curated_hidden, curated_visible, candidate, invalid_auto_candidate]
+        [
+            generated_hidden,
+            curated_hidden,
+            curated_visible,
+            candidate,
+            unverified_candidate,
+            invalid_auto_candidate,
+        ]
     )
     await db.flush()
 
@@ -520,7 +540,7 @@ async def test_reconcile_extracted_relationships_repairs_generated_rows_and_pres
     assert candidate.status == "accepted"
     assert (candidate.matched_character_a_id, candidate.matched_character_b_id) == visible_pair
     assert candidate.reason_codes == ["relationship_auto_reconciled"]
-    assert invalid_auto_candidate.status == "suppressed"
-    assert invalid_auto_candidate.matched_character_a_id is None
-    assert invalid_auto_candidate.matched_character_b_id is None
-    assert invalid_auto_candidate.reason_codes == ["relationship_unresolved"]
+    assert unverified_candidate.status == "suppressed"
+    assert not any(relationship.rel_type == "rival" for relationship in relationships)
+    assert invalid_auto_candidate.status == "pending"
+    assert invalid_auto_candidate.reason_codes == ["relationship_source_quote_unverified"]
