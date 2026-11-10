@@ -3028,6 +3028,63 @@ async def test_character_routes_cover_crud_and_exports(monkeypatch):
     )
     assert noted_update["analysis_metadata"]["review_note"] == "Needs manual check"
 
+    character.generation_id = uuid.uuid4()
+    proposal = {
+        "field": "motivations",
+        "value": "find shelter",
+        "quote": "I looked for shelter.",
+        "chapter_number": 2,
+        "source_start": 10,
+        "source_end": 31,
+    }
+    character.analysis_metadata["narrator_profile_review"] = {
+        "author_confirmed_identity": True,
+        "generation_id": str(character.generation_id),
+        "chapter_s3_keys": {"2": "chapter-2-key"},
+        "proposals": [proposal],
+    }
+    stale_db = _FakeDB(
+        get_values=[character], execute_values=[_Result(scalar="changed-chapter-key")]
+    )
+    with pytest.raises(HTTPException) as stale_error:
+        await books.update_book_character(
+            book.id,
+            character.id,
+            CharacterUpdateBody(accept_narrator_claim_index=0),
+            db=stale_db,
+            current_user=user,
+        )
+    assert stale_error.value.status_code == 409
+    assert stale_db.commits == 0
+
+    accepted_db = _FakeDB(
+        get_values=[character],
+        execute_values=[
+            _Result(scalar="chapter-2-key"),
+            _Result(scalars=[]),
+            _Result(scalars=[]),
+            _Result(scalars=[]),
+            _Result(scalar=None),
+        ],
+    )
+    await books.update_book_character(
+        book.id,
+        character.id,
+        CharacterUpdateBody(accept_narrator_claim_index=0),
+        db=accepted_db,
+        current_user=user,
+    )
+    assert accepted_db.commits == 1
+    assert "find shelter" in character.motivations
+    assert (
+        character.analysis_metadata["narrator_profile_review"]["proposals"][0]["status"]
+        == "accepted"
+    )
+    assert any(
+        claim.get("quote") == "I looked for shelter."
+        for claim in character.analysis_metadata.get("profile_claims", [])
+    )
+
     demote_candidate = SimpleNamespace(id=uuid.uuid4())
     monkeypatch.setattr(
         books, "demote_character_to_review_candidate", _async_value(demote_candidate)
