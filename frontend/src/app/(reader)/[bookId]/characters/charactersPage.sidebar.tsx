@@ -9,6 +9,7 @@ import {
   formatRelationshipType,
   formatRole,
   reviewStatusLabel,
+  relationshipReviewWarning,
   type MergeSuggestion,
 } from "./charactersPage.helpers"
 
@@ -293,11 +294,11 @@ export function CharactersSidebarBody({
           <p className={`text-xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-400" : "text-stone-600"}`}>Relationship review</p>
           <p className={`mt-1 text-xs ${isDark ? "text-slate-400" : "text-stone-600"}`}>{filteredRelationshipCandidates.length} unresolved relationships waiting for review</p>
           <div className="mt-3 space-y-3">
-            {filteredRelationshipCandidates.slice(0, 8).map((candidate) => (
+            {filteredRelationshipCandidates.map((candidate) => (
               <div key={candidate.id} className={`rounded-md border px-3 py-3 ${isDark ? "border-[#17202c] bg-white/[0.02]" : "border-stone-200 bg-white"}`}>
                 <p className={`break-words text-sm font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>{candidate.raw_character_a} {"<->"} {candidate.raw_character_b}</p>
                 <p className={`mt-1 text-xs ${isDark ? "text-slate-400" : "text-stone-600"}`}>Chapter {candidate.chapter_number}{candidate.rel_type ? ` · ${formatRelationshipType(candidate.rel_type)}` : ""}</p>
-                <p className={`mt-2 text-xs ${isDark ? "text-slate-400" : "text-stone-600"}`}>{candidate.reason_codes[0] ?? "Needs relationship review"}</p>
+                <p className={`mt-2 text-xs ${isDark ? "text-slate-400" : "text-stone-600"}`}>{relationshipReviewWarning(candidate) ?? candidate.reason_codes[0] ?? "Needs relationship review"}</p>
                 <div className="mt-3 flex flex-wrap gap-2">
                   <button
                     type="button"
@@ -321,7 +322,7 @@ export function CharactersSidebarBody({
                     onClick={() => onAcceptRelationshipCandidate(candidate)}
                     className={actionButtonClasses(isDark)}
                   >
-                    {relationshipCandidateActionId === candidate.id ? "Working..." : "Create relationship"}
+                    {relationshipCandidateActionId === candidate.id ? "Working..." : candidate.reason_codes.includes("generated_relationship_requires_review") ? "Confirm relationship" : "Create relationship"}
                   </button>
                   <button
                     type="button"

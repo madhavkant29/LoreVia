@@ -58,6 +58,23 @@ export type MergeSuggestion = {
 
 export const RELATIONSHIP_TYPE_OPTIONS: RelationshipComposerType[] = ["ally", "enemy", "family", "mentor", "neutral", "political", "romantic", "rival"]
 
+export function relationshipReviewWarning(candidate: CharacterRelationshipCandidate): string | null {
+  const reasons = candidate.reason_codes ?? []
+  if (reasons.includes("relationship_source_quote_missing")) return "No source quote was saved. Check the manuscript before confirming this relationship."
+  if (reasons.includes("relationship_source_quote_unverified")) return "The saved quote was not found in the chapter. Check the manuscript before confirming this relationship."
+  if (reasons.includes("relationship_participants_unanchored")) return "The quote appears in the chapter but does not identify both people. Check the relationship before confirming it."
+  return null
+}
+
+export function relationshipReviewQuote(candidate: CharacterRelationshipCandidate): string | null {
+  const relationship = candidate.evidence?.relationship
+  if (!relationship || typeof relationship !== "object" || Array.isArray(relationship)) return null
+  const citation = (relationship as Record<string, unknown>).label_evidence
+  if (!citation || typeof citation !== "object" || Array.isArray(citation)) return null
+  const quote = (citation as Record<string, unknown>).quote
+  return typeof quote === "string" && quote.trim() ? quote.trim() : null
+}
+
 export function relationshipChangeKey(
   item: NonNullable<NonNullable<Character["arc_tracker"]>["relationship_changes"]>[number],
   index: number,

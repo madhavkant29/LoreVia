@@ -654,6 +654,56 @@ async def test_advisor_suggestions_collects_sorted_categories():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("include_author", [False, True])
+async def test_advisor_uses_only_supported_relationships_as_evidence(include_author):
+    book_id = uuid.uuid4()
+    user_id = uuid.uuid4()
+    character_a_id = uuid.uuid4()
+    character_b_id = uuid.uuid4()
+    book = SimpleNamespace(id=book_id, user_id=user_id, title="Atlas", total_chapters=3)
+    characters = [
+        SimpleNamespace(id=character_a_id, name="Mara"),
+        SimpleNamespace(id=character_b_id, name="Ilan"),
+    ]
+    unverified = SimpleNamespace(
+        character_a_id=character_a_id,
+        character_b_id=character_b_id,
+        rel_type="friend",
+        sentiment=0.5,
+        from_chapter=2,
+        description="They met.",
+        edited_by_author=False,
+        label_evidence={},
+    )
+    relationships = [unverified]
+    if include_author:
+        relationships.append(SimpleNamespace(**{**vars(unverified), "edited_by_author": True}))
+    db = _FakeDB(
+        execute_values=[
+            _Result(scalars=characters),
+            _Result(scalars=[]),
+            _Result(scalars=relationships),
+            _Result(scalars=[]),
+            _Result(all_rows=[]),
+            _Result(scalars=[]),
+            _Result(scalars=[]),
+            _Result(scalars=[]),
+            _Result(scalars=[]),
+            _Result(all_rows=[]),
+            _Result(all_rows=[]),
+        ],
+    )
+
+    payload = await advisor_scan_utils_module.build_advisor_suggestions_payload(
+        db=db, book=book, user_id=user_id, skip_llm=True
+    )
+
+    assert payload["meta"]["relationship_count"] == int(include_author)
+    assert ("relationships" in payload["meta"]["scan_basis"]) is include_author
+    assert ("verified relationships" in payload["meta"]["data_gaps"]) is not include_author
+
+
+@pytest.mark.asyncio
 async def test_advisor_suggestions_does_not_invent_findings_when_evidence_is_empty():
     book_id = uuid.uuid4()
     user_id = uuid.uuid4()
@@ -1086,6 +1136,7 @@ async def test_recommended_checks_include_groups_without_clues_or_threads(
         from_chapter=1,
         description="The wardens work together.",
         sentiment=0.5,
+        edited_by_author=True,
     )
     db = _FakeDB(
         get_values=[book],
@@ -1355,6 +1406,7 @@ async def test_large_advisor_scan_covers_all_thread_groups_with_bounded_parallel
         from_chapter=2,
         description="They traveled together. " * 10 + "Their alliance ended at the gate.",
         sentiment=0.5,
+        edited_by_author=True,
     )
     world_element = SimpleNamespace(
         id=uuid.uuid4(),

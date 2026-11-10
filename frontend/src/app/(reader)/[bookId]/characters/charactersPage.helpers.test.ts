@@ -53,6 +53,8 @@ import {
   qualityFlags,
   relationshipChangeKey,
   reviewStatusLabel,
+  relationshipReviewQuote,
+  relationshipReviewWarning,
   sentimentLabel,
   sortedMergeableCharacters,
   sortedRelationshipCounterpartOptions,
@@ -64,6 +66,27 @@ import {
 import { character } from "./charactersPage.testData"
 
 describe("characters page helpers", () => {
+  it("explains why a repaired relationship needs review without treating its quote as verified", () => {
+    const candidate: CharacterRelationshipCandidate = {
+      id: "relationship-1",
+      book_id: "book-1",
+      chapter_number: 3,
+      raw_character_a: "Mara",
+      raw_character_b: "Lina",
+      status: "pending",
+      reason_codes: ["relationship_participants_unanchored", "generated_relationship_requires_review"],
+      evidence: { relationship: { label_evidence: { quote: "Mara waited beside the gate." } } },
+      created_at: "2026-11-10T00:00:00Z",
+      updated_at: "2026-11-10T00:00:00Z",
+    }
+
+    expect(relationshipReviewWarning(candidate)).toContain("does not identify both people")
+    expect(relationshipReviewQuote(candidate)).toBe("Mara waited beside the gate.")
+    expect(relationshipReviewWarning({ ...candidate, reason_codes: ["relationship_source_quote_missing"] })).toContain("No source quote")
+    expect(relationshipReviewWarning({ ...candidate, reason_codes: ["relationship_source_quote_unverified"] })).toContain("not found")
+    expect(relationshipReviewQuote({ ...candidate, evidence: {} })).toBeNull()
+  })
+
   it("shows only sourced claims that still match the current profile", () => {
     const source = {
       ...character({}),

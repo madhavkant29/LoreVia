@@ -253,6 +253,7 @@ ${COMPOSE} up -d "${RUNTIME_SERVICES[@]}"
 for retry_index in $(seq 0 8); do
   if runtime_services_healthy && \
      ${COMPOSE} exec -T nginx wget -qO- http://127.0.0.1:8080/nginx-health >/dev/null 2>&1 && \
+     ${COMPOSE} exec -T nginx curl --noproxy '*' -kfsS --max-time 5 --resolve api.getlorevia.com:8443:127.0.0.1 https://api.getlorevia.com:8443/ready >/dev/null 2>&1 && \
      ${COMPOSE} exec -T backend python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/ready', timeout=5)" >/dev/null 2>&1; then
     echo "Deploy succeeded"
     exit 0

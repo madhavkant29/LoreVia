@@ -33,6 +33,7 @@ from app.utils.advisor_route_errors import advisor_scan_failure_category
 from app.utils.advisor_story_context_utils import build_story_context
 from app.utils.advisor_suggestions_utils import (
     advisor_clue_evidence,
+    advisor_supported_relationship,
     build_advisor_chapter_evidence_blocks,
     build_advisor_item_evidence_blocks,
     build_open_thread_review_suggestions,
@@ -112,7 +113,7 @@ async def build_advisor_suggestions_payload(
     else:
         data_gaps.append("plot threads")
 
-    relationship_rows = (
+    all_relationship_rows = (
         (
             await db.execute(
                 select(CharacterRelationship)
@@ -123,11 +124,14 @@ async def build_advisor_suggestions_payload(
         .scalars()
         .all()
     )
+    relationship_rows = [
+        rel for rel in all_relationship_rows if advisor_supported_relationship(rel, character_names)
+    ]
     relationship_count = len(relationship_rows)
     if relationship_count:
         scan_basis.append("relationships")
     else:
-        data_gaps.append("relationships")
+        data_gaps.append("verified relationships" if all_relationship_rows else "relationships")
 
     world_rows = (
         (
