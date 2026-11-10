@@ -8,6 +8,7 @@ from app.models.character import Character, CharacterRelationshipCandidate
 from app.models.generation import BookDataGeneration
 from app.models.intelligence import CharacterRelationship
 from app.models.user import User
+from app.utils.books.manuscript import serialize_manuscript_content
 from scripts.review_unanchored_relationships import apply_plan, build_plan
 
 
@@ -86,7 +87,9 @@ async def test_review_unanchored_relationships_preserves_grounded_and_curated_ro
     await db.flush()
     monkeypatch.setattr(
         "scripts.review_unanchored_relationships.download_book",
-        lambda _key: b"Alice and Bob walked home together. Alice walked home alone that night.",
+        lambda _key: serialize_manuscript_content(
+            "Alice and Bob walked\nhome together. Alice walked home alone that night."
+        ).encode("utf-8"),
     )
 
     plan = await build_plan(db, book.id)

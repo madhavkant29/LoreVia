@@ -23,6 +23,7 @@ from app.models.book import Book, Chapter
 from app.models.character import Character, CharacterRelationshipCandidate
 from app.models.generation import BookDataGeneration
 from app.models.intelligence import CharacterRelationship
+from app.utils.books.manuscript import deserialize_manuscript_content
 from app.utils.characters.profile_evidence import source_quote_span
 from app.utils.characters.relationship_evidence import relationship_quote_anchors_participants
 
@@ -81,9 +82,10 @@ async def build_plan(
                 source_key = source_keys.get(chapter_number)
                 if not source_key:
                     raise ValueError(f"Saved source missing for chapter {chapter_number}")
-                source_cache[chapter_number] = (
-                    await asyncio.to_thread(download_book, source_key)
-                ).decode("utf-8", "replace")
+                raw_source = await asyncio.to_thread(download_book, source_key)
+                source_cache[chapter_number] = str(
+                    deserialize_manuscript_content(raw_source).get("text") or ""
+                )
             if source_quote_span(source_cache[chapter_number], quote) is None:
                 reason = "relationship_source_quote_unverified"
             elif not relationship_quote_anchors_participants(quote, left, right):
