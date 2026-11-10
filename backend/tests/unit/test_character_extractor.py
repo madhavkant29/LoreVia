@@ -684,7 +684,10 @@ def test_candidate_hints_rescue_contextual_surname_ending_in_s_without_noun_phra
 
 
 def test_repeated_accented_surname_is_a_full_name_discovery_hint():
-    text = "Raymond Sintès spoke to Marie Cardona. Later Raymond Sintès returned."
+    text = (
+        "Raymond Sintès spoke to Marie Cardona. "
+        "Later Raymond Sintès returned, and Marie Cardona answered."
+    )
 
     names = _candidate_names(text)
 
