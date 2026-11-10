@@ -683,6 +683,16 @@ def test_candidate_hints_rescue_contextual_surname_ending_in_s_without_noun_phra
     assert "Cracked" not in names
 
 
+def test_repeated_accented_surname_is_a_full_name_discovery_hint():
+    text = "Raymond Sintès spoke to Marie Cardona. Later Raymond Sintès returned."
+
+    names = _candidate_names(text)
+
+    assert "Raymond Sintès" in names
+    assert "Marie Cardona" in names
+    assert "Later Raymond" not in names
+
+
 def test_candidate_hints_do_not_treat_chapter_heading_fragments_as_people(monkeypatch):
     text = "In Chapter 3, Detective Bell examined the locked room."
     monkeypatch.setattr(

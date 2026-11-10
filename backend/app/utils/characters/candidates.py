@@ -213,6 +213,8 @@ def can_auto_persist_character_candidate(
             return True
         if bool(summary.get("human_self_action_single_name_eligible")):
             return True
+        if bool(summary.get("recurring_single_name_eligible")):
+            return True
         if deterministic_fallback and full_name_alias_support:
             return bool(
                 mention_count >= 3

@@ -165,6 +165,134 @@ def test_generic_review_reason_does_not_claim_character_identity_conflict():
     assert "conflicts_with_existing_character" not in summary["strict_auto_reason_codes"]
 
 
+@pytest.mark.parametrize(
+    "verifier_reason", ["ambiguous_single_token_mention", "ambiguous_multi_token_mention"]
+)
+def test_llm_accepted_mention_ambiguity_is_not_identity_conflict(verifier_reason):
+    summary = build_character_dossier_summary(
+        name="Marie Cardona",
+        aliases=["Marie"],
+        evidence={
+            "resolver_status": "clustered",
+            "mention_count": 43,
+            "strong_mention_count": 22,
+            "has_dialogue_or_action": True,
+            "verifier": {
+                "local": {"mid_sentence_mentions": 29},
+                "final": {
+                    "confidence_band": "accept",
+                    "reasons": ["llm_confirmed_person", verifier_reason],
+                },
+            },
+        },
+        reason_codes=["llm_confirmed_person", verifier_reason],
+    )
+    assert summary["resolver_ambiguity_count"] == 0
+    assert summary["strict_auto_eligible"] is True
+    assert "conflicts_with_existing_character" not in summary["strict_auto_reason_codes"]
+
+
+def test_ambiguous_roster_match_remains_an_identity_conflict():
+    summary = build_character_dossier_summary(
+        name="Marie Cardona",
+        evidence={"verifier": {"final": {"confidence_band": "accept"}}},
+        reason_codes=["ambiguous_roster_match"],
+    )
+    assert summary["resolver_ambiguity_count"] == 1
+    assert "conflicts_with_existing_character" in summary["strict_auto_reason_codes"]
+
+
+def test_repeated_accepted_single_name_across_chapters_can_be_promoted():
+    from app.utils.characters.candidates import can_auto_persist_character_candidate
+
+    evidence = {
+        "source_mention_count_verified": True,
+        "mention_count": 16,
+        "strong_mention_count": 7,
+        "chapter_numbers": [2, 3],
+        "has_dialogue_or_action": True,
+        "verifier": {
+            "local": {
+                "person_context_mentions": 5,
+                "mid_sentence_mentions": 13,
+            },
+            "final": {"confidence_band": "accept", "reasons": []},
+        },
+    }
+    summary = build_character_dossier_summary(name="Céleste", evidence=evidence)
+    assert summary["recurring_single_name_eligible"] is True
+    assert summary["strict_auto_eligible"] is True
+    assert can_auto_persist_character_candidate(name="Céleste", evidence=evidence) is True
+
+    evidence["chapter_numbers"] = [2]
+    summary = build_character_dossier_summary(name="Céleste", evidence=evidence)
+    assert summary["recurring_single_name_eligible"] is False
+    assert can_auto_persist_character_candidate(name="Céleste", evidence=evidence) is False
+
+    evidence["chapter_numbers"] = [2, 3]
+    evidence["verifier"]["local"]["non_person_ner_mentions"] = 2
+    summary = build_character_dossier_summary(name="Céleste", evidence=evidence)
+    assert summary["recurring_single_name_eligible"] is False
+    assert can_auto_persist_character_candidate(name="Céleste", evidence=evidence) is False
+
+
+def test_named_narrator_address_supports_full_name_promotion():
+    from app.services.extraction_character_decision_service import _character_save_decision
+    from app.utils.characters.candidates import can_auto_persist_character_candidate
+
+    evidence = {
+        "source_mention_count_verified": True,
+        "mention_count": 3,
+        "strong_mention_count": 1,
+        "narrator_addressed_as": "you, Monsieur Meursault",
+        "verifier": {
+            "local": {"mid_sentence_mentions": 3},
+            "final": {
+                "confidence_band": "accept",
+                "reasons": ["llm_confirmed_person", "ambiguous_multi_token_mention"],
+            },
+        },
+    }
+    summary = build_character_dossier_summary(name="Monsieur Meursault", evidence=evidence)
+    assert summary["explicit_narrator_full_name_eligible"] is True
+    assert can_auto_persist_character_candidate(name="Monsieur Meursault", evidence=evidence)
+    assert _character_save_decision(
+        {"name": "Monsieur Meursault", "confidence": 0.9, "evidence": evidence}
+    ).allowed
+
+
+def test_production_like_accepted_marie_profile_passes_initial_save_gates():
+    from app.services.extraction_character_decision_service import _character_save_decision
+    from app.utils.characters.candidates import can_auto_persist_character_candidate
+
+    evidence = {
+        "source_mention_count_verified": True,
+        "mention_count": 43,
+        "strong_mention_count": 22,
+        "cluster_names": ["Marie Cardona", "Marie"],
+        "has_dialogue_or_action": True,
+        "has_direct_communication": True,
+        "verifier": {
+            "local": {"person_context_mentions": 11, "mid_sentence_mentions": 29},
+            "final": {
+                "confidence_band": "accept",
+                "reasons": ["llm_confirmed_person", "ambiguous_multi_token_mention"],
+            },
+        },
+    }
+    entity = {
+        "name": "Marie Cardona",
+        "aliases": ["Marie"],
+        "confidence": 0.95,
+        "entity_type": "person",
+        "evidence": evidence,
+    }
+    assert _character_save_decision(entity).allowed
+    assert can_auto_persist_character_candidate(
+        name=entity["name"], aliases=entity["aliases"], evidence=evidence
+    )
+
+
 def test_embedding_match_uses_generation_scoped_character_query():
     character_id = uuid.uuid4()
     blocked_id = uuid.uuid4()

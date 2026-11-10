@@ -172,6 +172,51 @@ def test_cross_chapter_evidence_enables_strict_promotion_without_inventing_profi
     assert "goal" not in combined
 
 
+def test_repeated_accepted_celeste_mentions_combine_for_promotion():
+    from app.utils.characters.candidates import can_auto_persist_character_candidate
+
+    prior_evidence = {
+        "source_mention_count_verified": True,
+        "mention_count": 9,
+        "strong_mention_count": 7,
+        "has_dialogue_or_action": True,
+        "verifier": {
+            "local": {"person_context_mentions": 4, "mid_sentence_mentions": 8},
+            "final": {"confidence_band": "accept", "reasons": []},
+        },
+    }
+    current_evidence = {
+        "source_mention_count_verified": True,
+        "mention_count": 7,
+        "strong_mention_count": 4,
+        "has_dialogue_or_action": True,
+        "verifier": {
+            "local": {"person_context_mentions": 3, "mid_sentence_mentions": 5},
+            "final": {"confidence_band": "accept", "reasons": []},
+        },
+    }
+    prior = CharacterCandidate(
+        id=uuid.uuid4(),
+        book_id=uuid.uuid4(),
+        chapter_number=2,
+        raw_name="Céleste",
+        proposed_name="Céleste",
+        normalized_name="céleste",
+        status="pending",
+        reason_codes=["candidate_dossier_needs_review", "single_token_ambiguous"],
+        evidence=prior_evidence,
+    )
+    entity = {"name": "Céleste", "aliases": [], "confidence": 0.9, "evidence": current_evidence}
+
+    combined = combine_exact_name_chapter_evidence(
+        entity, chapter_number=3, prior_candidates=[prior]
+    )
+
+    assert combined["evidence"]["chapter_numbers"] == [2, 3]
+    assert extraction_character_resolution_service._character_save_decision(combined).allowed
+    assert can_auto_persist_character_candidate(name="Céleste", evidence=combined["evidence"])
+
+
 @pytest.mark.parametrize(
     "change",
     [
