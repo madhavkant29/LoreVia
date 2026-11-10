@@ -126,7 +126,6 @@ async def accept_relationship_candidate_for_user(
 
     rel_type = _normalize_relationship_type(body.rel_type or candidate.rel_type or "connection")
     from_chapter = body.from_chapter or int(candidate.chapter_number or 1)
-    _validate_relationship_window(from_chapter, body.to_chapter)
     if body.sentiment is not None and not -1.0 <= body.sentiment <= 1.0:
         raise HTTPException(400, "Sentiment must be between -1.0 and 1.0")
     evidence_payload = dict(candidate.evidence or {})
@@ -135,6 +134,12 @@ async def accept_relationship_candidate_for_user(
         if isinstance(evidence_payload.get("relationship"), dict)
         else {}
     )
+    to_chapter = (
+        body.to_chapter
+        if "to_chapter" in body.model_fields_set
+        else extracted_relationship.get("to_chapter")
+    )
+    _validate_relationship_window(from_chapter, to_chapter)
 
     relationship, _ = await upsert_relationship_timeline_state(
         db,
@@ -147,7 +152,7 @@ async def accept_relationship_candidate_for_user(
         if body.description is not None
         else clean_optional_text(candidate.description),
         from_chapter=from_chapter,
-        to_chapter=body.to_chapter,
+        to_chapter=to_chapter,
         shared_labels=body.shared_labels
         if body.shared_labels is not None
         else extracted_relationship.get("shared_labels"),

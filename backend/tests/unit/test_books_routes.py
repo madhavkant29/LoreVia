@@ -3104,7 +3104,7 @@ async def test_character_routes_cover_crud_and_exports(monkeypatch):
         description="Pressure grows.",
         status="pending",
         reason_codes=["relationship_unresolved"],
-        evidence={},
+        evidence={"relationship": {"to_chapter": 5}},
         source_batch_key="relationship:1",
     )
 
@@ -3145,6 +3145,7 @@ async def test_character_routes_cover_crud_and_exports(monkeypatch):
         current_user=user,
     )
     assert accepted["rel_type"] == "family"
+    assert accepted["to_chapter"] == 5
 
     resolved = await books.resolve_relationship_candidate(
         book.id,
