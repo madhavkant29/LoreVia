@@ -2518,7 +2518,7 @@ async def test_chapter_consistency_reports_load_full_context(db):
     assert "chapter summaries" in advisor_scan["meta"]["scan_basis"]
     assert advisor_scan["meta"]["clue_count"] == 1
     assert any(
-        item["type"] == "unresolved_clue" and "brass key" in item["description"]
+        item["type"] == "clue_review" and "brass key" in item["description"]
         for item in advisor_scan["suggestions"]
     )
     assert any(item["type"] == "trait_contradiction" for item in advisor_scan["suggestions"])

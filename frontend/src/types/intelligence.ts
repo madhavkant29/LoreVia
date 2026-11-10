@@ -98,6 +98,7 @@ export type SuggestionType =
   | "arc_opportunity"
   | "foreshadowing_opportunity"
   | "unresolved_clue"
+  | "clue_review"
   | "future_direction"
   | "manuscript_checkpoint"
   | "editorial_focus"

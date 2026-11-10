@@ -33,6 +33,7 @@ from app.utils.advisor_route_errors import advisor_scan_failure_category
 from app.utils.advisor_story_context_utils import build_story_context
 from app.utils.advisor_suggestions_utils import (
     advisor_clue_evidence,
+    advisor_clue_review_labels,
     advisor_supported_relationship,
     build_advisor_chapter_evidence_blocks,
     build_advisor_item_evidence_blocks,
@@ -452,26 +453,29 @@ async def build_advisor_suggestions_payload(
     clue_evidence_by_chapter: dict[int, list[str]] = {}
     for clues, chapter_num, chapter_title in detailed_summaries:
         clue_lines = advisor_clue_evidence(clues)
+        clue_labels = advisor_clue_review_labels(clues)
         clue_evidence_by_chapter.setdefault(chapter_num, []).extend(clue_lines)
         clue_count += len(clue_lines)
-        for clue in clue_lines:
+        for clue in clue_labels:
             clue_key = " ".join(clue.casefold().split())
             if clue_key not in seen_clues and len(seen_clues) < 3:
                 seen_clues.add(clue_key)
-                clue_str = clue[:120]
                 suggestions.append(
                     {
                         "id": f"clue-{book_id}-{chapter_num}-{len(seen_clues)}",
-                        "type": "unresolved_clue",
+                        "type": "clue_review",
                         "severity": "opportunity",
-                        "title": f"Planted clue from chapter {chapter_num}",
+                        "title": f"Review possible clue from chapter {chapter_num}",
                         "description": (
-                            f'Chapter {chapter_num} ({chapter_title or "Untitled"}) contains: "{clue_str}". '
-                            f"If this hasn't paid off yet, it's either a plothole or a foreshadowing opportunity."
+                            f'Chapter {chapter_num} ({chapter_title or "Untitled"}) summary lists: "{clue}". '
+                            "Check the manuscript and later chapters before treating it as an unresolved clue."
                         ),
                         "chapter_ref": chapter_num,
-                        "action_label": "Check if this clue resolved",
-                        "ask_prompt": f"Has the clue from chapter {chapter_num} been resolved? '{clue_str}'",
+                        "action_label": "Check clue and payoff",
+                        "ask_prompt": (
+                            f"Does chapter {chapter_num} establish this possible clue, and do later chapters address it? "
+                            f"Use source passages: {clue}"
+                        ),
                     }
                 )
 

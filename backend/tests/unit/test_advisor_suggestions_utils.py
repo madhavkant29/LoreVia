@@ -6,6 +6,7 @@ import pytest
 
 from app.utils.advisor_suggestions_utils import (
     advisor_clue_evidence,
+    advisor_clue_review_labels,
     advisor_scan_output_token_budget,
     build_advisor_chapter_evidence_blocks,
     build_advisor_item_evidence_blocks,
@@ -62,6 +63,22 @@ def test_advisor_clue_evidence_keeps_structured_details_and_skips_empty_values()
         "Brass key | Points to the cellar"
     ]
     assert advisor_clue_evidence(None) == []
+
+
+def test_advisor_clue_review_labels_exclude_inferred_payoff_context():
+    assert advisor_clue_review_labels(
+        [
+            {"clue": " Brass key ", "foreshadows": "A locked cellar"},
+            "A blue ribbon | embroidered by Mara",
+            {"clue": "  "},
+            {"why_it_matters": "No clue supplied"},
+            None,
+        ]
+    ) == ["Brass key", "A blue ribbon | embroidered by Mara"]
+    assert advisor_clue_review_labels({"Brass key": {"why_it_matters": "A locked cellar"}}) == [
+        "Brass key"
+    ]
+    assert advisor_clue_review_labels(None) == []
 
 
 def test_advisor_chapter_evidence_blocks_cover_late_summary_and_every_key_event():

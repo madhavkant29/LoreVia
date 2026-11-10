@@ -21,12 +21,11 @@ def proactive_advisor_finding_id(finding: dict[str, Any]) -> str:
     return f"proactive-{hashlib.sha256(identity.encode()).hexdigest()[:24]}"
 
 
-def advisor_clue_evidence(clues: object) -> list[str]:
-    """Keep the structured clue and payoff context from detailed summaries."""
+def _advisor_clue_items(clues: object) -> list[object]:
     if isinstance(clues, list):
-        values = clues
-    elif isinstance(clues, dict):
-        values = (
+        return clues
+    if isinstance(clues, dict):
+        return (
             [clues]
             if "clue" in clues
             else [
@@ -34,10 +33,25 @@ def advisor_clue_evidence(clues: object) -> list[str]:
                 for key, value in clues.items()
             ]
         )
-    else:
-        return []
+    return []
+
+
+def advisor_clue_review_labels(clues: object) -> list[str]:
+    """Use only the clue itself for heuristic prompts, not inferred payoff context."""
+    labels: list[str] = []
+    for item in _advisor_clue_items(clues):
+        label = (
+            item if isinstance(item, str) else item.get("clue") if isinstance(item, dict) else None
+        )
+        if isinstance(label, str) and label.strip():
+            labels.append(" ".join(label.split()))
+    return labels
+
+
+def advisor_clue_evidence(clues: object) -> list[str]:
+    """Keep the structured clue and payoff context from detailed summaries."""
     evidence: list[str] = []
-    for item in values:
+    for item in _advisor_clue_items(clues):
         if isinstance(item, str):
             line = item.strip()
         elif isinstance(item, dict):

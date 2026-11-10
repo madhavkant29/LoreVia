@@ -608,7 +608,7 @@ async def test_advisor_suggestions_collects_sorted_categories():
         first_chapter=3,
     )
     recent_summaries = [
-        (["Rust key"], 4, "Vault"),
+        ([{"clue": "Rust key", "foreshadows": "A hidden vault"}], 4, "Vault"),
         ({"one": "Hidden map"}, 5, "Tunnel"),
     ]
     lead_character = SimpleNamespace(id=char_id, name="Iris", mention_count=12, first_chapter=1)
@@ -641,7 +641,13 @@ async def test_advisor_suggestions_collects_sorted_categories():
     assert "character_absent" in types
     assert "arc_opportunity" in types
     assert "foreshadowing_opportunity" in types
-    assert "unresolved_clue" in types
+    assert "clue_review" in types
+    clue_review = next(item for item in payload["suggestions"] if item["type"] == "clue_review")
+    assert "Review possible clue" in clue_review["title"]
+    assert '"Rust key"' in clue_review["description"]
+    assert "A hidden vault" not in clue_review["description"]
+    assert "Check the manuscript and later chapters" in clue_review["description"]
+    assert "plothole" not in clue_review["description"]
     assert payload["meta"]["character_count"] == 3
     assert payload["meta"]["open_thread_count"] == 1
     assert payload["meta"]["fallback_applied"] is False
