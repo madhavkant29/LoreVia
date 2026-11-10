@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.character import Character, CharacterRelationshipCandidate
 from app.models.intelligence import CharacterRelationship
+from app.utils.characters.relationship_evidence import relationship_quote_anchors_participants
 
 
 def clean_relationship_text(value: object | None) -> str | None:
@@ -1098,6 +1099,28 @@ async def reconcile_extracted_relationships(
         )
         if candidate.status == "accepted" and not was_auto_reconciled:
             continue
+        evidence = dict(candidate.evidence or {})
+        extracted_relationship = (
+            evidence.get("relationship") if isinstance(evidence.get("relationship"), dict) else {}
+        )
+        citation = extracted_relationship.get("label_evidence")
+        citation = citation if isinstance(citation, dict) else {}
+        source_verified = evidence.get("source_quote_verified") is True
+        participants_anchored = relationship_quote_anchors_participants(
+            citation.get("quote"), candidate.raw_character_a, candidate.raw_character_b
+        )
+        if not source_verified or not participants_anchored:
+            if was_auto_reconciled:
+                candidate.status = "pending"
+                candidate.reason_codes = [
+                    "relationship_source_quote_unverified"
+                    if not source_verified
+                    else "relationship_participants_unanchored"
+                ]
+                evidence["relationship_auto_reconciled"] = False
+                candidate.evidence = evidence
+                demoted_candidates += 1
+            continue
         left_matches = _resolve(candidate.raw_character_a, candidate.description)
         right_matches = _resolve(candidate.raw_character_b, candidate.description)
         if len(left_matches) != 1 or len(right_matches) != 1 or left_matches[0] == right_matches[0]:
@@ -1106,16 +1129,11 @@ async def reconcile_extracted_relationships(
                 candidate.matched_character_b_id = None
                 candidate.status = "suppressed"
                 candidate.reason_codes = ["relationship_unresolved"]
-                evidence = dict(candidate.evidence or {})
                 evidence["resolution"] = "unresolved_after_reconcile"
                 evidence["relationship_auto_reconciled"] = False
                 candidate.evidence = evidence
                 demoted_candidates += 1
             continue
-        evidence = dict(candidate.evidence or {})
-        extracted_relationship = (
-            evidence.get("relationship") if isinstance(evidence.get("relationship"), dict) else {}
-        )
         relationship, _created = await upsert_relationship_timeline_state(
             db,
             book_id=book_id,

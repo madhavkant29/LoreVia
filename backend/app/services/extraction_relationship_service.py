@@ -13,6 +13,7 @@ from app.utils.characters.constants import CHARACTER_RELATIONSHIP_CANDIDATE_PEND
 from app.utils.characters.extraction import resolve_character_reference_from_roster
 from app.utils.characters.governance import is_cast_visible_character
 from app.utils.characters.identity import family_role_reference
+from app.utils.characters.relationship_evidence import relationship_quote_anchors_participants
 from app.utils.characters.review import record_relationship_candidate
 from app.utils.relationship_utils import (
     canonical_relationship_pair_key,
@@ -161,6 +162,8 @@ def _relationship_evidence_payload(
             "character_b_to_a_labels": rel.get("character_b_to_a_labels") or [],
             "label_evidence": rel.get("label_evidence") or rel.get("evidence") or {},
         },
+        "source_quote_verified": rel.get("source_quote_verified") is True,
+        "relationship_participants_anchored": rel.get("relationship_participants_anchored") is True,
         "review_kind": "relationship_resolution",
         "unresolved_side": unresolved_side,
         "resolution": resolution,
@@ -205,11 +208,14 @@ async def _record_relationship_review_candidates(
             len(left_matches) != 1
             or len(right_matches) != 1
             or rel.get("source_quote_verified") is False
+            or rel.get("relationship_participants_anchored") is False
         )
     ):
         reason_codes = [
             "relationship_source_quote_unverified"
             if rel.get("source_quote_verified") is False
+            else "relationship_participants_unanchored"
+            if rel.get("relationship_participants_anchored") is False
             else "relationship_unresolved",
             f"character_a_{left_resolution}",
             f"character_b_{right_resolution}",
@@ -303,10 +309,15 @@ async def _persist_relationship_records(
             existing_characters, right_name, key_cache=key_cache, context_text=context_text
         )
         quote_verified = rel.get("source_quote_verified") is True
+        citation = rel.get("label_evidence")
+        citation = citation if isinstance(citation, dict) else {}
+        participants_anchored = relationship_quote_anchors_participants(
+            citation.get("quote"), left_name, right_name
+        )
+        rel["relationship_participants_anchored"] = participants_anchored
         if (
             quote_verified
-            and isinstance(rel.get("label_evidence"), dict)
-            and rel["label_evidence"].get("quote")
+            and participants_anchored
             and len(left_matches) == 1
             and len(right_matches) == 1
             and left_matches[0] != right_matches[0]
@@ -360,6 +371,7 @@ async def _persist_relationship_records(
             else {},
             "source_batch_key": rel.get("source_batch_key"),
             "source_quote_verified": quote_verified,
+            "relationship_participants_anchored": participants_anchored,
             "chapter_number": chapter_number,
             "character_a_matches": [str(item) for item in left_matches[:3]],
             "character_b_matches": [str(item) for item in right_matches[:3]],

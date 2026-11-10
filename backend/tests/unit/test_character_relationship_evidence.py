@@ -1,4 +1,7 @@
-from app.utils.characters.relationship_evidence import grounded_relationship_evidence
+from app.utils.characters.relationship_evidence import (
+    grounded_relationship_evidence,
+    relationship_quote_anchors_participants,
+)
 
 
 def test_relationship_evidence_matches_quote_and_records_source_offsets():
@@ -30,3 +33,29 @@ def test_relationship_evidence_rejects_missing_or_fabricated_quotes():
     )
     assert grounded_relationship_evidence({"label_evidence": {}}, source) is None
     assert grounded_relationship_evidence({}, source) is None
+
+
+def test_relationship_quote_requires_both_named_participants():
+    assert relationship_quote_anchors_participants(
+        "Mara promised to protect Ilya.", "Mara Vale", "Ilya Ren"
+    )
+    assert not relationship_quote_anchors_participants(
+        "He was a friend of the family.", "Mara Vale", "Ilya Ren"
+    )
+    assert not relationship_quote_anchors_participants(
+        "Mara was a friend of the family.", "Mara Vale", "Ilya Ren"
+    )
+    assert not relationship_quote_anchors_participants("", "Mara", "Ilya")
+    assert not relationship_quote_anchors_participants("Mara and Ilya met.", "", "Ilya")
+    assert relationship_quote_anchors_participants(
+        "Monsieur Meursault spoke to Marie.", "Monsieur Meursault", "Marie Cardona"
+    )
+    assert not relationship_quote_anchors_participants(
+        "Madame Meursault spoke to Marie.", "Monsieur Meursault", "Marie Cardona"
+    )
+    assert not relationship_quote_anchors_participants(
+        "Mme Masson spoke alone.", "Masson", "Mme Masson"
+    )
+    assert not relationship_quote_anchors_participants(
+        "Marie left early.", "Marie Cardona", "Marie Laurent"
+    )
