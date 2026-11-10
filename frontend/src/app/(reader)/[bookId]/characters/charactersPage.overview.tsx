@@ -67,6 +67,15 @@ export function CharacterOverviewIdentityCards({
               </dd>
             </div>
           )}
+          {!character.analysis_metadata?.first_person_self_identification?.excerpt && character.analysis_metadata?.first_person_addressed_as?.excerpt && (
+            <div className="grid grid-cols-[120px_minmax(0,1fr)] gap-3">
+              <dt className={isDark ? "text-slate-400" : "text-stone-600"}>Narrator clue</dt>
+              <dd className={isDark ? "text-white" : "text-stone-900"}>
+                <span className="block text-xs">Addressed by name in {chapterAppearanceText(character.analysis_metadata.first_person_addressed_as.chapter_number)}. This alone does not confirm the first-person narrator.</span>
+                <q className="mt-1 block text-sm">{character.analysis_metadata.first_person_addressed_as.excerpt}</q>
+              </dd>
+            </div>
+          )}
           <div className="grid grid-cols-[120px_minmax(0,1fr)] gap-3">
             <dt className={isDark ? "text-slate-400" : "text-stone-600"}>Aliases</dt>
             <dd className={isDark ? "text-white" : "text-stone-900"}>{character.aliases.length > 0 ? character.aliases.join(", ") : "None recorded"}</dd>

@@ -74,6 +74,7 @@ export interface Character {
     resolver_status?: string | null
     review_note?: string | null
     first_person_self_identification?: { chapter_number: number; excerpt: string } | null
+    first_person_addressed_as?: { chapter_number: number; excerpt: string; attribution_confidence: "contextual" } | null
     visibility_state?: "visible" | "quarantined" | "noise" | null
     approval_state?: "approved" | "pending_review" | "rejected" | "protected" | null
     approval_source?: "manual_review" | "deterministic_auto" | "backfill_review" | "legacy_import" | null
