@@ -68,6 +68,9 @@ async def test_review_unanchored_relationships_preserves_grounded_and_curated_ro
         character_b_id=bob.id,
         rel_type="supportive",
         from_chapter=1,
+        to_chapter=2,
+        shared_labels=["supportive"],
+        character_a_to_b_labels=["protects"],
         label_evidence={},
         edited_by_author=False,
     )
@@ -88,6 +91,7 @@ async def test_review_unanchored_relationships_preserves_grounded_and_curated_ro
 
     plan = await build_plan(db, book.id)
     assert plan["review_count"] == 2
+    assert len(plan["plan_sha256"]) == 64
     assert {item["reason"] for item in plan["review"]} == {
         "relationship_participants_unanchored",
         "relationship_source_quote_missing",
@@ -95,8 +99,25 @@ async def test_review_unanchored_relationships_preserves_grounded_and_curated_ro
     assert (await db.get(CharacterRelationship, unanchored.id)) is not None
 
     with pytest.raises(ValueError, match="Active generation changed"):
-        await apply_plan(db, book_id=book.id, expected_generation_id=uuid.uuid4())
-    result = await apply_plan(db, book_id=book.id, expected_generation_id=generation.id)
+        await apply_plan(
+            db,
+            book_id=book.id,
+            expected_generation_id=uuid.uuid4(),
+            expected_plan_sha256=plan["plan_sha256"],
+        )
+    with pytest.raises(ValueError, match="plan changed"):
+        await apply_plan(
+            db,
+            book_id=book.id,
+            expected_generation_id=generation.id,
+            expected_plan_sha256="0" * 64,
+        )
+    result = await apply_plan(
+        db,
+        book_id=book.id,
+        expected_generation_id=generation.id,
+        expected_plan_sha256=plan["plan_sha256"],
+    )
     assert result["review_count"] == 2
     assert (await db.get(CharacterRelationship, grounded.id)) is not None
     assert (await db.get(CharacterRelationship, curated.id)) is not None
@@ -117,3 +138,7 @@ async def test_review_unanchored_relationships_preserves_grounded_and_curated_ro
     assert len(candidates) == 2
     assert all(candidate.status == "pending" for candidate in candidates)
     assert all(candidate.evidence["repaired_relationship_id"] for candidate in candidates)
+    preserved = next(candidate for candidate in candidates if candidate.rel_type == "supportive")
+    assert preserved.evidence["relationship"]["to_chapter"] == 2
+    assert preserved.evidence["relationship"]["shared_labels"] == ["supportive"]
+    assert preserved.evidence["relationship"]["character_a_to_b_labels"] == ["protects"]

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import hashlib
 import json
 import uuid
 from typing import Any
@@ -16,6 +17,7 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import AsyncSessionLocal
+from app.core.redis import mark_book_cache_dirty
 from app.core.storage import download_book
 from app.models.book import Book, Chapter
 from app.models.character import Character, CharacterRelationshipCandidate
@@ -27,7 +29,9 @@ from app.utils.characters.relationship_evidence import relationship_quote_anchor
 CONFIRM_TOKEN = "REVIEW_UNANCHORED_RELATIONSHIPS"
 
 
-async def build_plan(db: AsyncSession, book_id: uuid.UUID) -> dict[str, Any]:
+async def build_plan(
+    db: AsyncSession, book_id: uuid.UUID, *, lock_rows: bool = False
+) -> dict[str, Any]:
     book = await db.get(Book, book_id)
     if book is None or book.status != "ready":
         raise ValueError("Book must be ready before relationship repair")
@@ -50,19 +54,14 @@ async def build_plan(db: AsyncSession, book_id: uuid.UUID) -> dict[str, Any]:
         (await db.execute(select(Character).where(Character.book_id == book_id))).scalars().all()
     )
     names = {character.id: character.name for character in characters}
-    relationships = (
-        (
-            await db.execute(
-                select(CharacterRelationship).where(
-                    CharacterRelationship.book_id == book_id,
-                    CharacterRelationship.generation_id == generation.id,
-                    CharacterRelationship.edited_by_author.is_(False),
-                )
-            )
-        )
-        .scalars()
-        .all()
+    relationship_query = select(CharacterRelationship).where(
+        CharacterRelationship.book_id == book_id,
+        CharacterRelationship.generation_id == generation.id,
+        CharacterRelationship.edited_by_author.is_(False),
     )
+    if lock_rows:
+        relationship_query = relationship_query.with_for_update()
+    relationships = (await db.execute(relationship_query)).scalars().all()
     chapters = (await db.execute(select(Chapter).where(Chapter.book_id == book_id))).scalars().all()
     source_keys = {chapter.number: chapter.s3_key for chapter in chapters}
     source_cache: dict[int, str] = {}
@@ -101,9 +100,18 @@ async def build_plan(db: AsyncSession, book_id: uuid.UUID) -> dict[str, Any]:
                 "reason": reason,
             }
         )
+    review.sort(key=lambda item: item["relationship_id"])
+    plan_sha256 = hashlib.sha256(
+        json.dumps(
+            {"generation_id": str(generation.id), "review": review},
+            ensure_ascii=False,
+            sort_keys=True,
+        ).encode("utf-8")
+    ).hexdigest()
     return {
         "book_id": str(book_id),
         "active_generation_id": str(generation.id),
+        "plan_sha256": plan_sha256,
         "generated_relationships_checked": len(relationships),
         "review_count": len(review),
         "review": review,
@@ -111,14 +119,20 @@ async def build_plan(db: AsyncSession, book_id: uuid.UUID) -> dict[str, Any]:
 
 
 async def apply_plan(
-    db: AsyncSession, *, book_id: uuid.UUID, expected_generation_id: uuid.UUID
+    db: AsyncSession,
+    *,
+    book_id: uuid.UUID,
+    expected_generation_id: uuid.UUID,
+    expected_plan_sha256: str,
 ) -> dict[str, Any]:
     generation = await db.get(BookDataGeneration, expected_generation_id, with_for_update=True)
     if generation is None or generation.status != "active":
         raise ValueError("Active generation changed during repair")
-    plan = await build_plan(db, book_id)
+    plan = await build_plan(db, book_id, lock_rows=True)
     if plan["active_generation_id"] != str(expected_generation_id):
         raise ValueError("Active generation changed since dry run")
+    if plan["plan_sha256"] != expected_plan_sha256:
+        raise ValueError("Relationship repair plan changed since dry run")
     for item in plan["review"]:
         relationship = await db.get(
             CharacterRelationship, uuid.UUID(item["relationship_id"]), with_for_update=True
@@ -145,7 +159,13 @@ async def apply_plan(
                 status="pending",
                 reason_codes=[item["reason"], "generated_relationship_requires_review"],
                 evidence={
-                    "relationship": {"label_evidence": evidence},
+                    "relationship": {
+                        "label_evidence": evidence,
+                        "to_chapter": relationship.to_chapter,
+                        "shared_labels": list(relationship.shared_labels or []),
+                        "character_a_to_b_labels": list(relationship.character_a_to_b_labels or []),
+                        "character_b_to_a_labels": list(relationship.character_b_to_a_labels or []),
+                    },
                     "source_quote_verified": item["reason"]
                     == "relationship_participants_unanchored",
                     "relationship_participants_anchored": False,
@@ -164,22 +184,33 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--book-id", type=uuid.UUID, required=True)
     parser.add_argument("--apply", action="store_true")
     parser.add_argument("--expected-generation-id", type=uuid.UUID)
+    parser.add_argument("--expected-plan-sha256")
     parser.add_argument("--confirm-apply", default="")
     return parser.parse_args()
 
 
 async def main() -> None:
     args = parse_args()
-    if args.apply and (args.confirm_apply != CONFIRM_TOKEN or args.expected_generation_id is None):
+    if args.apply and (
+        args.confirm_apply != CONFIRM_TOKEN
+        or args.expected_generation_id is None
+        or args.expected_plan_sha256 is None
+    ):
         raise SystemExit(
-            "Apply requires --expected-generation-id and --confirm-apply " + CONFIRM_TOKEN
+            "Apply requires --expected-generation-id, --expected-plan-sha256, "
+            "and --confirm-apply " + CONFIRM_TOKEN
         )
     async with AsyncSessionLocal() as db:
         if args.apply:
             async with db.begin():
                 result = await apply_plan(
-                    db, book_id=args.book_id, expected_generation_id=args.expected_generation_id
+                    db,
+                    book_id=args.book_id,
+                    expected_generation_id=args.expected_generation_id,
+                    expected_plan_sha256=args.expected_plan_sha256,
                 )
+            if result["review_count"]:
+                await mark_book_cache_dirty(str(args.book_id))
         else:
             await db.execute(text("SET TRANSACTION READ ONLY"))
             result = await build_plan(db, args.book_id)
