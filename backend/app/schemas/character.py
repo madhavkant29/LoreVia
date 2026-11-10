@@ -37,6 +37,7 @@ class CharacterOut(BaseModel):
         dossier_summary: dict | None = None
         trust_tier: str | None = None
         trust_reasons: list[str] = Field(default_factory=list)
+        profile_claims: list[dict] = Field(default_factory=list)
 
     model_config = ConfigDict(from_attributes=True)
 

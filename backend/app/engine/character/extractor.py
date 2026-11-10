@@ -2044,7 +2044,12 @@ def _clean_character_entries(
             )
             continue
 
-        grounded_claims, profile_evidence = ground_character_profile_claims(item, source_text)
+        grounded_claims, profile_evidence = ground_character_profile_claims(
+            item,
+            source_text,
+            character_name=cleaned_name,
+            is_narrator=bool(first_person_self_identification(source_text, cleaned_name)),
+        )
         traits = grounded_claims["traits"]
 
         aliases = []

@@ -176,6 +176,7 @@ def test_repeated_accepted_celeste_mentions_combine_for_promotion():
     from app.utils.characters.candidates import can_auto_persist_character_candidate
 
     prior_evidence = {
+        "anti_merge_names": ["Raymond"],
         "source_mention_count_verified": True,
         "mention_count": 9,
         "strong_mention_count": 7,
@@ -206,7 +207,13 @@ def test_repeated_accepted_celeste_mentions_combine_for_promotion():
         reason_codes=["candidate_dossier_needs_review", "single_token_ambiguous"],
         evidence=prior_evidence,
     )
-    entity = {"name": "Céleste", "aliases": [], "confidence": 0.9, "evidence": current_evidence}
+    entity = {
+        "name": "Céleste",
+        "aliases": [],
+        "anti_merge_names": ["Marie"],
+        "confidence": 0.9,
+        "evidence": current_evidence,
+    }
 
     combined = combine_exact_name_chapter_evidence(
         entity, chapter_number=3, prior_candidates=[prior]
@@ -215,6 +222,14 @@ def test_repeated_accepted_celeste_mentions_combine_for_promotion():
     assert combined["evidence"]["chapter_numbers"] == [2, 3]
     assert extraction_character_resolution_service._character_save_decision(combined).allowed
     assert can_auto_persist_character_candidate(name="Céleste", evidence=combined["evidence"])
+
+    same_name_conflict = {**entity, "anti_merge_names": ["Céleste"]}
+    assert (
+        combine_exact_name_chapter_evidence(
+            same_name_conflict, chapter_number=3, prior_candidates=[prior]
+        )
+        == same_name_conflict
+    )
 
 
 @pytest.mark.parametrize(

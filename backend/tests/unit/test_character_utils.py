@@ -7,6 +7,7 @@ from app.models.book import Book, Chapter
 from app.models.character import Character, CharacterAlias
 from app.models.intelligence import BookChunk
 from app.models.user import User
+from app.schemas.character import CharacterOut
 from app.utils.characters import serialization as character_serialization
 from app.utils.characters.candidates import build_character_analysis_payload
 from app.utils.characters.governance import infer_character_trust_tier, is_cast_visible_character
@@ -72,6 +73,17 @@ def test_build_character_analysis_payload_exposes_narrator_source_evidence():
 
     character.analysis_metadata = {"first_person_self_identification": "invalid"}
     assert build_character_analysis_payload(character)["first_person_self_identification"] is None
+
+
+def test_character_analysis_payload_and_schema_expose_profile_claims():
+    character = Character(book_id=uuid.uuid4(), name="Mara", first_chapter=1, mention_count=2)
+    claim = {"field": "personality_tags", "value": "kind", "quote": "Mara helped the child."}
+    character.analysis_metadata = {"profile_claims": [claim, "invalid"]}
+
+    payload = build_character_analysis_payload(character)
+
+    assert payload["profile_claims"] == [claim]
+    assert CharacterOut.CharacterAnalysisOut.model_validate(payload).profile_claims == [claim]
 
 
 def test_build_character_analysis_payload_marks_common_single_token_as_review_only():

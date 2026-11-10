@@ -585,4 +585,7 @@ def build_character_analysis_payload(char: Character) -> dict[str, Any]:
         "dossier_summary": dossier_summary,
         "trust_tier": trust_tier,
         "trust_reasons": trust_reasons,
+        "profile_claims": [
+            claim for claim in metadata.get("profile_claims") or [] if isinstance(claim, dict)
+        ],
     }
