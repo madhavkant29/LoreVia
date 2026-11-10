@@ -19,6 +19,7 @@ PROFILE_SCALAR_FIELDS = (
 )
 PROFILE_LIST_FIELDS = ("personality_tags", "motivations", "fears")
 FIRST_PERSON_RE = re.compile(r"\b(?:I|me|my|mine|we|us|our|ours)\b", re.I)
+FIRST_PERSON_SUBJECT_RE = re.compile(r"\b(?:I|we)\b", re.I)
 SPEECH_VERB_RE = r"(?:said|asked|answered|replied|told|cried|called|shouted|whispered)"
 POST_QUOTE_SPEECH_VERB_RE = r"(?:said|asked|answered|replied|cried|called|shouted|whispered)"
 
@@ -43,7 +44,9 @@ def profile_quote_attributed_to_character(
         pattern = rf"(?<!\w){re.escape(name)}(?!\w)"
         for match in re.finditer(pattern, quote, re.I):
             before_name = quote[: match.start()]
-            if not FIRST_PERSON_RE.search(before_name):
+            if not FIRST_PERSON_RE.search(before_name) and not FIRST_PERSON_SUBJECT_RE.search(
+                quote
+            ):
                 return True
         before = source_text[max(0, span[0] - 100) : span[0]]
         after = source_text[span[1] : span[1] + 100]

@@ -77,6 +77,17 @@ def test_first_person_profile_quote_requires_named_speaker_or_subject():
     assert action_span is not None
     assert profile_quote_attributed_to_character(action, action_span, character_name="Mara")
 
+    for shared_or_addressed in (
+        "Mara and I wanted to leave the city.",
+        "Mara, I wanted to leave the city.",
+        "Mara and we walked toward the city.",
+    ):
+        span = source_quote_span(shared_or_addressed, shared_or_addressed)
+        assert span is not None
+        assert not profile_quote_attributed_to_character(
+            shared_or_addressed, span, character_name="Mara"
+        )
+
     speech = 'Mara said, "I will protect the gate."'
     speech_span = source_quote_span(speech, "I will protect the gate")
     assert speech_span is not None
