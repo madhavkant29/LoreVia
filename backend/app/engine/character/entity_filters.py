@@ -407,7 +407,9 @@ def person_name_shape_score(name: str | None) -> int:
         score += 1
 
     if len(words) >= 2 and lowered[-1].endswith("s") and lowered[-1] not in PERSON_ROLE_WORDS:
-        score -= 3
+        # Accented surnames such as Sintès also end in "s". Keep their
+        # source-backed name shape without admitting ordinary plural phrases.
+        score -= 1 if any(not char.isascii() for char in words[-1]) else 3
     if lowered[-1] in NON_PERSON_HEADWORDS:
         score -= 4
     if any(word in NON_PERSON_HEADWORDS for word in lowered[1:-1]):

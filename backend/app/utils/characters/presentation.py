@@ -240,7 +240,15 @@ def build_character_dossier_summary(
         resolver_status in {"ambiguous", "matched_needs_review", "held_for_review"}
         or any(
             "conflict" in reason.casefold()
-            or "ambiguous" in reason.casefold()
+            or (
+                "ambiguous" in reason.casefold()
+                and reason.casefold()
+                not in {
+                    "ambiguous_single_token_mention",
+                    "ambiguous_multi_token_mention",
+                    "single_token_ambiguous",
+                }
+            )
             or reason.casefold() == "embedding_match_requires_review"
             for reason in resolved_reason_codes
         )
@@ -340,7 +348,9 @@ def build_character_dossier_summary(
             or bool(evidence_map.get("has_physical_description"))
         )
     )
-    narrator_identification = evidence_map.get("narrator_self_identification")
+    narrator_identification = evidence_map.get("narrator_self_identification") or evidence_map.get(
+        "narrator_addressed_as"
+    )
     explicit_narrator_full_name_eligible = bool(
         not single_token
         and not deterministic_fallback
@@ -352,6 +362,23 @@ def build_character_dossier_summary(
         and resolver_ambiguity_count <= 0
         and conflict_signal_count <= 0
         and not ambiguous_full_name_fragment
+    )
+    recurring_single_name_eligible = bool(
+        single_token
+        and not common_single_token
+        and not role_only_single_token
+        and not deterministic_fallback
+        and final_band == "accept"
+        and evidence_map.get("source_mention_count_verified") is True
+        and len(chapter_numbers) >= 2
+        and mention_count >= 5
+        and strong_mention_count >= 3
+        and mid_sentence_mentions >= 3
+        and int(local.get("person_context_mentions") or 0) >= 2
+        and dialogue_attribution_support >= 1
+        and non_person_signal_count <= 0
+        and resolver_ambiguity_count <= 0
+        and conflict_signal_count <= 0
     )
 
     strict_auto_reason_codes: list[str] = []
@@ -372,6 +399,7 @@ def build_character_dossier_summary(
         and not explicit_speech_single_name_eligible
         and not direct_communication_single_name_eligible
         and not human_self_action_single_name_eligible
+        and not recurring_single_name_eligible
     ):
         strict_auto_reason_codes.append("single_token_ambiguous")
     if (
@@ -394,6 +422,7 @@ def build_character_dossier_summary(
             or explicit_speech_single_name_eligible
             or direct_communication_single_name_eligible
             or human_self_action_single_name_eligible
+            or recurring_single_name_eligible
         ):
             strict_auto_eligible = True
         elif not strict_auto_reason_codes:
@@ -448,6 +477,7 @@ def build_character_dossier_summary(
         "explicit_speech_single_name_eligible": explicit_speech_single_name_eligible,
         "direct_communication_single_name_eligible": direct_communication_single_name_eligible,
         "human_self_action_single_name_eligible": human_self_action_single_name_eligible,
+        "recurring_single_name_eligible": recurring_single_name_eligible,
         "strict_auto_eligible": strict_auto_eligible,
         "strict_auto_reason_codes": dedupe_preserve_order(strict_auto_reason_codes),
         "summary_reason_codes": dedupe_preserve_order(
