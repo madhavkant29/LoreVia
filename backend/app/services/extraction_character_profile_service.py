@@ -39,6 +39,9 @@ Every nonempty value, list item, trait, or growth event must have its own exact 
 source quote in claim_evidence. Do not use a name mention alone as evidence for a trait,
 motivation, fear, or arc. Preserve observations separately from interpretations.
 The source may contain other people: attribute facts only to the named character.
+First-person narration describes the narrator, not another named person. Use it for
+the named person only when the passage explicitly attributes that speech or action
+to them. If attribution is unclear, leave the field empty.
 Return JSON only: {"profile":{"traits":{},"personality_tags":[],"goal":null,
 "motivations":[],"fears":[],"lie_they_believe":null,"backstory_wound":null,
 "arc_type":null,"arc_summary":null,"archetype":null,
@@ -63,6 +66,7 @@ async def extract_profile_from_packet(
     user_id: uuid.UUID,
     book_id: uuid.UUID,
     language: str | None,
+    is_narrator: bool = False,
 ) -> dict[str, Any]:
     """Extract one sparse profile and reject unsupported or malformed claims."""
     source_text = str(packet["text"])
@@ -122,7 +126,13 @@ async def extract_profile_from_packet(
                 "Use empty fields when this passage provides no supported facts."
             )
             continue
-        grounded, citations = ground_character_profile_claims(profile, source_text)
+        grounded, citations = ground_character_profile_claims(
+            profile,
+            source_text,
+            character_name=character_name,
+            aliases=aliases,
+            is_narrator=is_narrator,
+        )
         complete = profile_claims_complete(profile, grounded)
         try:
             mapped_citations = (
@@ -149,8 +159,9 @@ async def extract_profile_from_packet(
             partial_profile = {**result, "_profile_partial_invalid_response": True}
         retry_instruction = (
             "\nValidation feedback: At least one nonempty claim lacked a verbatim "
-            "quote from the supplied source passage. Remove unsupported claims or "
-            "provide an exact source quote for each claim."
+            "quote from the supplied source passage or was attributed to the wrong "
+            "speaker. Remove unsupported claims or provide an exact quote clearly "
+            "attributed to this character."
         )
     if partial_profile is not None:
         return partial_profile
@@ -179,6 +190,8 @@ async def enrich_chapter_character_profiles(
 
     async def run(entity_index: int, packet: dict[str, Any]) -> dict[str, Any]:
         entity = entities[entity_index]
+        evidence = entity.get("evidence")
+        evidence = evidence if isinstance(evidence, dict) else {}
         async with semaphore:
             return await extract_profile_from_packet(
                 character_name=str(entity["name"]),
@@ -187,6 +200,7 @@ async def enrich_chapter_character_profiles(
                 user_id=user_id,
                 book_id=book_id,
                 language=language,
+                is_narrator=bool(evidence.get("narrator_self_identification")),
             )
 
     results = await asyncio.gather(

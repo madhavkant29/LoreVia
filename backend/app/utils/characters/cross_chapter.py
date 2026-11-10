@@ -26,6 +26,22 @@ def _count(value: object) -> int:
         return 0
 
 
+def _blocks_exact_name(anti_merge_names: object, normalized_name: str) -> bool:
+    """Keep same-name and full-name-fragment conflicts out of chapter evidence."""
+    if not isinstance(anti_merge_names, (list, tuple, set)):
+        return False
+    name_words = normalized_name.split()
+    for item in anti_merge_names:
+        blocked_words = normalize_character_name(str(item)).split()
+        if blocked_words == name_words:
+            return True
+        if len(name_words) == 1 and name_words[0] in blocked_words:
+            return True
+        if len(blocked_words) == 1 and blocked_words[0] in name_words:
+            return True
+    return False
+
+
 def _named_snippets(evidence: Mapping[str, Any], name: str) -> list[str]:
     values = evidence.get("snippets")
     if not isinstance(values, list):
@@ -147,7 +163,11 @@ def combine_exact_name_chapter_evidence(
     if _verifier_part(current, "final").get("confidence_band") != "accept":
         return entity
     name = normalize_character_name(str(entity.get("name") or ""))
-    if not name or current.get("ambiguous_full_name_fragment") or entity.get("anti_merge_names"):
+    if (
+        not name
+        or current.get("ambiguous_full_name_fragment")
+        or _blocks_exact_name(entity.get("anti_merge_names"), name)
+    ):
         return entity
     if any(normalize_character_name(str(alias)) != name for alias in entity.get("aliases") or []):
         return entity
@@ -168,7 +188,7 @@ def combine_exact_name_chapter_evidence(
             or _count(evidence.get("mention_count")) < 1
             or evidence.get("profile_enrichment_status") == "unanchored_reference"
             or evidence.get("ambiguous_full_name_fragment")
-            or evidence.get("anti_merge_names")
+            or _blocks_exact_name(evidence.get("anti_merge_names"), name)
             or evidence.get("resolver_status") in {"ambiguous", "matched_needs_review"}
             or _verifier_part(evidence, "final").get("confidence_band") != "accept"
             or candidate.entity_type not in (None, "person", "alias_candidate")

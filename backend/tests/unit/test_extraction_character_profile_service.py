@@ -59,6 +59,41 @@ async def test_profile_packet_requires_verbatim_claim_and_preserves_batch_offset
 
 
 @pytest.mark.asyncio
+async def test_profile_packet_salvages_named_action_but_rejects_narrator_goal(monkeypatch):
+    source = "I wanted to impress Mara. Mara helped the child."
+
+    async def fake_complete(**_kwargs):
+        return json.dumps(
+            {
+                "profile": {
+                    "goal": "impress Mara",
+                    "personality_tags": ["helpful"],
+                    "claim_evidence": {
+                        "goal": "I wanted to impress Mara.",
+                        "personality_tags": {"helpful": "Mara helped the child."},
+                    },
+                }
+            }
+        )
+
+    monkeypatch.setattr(
+        extraction_character_profile_service, "complete_with_fallback", fake_complete
+    )
+    result = await extract_profile_from_packet(
+        character_name="Mara",
+        aliases=[],
+        packet={"text": source, "source_batch_key": "book:1:1", "source_start": 0},
+        user_id=uuid.uuid4(),
+        book_id=uuid.uuid4(),
+        language="en",
+    )
+
+    assert result["goal"] is None
+    assert result["personality_tags"] == ["helpful"]
+    assert result["_profile_partial_invalid_response"] is True
+
+
+@pytest.mark.asyncio
 async def test_profile_packet_preserves_cited_first_appearance_and_backstory(monkeypatch):
     source = "Mara entered the station. The fire had destroyed her home."
 

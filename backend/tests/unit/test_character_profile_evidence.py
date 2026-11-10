@@ -10,6 +10,7 @@ from app.utils.characters.profile_evidence import (
     profile_claim_records,
     profile_claims_complete,
     profile_evidence_packets,
+    profile_quote_attributed_to_character,
     shift_profile_citations,
     source_quote_span,
 )
@@ -60,6 +61,50 @@ def test_source_quote_span_rejects_short_fabricated_and_empty_quotes():
     assert source_quote_span(source, "Mara") is None
     assert source_quote_span(source, "Mara secretly feared the sea") is None
     assert source_quote_span("", "Mara promised") is None
+
+
+def test_first_person_profile_quote_requires_named_speaker_or_subject():
+    narrator = "I wanted to impress Mara, but Mara ignored me."
+    narrator_span = source_quote_span(narrator, "I wanted to impress Mara")
+    assert narrator_span is not None
+    assert not profile_quote_attributed_to_character(narrator, narrator_span, character_name="Mara")
+    assert profile_quote_attributed_to_character(
+        narrator, narrator_span, character_name="Arun", is_narrator=True
+    )
+
+    action = "Mara threw me a rope before the bridge fell."
+    action_span = source_quote_span(action, action)
+    assert action_span is not None
+    assert profile_quote_attributed_to_character(action, action_span, character_name="Mara")
+
+    speech = 'Mara said, "I will protect the gate."'
+    speech_span = source_quote_span(speech, "I will protect the gate")
+    assert speech_span is not None
+    assert profile_quote_attributed_to_character(speech, speech_span, character_name="Mara")
+
+    listener = '"I will protect the gate," I told Mara.'
+    listener_span = source_quote_span(listener, "I will protect the gate")
+    assert listener_span is not None
+    assert not profile_quote_attributed_to_character(listener, listener_span, character_name="Mara")
+
+
+def test_ground_character_profile_claims_omits_narrator_claims_for_another_person():
+    source = "I wanted to impress Mara. Mara threw me a rope before the bridge fell."
+    raw = {
+        "goal": "impress Mara",
+        "personality_tags": ["helpful"],
+        "claim_evidence": {
+            "goal": "I wanted to impress Mara.",
+            "personality_tags": {"helpful": "Mara threw me a rope before the bridge fell."},
+        },
+    }
+
+    grounded, citations = ground_character_profile_claims(raw, source, character_name="Mara")
+
+    assert grounded["goal"] is None
+    assert grounded["personality_tags"] == ["helpful"]
+    assert "goal" not in citations
+    assert "personality_tags" in citations
 
 
 def test_ground_character_profile_claims_keeps_only_cited_values():

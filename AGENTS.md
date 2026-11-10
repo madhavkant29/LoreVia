@@ -28,6 +28,12 @@ LoreVia2/
 - Do not assume Render-specific infrastructure, `onrender.com` hostnames, or Render-managed env behavior.
 - When discussing production incidents, do not claim env overrides or platform-level settings exist unless they have been verified from the VPS deployment configuration or explicitly confirmed by the user.
 
+## Workspace Cleanup
+
+- Keep temporary worktrees, clones, build outputs, and scratch files outside the main checkout.
+- Remove temporary files, directories, and worktrees created for a task when they are no longer needed. Check for uncommitted or user-owned work before removal.
+- Close processes, tool sessions, and network or database connections opened for a task when finished. Do not leave background helpers running unnecessarily.
+
 ---
 
 ## Rules — follow every one of these

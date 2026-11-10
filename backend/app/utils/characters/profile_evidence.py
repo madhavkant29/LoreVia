@@ -16,6 +16,38 @@ PROFILE_SCALAR_FIELDS = (
     "first_appearance_context",
 )
 PROFILE_LIST_FIELDS = ("personality_tags", "motivations", "fears")
+FIRST_PERSON_RE = re.compile(r"\b(?:I|me|my|mine|we|us|our|ours)\b", re.I)
+SPEECH_VERB_RE = r"(?:said|asked|answered|replied|told|cried|called|shouted|whispered)"
+POST_QUOTE_SPEECH_VERB_RE = r"(?:said|asked|answered|replied|cried|called|shouted|whispered)"
+
+
+def profile_quote_attributed_to_character(
+    source_text: str,
+    span: tuple[int, int],
+    *,
+    character_name: str,
+    aliases: Sequence[str] = (),
+    is_narrator: bool = False,
+) -> bool:
+    """Hold first-person claims unless the target speaks or acts in the cited text."""
+    quote = source_text[span[0] : span[1]]
+    pronouns = list(FIRST_PERSON_RE.finditer(quote))
+    if not pronouns or is_narrator:
+        return True
+    names = [name.strip() for name in [character_name, *aliases] if name.strip()]
+    for name in names:
+        pattern = rf"(?<!\w){re.escape(name)}(?!\w)"
+        for match in re.finditer(pattern, quote, re.I):
+            before_name = quote[: match.start()]
+            if not FIRST_PERSON_RE.search(before_name):
+                return True
+        before = source_text[max(0, span[0] - 100) : span[0]]
+        after = source_text[span[1] : span[1] + 100]
+        if re.search(rf"{pattern}\s+{SPEECH_VERB_RE}\b[^.!?]{{0,45}}$", before, re.I):
+            return True
+        if re.search(rf"^[^.!?]{{0,45}}{POST_QUOTE_SPEECH_VERB_RE}\s+{pattern}", after, re.I):
+            return True
+    return False
 
 
 def character_mention_weight(entity: Mapping[str, Any]) -> int:
@@ -195,7 +227,12 @@ def source_quote_span(source_text: str, proposed_quote: object) -> tuple[int, in
 
 
 def ground_character_profile_claims(
-    raw: dict[str, Any], source_text: str
+    raw: dict[str, Any],
+    source_text: str,
+    *,
+    character_name: str | None = None,
+    aliases: Sequence[str] = (),
+    is_narrator: bool = False,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Keep only profile fields with a verifiable per-claim source quote."""
     citations = raw.get("claim_evidence")
@@ -203,10 +240,24 @@ def ground_character_profile_claims(
     grounded: dict[str, Any] = {}
     verified: dict[str, Any] = {}
 
+    def supported(span: tuple[int, int] | None) -> bool:
+        return span is not None and (
+            character_name is None
+            or profile_quote_attributed_to_character(
+                source_text,
+                span,
+                character_name=character_name,
+                aliases=aliases,
+                is_narrator=is_narrator,
+            )
+        )
+
     for field in PROFILE_SCALAR_FIELDS:
         value = raw.get(field)
         span = source_quote_span(source_text, citations.get(field))
-        grounded[field] = value if isinstance(value, str) and value.strip() and span else None
+        grounded[field] = (
+            value if isinstance(value, str) and value.strip() and supported(span) else None
+        )
         if grounded[field] is not None and span is not None:
             verified[field] = {
                 "quote": source_text[span[0] : span[1]],
@@ -224,7 +275,7 @@ def ground_character_profile_claims(
             if not isinstance(value, str) or not value.strip():
                 continue
             span = source_quote_span(source_text, field_citations.get(value))
-            if span is None:
+            if span is None or not supported(span):
                 continue
             kept.append(value)
             field_verified[value] = {
@@ -246,7 +297,7 @@ def ground_character_profile_claims(
         if not isinstance(data, dict) or not str(data.get("value") or "").strip():
             continue
         span = source_quote_span(source_text, trait_citations.get(trait))
-        if span is None:
+        if span is None or not supported(span):
             continue
         grounded_traits[trait] = data
         verified_traits[trait] = {
@@ -262,7 +313,7 @@ def ground_character_profile_claims(
     growth_span = source_quote_span(source_text, citations.get("growth_event"))
     grounded["growth_event"] = (
         growth_event
-        if isinstance(growth_event, dict) and growth_event.get("event") and growth_span
+        if isinstance(growth_event, dict) and growth_event.get("event") and supported(growth_span)
         else None
     )
     if grounded["growth_event"] is not None and growth_span is not None:
