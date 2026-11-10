@@ -9,6 +9,7 @@ import {
   formatRelationshipType,
   formatResolverStatus,
   relationshipReviewQuote,
+  relationshipReviewProposal,
   relationshipReviewWarning,
 } from "./charactersPage.helpers"
 
@@ -181,6 +182,7 @@ export function CharacterReviewTab({
                   <p className={`mt-1 text-xs ${isDark ? "text-slate-400" : "text-stone-600"}`}>Chapter {candidate.chapter_number}{candidate.rel_type ? ` · ${formatRelationshipType(candidate.rel_type)}` : ""}</p>
                   <p className={`mt-2 text-sm ${isDark ? "text-slate-300" : "text-stone-600"}`}>{candidate.description || candidate.reason_codes[0] || "Needs relationship review."}</p>
                   {relationshipReviewWarning(candidate) ? <p className="mt-2 text-sm text-amber-500">{relationshipReviewWarning(candidate)}</p> : null}
+                  {relationshipReviewProposal(candidate) ? <blockquote className={`mt-2 border-l-2 pl-3 text-sm ${isDark ? "border-teal-700 text-slate-300" : "border-teal-500 text-stone-700"}`}><strong>AI suggested {formatRelationshipType(relationshipReviewProposal(candidate)!.relType)}; source quote needs your interpretation{relationshipReviewProposal(candidate)!.participantsAnchored ? "" : " and does not name both people"}:</strong> {relationshipReviewProposal(candidate)!.quote}</blockquote> : null}
                   {relationshipReviewQuote(candidate) ? <blockquote className={`mt-2 border-l-2 pl-3 text-sm ${isDark ? "border-slate-600 text-slate-300" : "border-stone-300 text-stone-700"}`}><strong>Saved quote to verify:</strong> {relationshipReviewQuote(candidate)}</blockquote> : null}
                 </div>
               ))}

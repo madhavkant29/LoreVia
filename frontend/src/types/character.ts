@@ -20,6 +20,16 @@ export interface CharacterProfileClaim {
   end?: number | null
 }
 
+export interface NarratorProfileProposal {
+  field: string
+  value: string
+  quote: string
+  chapter_number: number
+  source_start: number
+  source_end: number
+  status?: "pending" | "accepted"
+}
+
 export interface Character {
   id: string
   book_id: string
@@ -83,6 +93,11 @@ export interface Character {
     trust_tier?: "visible" | "review_only" | "repaired_noise" | null
     trust_reasons?: string[]
     profile_claims?: CharacterProfileClaim[]
+    narrator_profile_review?: {
+      author_confirmed_identity: boolean
+      generation_id: string
+      proposals: NarratorProfileProposal[]
+    } | null
   }
   visibility_state?: "visible" | "quarantined" | "noise" | null
   approval_state?: "approved" | "pending_review" | "rejected" | "protected" | null

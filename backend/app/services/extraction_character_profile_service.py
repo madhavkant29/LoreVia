@@ -41,7 +41,8 @@ motivation, fear, or arc. Preserve observations separately from interpretations.
 The source may contain other people: attribute facts only to the named character.
 First-person narration describes the narrator, not another named person. Use it for
 the named person only when the passage explicitly attributes that speech or action
-to them. If attribution is unclear, leave the field empty.
+to them, or when the request explicitly identifies this character as the narrator.
+If attribution is unclear, leave the field empty.
 Return JSON only: {"profile":{"traits":{},"personality_tags":[],"goal":null,
 "motivations":[],"fears":[],"lie_they_believe":null,"backstory_wound":null,
 "arc_type":null,"arc_summary":null,"archetype":null,
@@ -52,6 +53,12 @@ Return JSON only: {"profile":{"traits":{},"personality_tags":[],"goal":null,
 "archetype":null,"first_appearance_context":null,"growth_event":null}}}.
 Trait values use {"value":"...","confidence":0.0,"type":"objective|subjective|abstract"}.
 If nothing about this person is supported beyond their name, return empty profile fields."""
+
+NARRATOR_IDENTITY_CONTEXT = (
+    "\nThe named character is the first-person narrator of the supplied passage. "
+    "Attribute first-person narration to this character, while keeping quoted speech "
+    "by other people separate. Cite the exact words supporting each claim."
+)
 
 
 class CharacterProfileFormatError(ValueError):
@@ -80,7 +87,7 @@ async def extract_profile_from_packet(
     for _attempt in range(2):
         try:
             raw = await complete_with_fallback(
-                system=PROFILE_SYSTEM,
+                system=PROFILE_SYSTEM + (NARRATOR_IDENTITY_CONTEXT if is_narrator else ""),
                 user=prompt + retry_instruction,
                 openai_model=settings.OPENAI_EXTRACT_MODEL,
                 gemini_model=settings.GEMINI_EXTRACT_MODEL,

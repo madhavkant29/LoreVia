@@ -3147,6 +3147,37 @@ async def test_character_routes_cover_crud_and_exports(monkeypatch):
     assert accepted["rel_type"] == "family"
     assert accepted["to_chapter"] == 5
 
+    generated_candidate = SimpleNamespace(**relationship_candidate.__dict__)
+    generated_candidate.reason_codes = ["generated_relationship_requires_review"]
+    generated_candidate.evidence = {
+        "relationship": {
+            "to_chapter": 5,
+            "shared_labels": ["unverified_label"],
+            "label_evidence": {"quote": "An unrelated saved quote."},
+        }
+    }
+    generated_accepted = await books.accept_relationship_candidate(
+        book.id,
+        generated_candidate.id,
+        RelationshipCandidateAcceptBody(
+            character_a_id=character.id,
+            character_b_id=secondary.id,
+            rel_type="allies",
+            from_chapter=3,
+            label_evidence={"quote": "Grete and her father agreed."},
+        ),
+        db=_FakeDB(
+            get_values=[generated_candidate, character, secondary],
+            execute_values=[_Result(scalars=[]), _Result(scalars=[])],
+        ),
+        current_user=user,
+    )
+    assert generated_accepted["rel_type"] == "allies"
+    assert generated_accepted["to_chapter"] == 5
+    assert generated_accepted["description"] is None
+    assert generated_accepted["shared_labels"] == []
+    assert generated_accepted["label_evidence"]["quote"] == "Grete and her father agreed."
+
     resolved = await books.resolve_relationship_candidate(
         book.id,
         relationship_candidate.id,

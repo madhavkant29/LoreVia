@@ -54,6 +54,7 @@ import {
   relationshipChangeKey,
   reviewStatusLabel,
   relationshipReviewQuote,
+  relationshipReviewProposal,
   relationshipReviewWarning,
   sentimentLabel,
   sortedMergeableCharacters,
@@ -85,6 +86,9 @@ describe("characters page helpers", () => {
     expect(relationshipReviewWarning({ ...candidate, reason_codes: ["relationship_source_quote_missing"] })).toContain("No source quote")
     expect(relationshipReviewWarning({ ...candidate, reason_codes: ["relationship_source_quote_unverified"] })).toContain("not found")
     expect(relationshipReviewQuote({ ...candidate, evidence: {} })).toBeNull()
+    const withProposal = { ...candidate, evidence: { relationship: { review_proposal: { relationship_type: "allies", quote: "Mara and Lina signed a pact.", source_start: 12, source_end: 40, participants_anchored: true } } } }
+    expect(relationshipReviewProposal(withProposal)?.relType).toBe("allies")
+    expect(relationshipReviewProposal({ ...withProposal, evidence: { relationship: { review_proposal: { relationship_type: "allies", quote: "Lina waved.", source_start: 12, source_end: 23, participants_anchored: false } } } })?.participantsAnchored).toBe(false)
   })
 
   it("shows only sourced claims that still match the current profile", () => {

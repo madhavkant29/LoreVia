@@ -112,6 +112,7 @@ export type CharactersPageLayoutProps = {
   onAcceptRelationshipCandidate: (candidate: CharacterRelationshipCandidate) => void
   onApplyRepairPlan: () => void
   onApproveCharacter: () => void
+  onCharacterUpdated: (character: Character) => void
   onAttachCandidate: (candidate: CharacterCandidate) => void
   onAttachRelationshipCandidate: (candidate: CharacterRelationshipCandidate, side: "a" | "b") => void
   onCancelCreate: () => void
@@ -233,6 +234,7 @@ export function CharactersPageLayout({
   onAcceptRelationshipCandidate,
   onApplyRepairPlan,
   onApproveCharacter,
+  onCharacterUpdated,
   onAttachCandidate,
   onAttachRelationshipCandidate,
   onCancelCreate,
@@ -494,6 +496,7 @@ export function CharactersPageLayout({
                     summary={derived.selectedCharacterSummary}
                     traitEntries={derived.selectedTraitEntries}
                     onApproveCharacter={onApproveCharacter}
+                    onCharacterUpdated={onCharacterUpdated}
                     onCreateRelationship={onCreateRelationship}
                     onDemoteSelectedCharacter={onDemoteSelectedCharacter}
                     onDraftChange={setDraft}

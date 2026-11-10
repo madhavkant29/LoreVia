@@ -6,6 +6,8 @@ import re
 from collections.abc import Mapping, Sequence
 from typing import Any
 
+from app.utils.characters.narrator import first_person_narration_span
+
 PROFILE_SCALAR_FIELDS = (
     "goal",
     "lie_they_believe",
@@ -32,8 +34,10 @@ def profile_quote_attributed_to_character(
     """Hold first-person claims unless the target speaks or acts in the cited text."""
     quote = source_text[span[0] : span[1]]
     pronouns = list(FIRST_PERSON_RE.finditer(quote))
-    if not pronouns or is_narrator:
+    if not pronouns:
         return True
+    if is_narrator:
+        return first_person_narration_span(source_text, span)
     names = [name.strip() for name in [character_name, *aliases] if name.strip()]
     for name in names:
         pattern = rf"(?<!\w){re.escape(name)}(?!\w)"

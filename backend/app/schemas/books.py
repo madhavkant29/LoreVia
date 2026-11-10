@@ -354,6 +354,7 @@ class CharacterUpdateBody(BaseModel):
     graph_visibility: str | None = None
     protected_from_repair: bool | None = None
     review_note: str | None = None
+    accept_narrator_claim_index: int | None = Field(default=None, ge=0)
 
 
 class RelationshipCreateBody(BaseModel):

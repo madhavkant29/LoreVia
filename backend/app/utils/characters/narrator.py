@@ -3,8 +3,69 @@
 from __future__ import annotations
 
 import re
+from bisect import bisect_left, bisect_right
 from collections.abc import Mapping, Sequence
 from typing import Any
+
+FIRST_PERSON_NARRATION_RE = re.compile(r"\b(?:I|me|my|mine|we|us|our|ours)\b", re.I)
+
+
+def first_person_profile_windows(
+    source: str, *, max_chars: int = 1_600, max_windows: int = 4
+) -> list[tuple[int, int, str]]:
+    """Sample diverse first-person narration passages without treating dialogue as narration."""
+    if max_chars < 1 or max_windows < 1:
+        raise ValueError("invalid_narrator_profile_window_limit")
+    if not source:
+        return []
+    quoted = [
+        (match.start(), match.end())
+        for match in re.finditer(
+            r"""["“][^"”]*["”]|‘[^’]*’|(?<!\w)'[^']*'(?!\w)""",
+            source,
+            flags=re.DOTALL,
+        )
+    ]
+    quoted.extend(
+        (match.start(), match.end())
+        for match in re.finditer(r"(?m)^[ \t]*[—–][ \t]+[^\n]*", source)
+    )
+    quoted.sort()
+    merged: list[tuple[int, int]] = []
+    for start, end in quoted:
+        if merged and start <= merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(end, merged[-1][1]))
+        else:
+            merged.append((start, end))
+    quoted = merged
+    quoted_starts = [start for start, _end in quoted]
+    mentions = [
+        match.start()
+        for match in FIRST_PERSON_NARRATION_RE.finditer(source)
+        if not (
+            (index := bisect_right(quoted_starts, match.start()) - 1) >= 0
+            and quoted[index][0] <= match.start() < quoted[index][1]
+        )
+    ]
+    if not mentions:
+        return []
+    candidates: list[tuple[int, int, int]] = []
+    for position in mentions:
+        start = max(0, min(position - max_chars // 3, len(source) - max_chars))
+        end = min(len(source), start + max_chars)
+        count = bisect_left(mentions, end) - bisect_left(mentions, start)
+        candidates.append((count, start, end))
+    selected: list[tuple[int, int, int]] = []
+    for bucket in range(max_windows):
+        lower = len(source) * bucket // max_windows
+        upper = len(source) * (bucket + 1) // max_windows
+        options = [row for row in candidates if lower <= row[1] + (row[2] - row[1]) // 2 < upper]
+        if not options:
+            continue
+        best = max(options, key=lambda row: (row[0], -row[1]))
+        if all(best[2] <= prior[1] or best[1] >= prior[2] for prior in selected):
+            selected.append(best)
+    return [(start, end, source[start:end]) for _count, start, end in selected]
 
 
 def _narrator_spoke_quote(text: str, quote_start: int, quote_end: int) -> bool:
@@ -28,6 +89,28 @@ def _narrator_spoke_quote(text: str, quote_start: int, quote_end: int) -> bool:
             )
         )
     )
+
+
+def first_person_narration_span(source: str, span: tuple[int, int]) -> bool:
+    """Require first-person evidence outside another speaker's quoted dialogue."""
+    start, end = span
+    if start < 0 or end > len(source) or start >= end:
+        return False
+    for speech in re.finditer(r"(?m)^[ \t]*[—–][ \t]+[^\n]*", source):
+        if speech.start() < end and start < speech.end():
+            return False
+    for quote in re.finditer(
+        r"""["“][^"”]*["”]|‘[^’]*’|(?<!\w)'[^']*'(?!\w)""",
+        source,
+        flags=re.DOTALL,
+    ):
+        if (
+            quote.start() < end
+            and start < quote.end()
+            and not _narrator_spoke_quote(source, quote.start(), quote.end())
+        ):
+            return False
+    return True
 
 
 def first_person_self_identification(

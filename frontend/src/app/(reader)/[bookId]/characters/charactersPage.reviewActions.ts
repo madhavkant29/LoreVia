@@ -2,6 +2,7 @@ import { useState, type Dispatch, type SetStateAction } from "react"
 
 import { booksApi } from "@/lib/api/books"
 import type { Character, CharacterCandidate, CharacterRelationshipCandidate } from "@/types/character"
+import { relationshipReviewProposal } from "./charactersPage.helpers"
 
 type WorkspaceMode = "profile" | "review" | "duplicates" | "repair"
 
@@ -114,6 +115,7 @@ export function useCharacterReviewActions({
   }
 
   async function handleAcceptRelationshipCandidate(candidate: CharacterRelationshipCandidate) {
+    const proposal = relationshipReviewProposal(candidate)
     const leftId = candidate.matched_character_a_id ?? selectedCharacter?.id ?? null
     const rightId = candidate.matched_character_b_id ?? selectedCharacter?.id ?? null
     if (!leftId || !rightId || leftId === rightId) {
@@ -126,10 +128,11 @@ export function useCharacterReviewActions({
       await booksApi.acceptRelationshipCandidate(bookId, candidate.id, {
         characterAId: leftId,
         characterBId: rightId,
-        relType: candidate.rel_type ?? "connection",
+        relType: proposal?.relType ?? candidate.rel_type ?? "connection",
         sentiment: candidate.sentiment ?? null,
-        description: candidate.description ?? null,
+        description: candidate.reason_codes.includes("generated_relationship_requires_review") ? null : candidate.description ?? null,
         fromChapter: candidate.chapter_number,
+        ...(proposal ? { labelEvidence: { quote: proposal.quote, source_start: proposal.sourceStart, source_end: proposal.sourceEnd } } : {}),
       })
       await refreshGraph()
       await refetchCharacterReview()

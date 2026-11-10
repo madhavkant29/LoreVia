@@ -88,6 +88,20 @@ def test_first_person_profile_quote_requires_named_speaker_or_subject():
     assert not profile_quote_attributed_to_character(listener, listener_span, character_name="Mara")
 
 
+def test_confirmed_narrator_profile_rejects_another_speakers_first_person_quote():
+    source = 'Lina said, "I wanted to leave the city." I stayed until dawn.'
+    wrong = source_quote_span(source, "I wanted to leave the city.")
+    own = source_quote_span(source, "I stayed until dawn.")
+
+    assert wrong is not None and own is not None
+    assert not profile_quote_attributed_to_character(
+        source, wrong, character_name="Arun Vale", is_narrator=True
+    )
+    assert profile_quote_attributed_to_character(
+        source, own, character_name="Arun Vale", is_narrator=True
+    )
+
+
 def test_ground_character_profile_claims_omits_narrator_claims_for_another_person():
     source = "I wanted to impress Mara. Mara threw me a rope before the bridge fell."
     raw = {

@@ -45,4 +45,33 @@ describe("CharacterOverviewIdentityCards narrator evidence", () => {
     expect(markup).toContain("This alone does not confirm the first-person narrator")
     expect(markup).not.toContain("Narrator evidence")
   })
+
+  it("shows narrator profile proposals as source-backed suggestions for author review", () => {
+    const markup = renderToStaticMarkup(
+      <CharacterOverviewIdentityCards
+        character={character({
+          analysis_metadata: {
+            narrator_profile_review: {
+              author_confirmed_identity: true,
+              generation_id: "generation-1",
+              proposals: [{ field: "motivations", value: "find shelter", quote: "I looked for shelter.", chapter_number: 2, source_start: 10, source_end: 31 }],
+            },
+          },
+        })}
+        chapterAppearanceText={(chapter) => `Chapter ${chapter}`}
+        evidenceCount={0}
+        growthEventCount={0}
+        isDark={false}
+        knownFacts={[]}
+        reviewStatus="Pending review"
+        summary=""
+        onOpenEvidence={() => {}}
+        onAcceptNarratorClaim={() => {}}
+      />,
+    )
+    expect(markup).toContain("Narrator profile suggestions")
+    expect(markup).toContain("find shelter")
+    expect(markup).toContain("I looked for shelter.")
+    expect(markup).toContain("Accept claim")
+  })
 })

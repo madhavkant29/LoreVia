@@ -10,6 +10,7 @@ import {
   formatRole,
   reviewStatusLabel,
   relationshipReviewWarning,
+  relationshipReviewProposal,
   type MergeSuggestion,
 } from "./charactersPage.helpers"
 
@@ -299,6 +300,7 @@ export function CharactersSidebarBody({
                 <p className={`break-words text-sm font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>{candidate.raw_character_a} {"<->"} {candidate.raw_character_b}</p>
                 <p className={`mt-1 text-xs ${isDark ? "text-slate-400" : "text-stone-600"}`}>Chapter {candidate.chapter_number}{candidate.rel_type ? ` · ${formatRelationshipType(candidate.rel_type)}` : ""}</p>
                 <p className={`mt-2 text-xs ${isDark ? "text-slate-400" : "text-stone-600"}`}>{relationshipReviewWarning(candidate) ?? candidate.reason_codes[0] ?? "Needs relationship review"}</p>
+                {relationshipReviewProposal(candidate) ? <p className={`mt-2 text-xs ${isDark ? "text-teal-300" : "text-teal-800"}`}>AI suggested {formatRelationshipType(relationshipReviewProposal(candidate)!.relType)}. Check the source quote{relationshipReviewProposal(candidate)!.participantsAnchored ? "" : " and both participants"} in Review before confirming.</p> : null}
                 <div className="mt-3 flex flex-wrap gap-2">
                   <button
                     type="button"
