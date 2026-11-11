@@ -270,6 +270,7 @@ async def apply_plan(
             max_tokens=MAX_OUTPUT_TOKENS_PER_CALL,
             response_format={"type": "json_object"},
             require_complete_output=True,
+            retry_transient_openai=False,
             usage_feature="narrator_profile_review",
             usage_user_id=user_id,
             usage_book_id=book_id,
