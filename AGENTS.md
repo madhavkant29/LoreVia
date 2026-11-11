@@ -25,6 +25,7 @@ LoreVia2/
 ## Deployment Note
 
 - Treat the current deployment target as a **VPS** unless the user explicitly says this has changed.
+- The user chose to leave the runtime release SHA as `unknown` in production. Treat that value as expected, not as evidence of a failed deployment.
 - Do not assume Render-specific infrastructure, `onrender.com` hostnames, or Render-managed env behavior.
 - When discussing production incidents, do not claim env overrides or platform-level settings exist unless they have been verified from the VPS deployment configuration or explicitly confirmed by the user.
 
