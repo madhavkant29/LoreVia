@@ -8,7 +8,7 @@ from collections.abc import Sequence
 from typing import Any
 
 from app.utils.characters.profile_evidence import source_quote_span
-from app.utils.characters.relationship_evidence import relationship_quote_anchors_participants
+from app.utils.characters.relationship_evidence import relationship_participant_name_distance
 from app.utils.characters.text import source_excerpt_ranges_around_names
 
 
@@ -29,24 +29,29 @@ def relationship_evidence_windows(
     if not source or not left or not right:
         return []
     ranges = source_excerpt_ranges_around_names(source, [*left, *right], max_chars=max_chars)
-    eligible = [
-        (start, end)
-        for start, end in ranges
-        if any(
-            relationship_quote_anchors_participants(source[start:end], a, b)
+    eligible: list[tuple[int, int, int]] = []
+    for start, end in ranges:
+        window = source[start:end]
+        gaps = [
+            gap
             for a in left
             for b in right
-        )
-    ]
+            if (gap := relationship_participant_name_distance(window, a, b)) is not None
+        ]
+        if gaps:
+            eligible.append((start, end, min(gaps)))
     preferred_span = source_quote_span(source, preferred_quote) if preferred_quote else None
-    if preferred_span is not None:
-        eligible.sort(
-            key=lambda window: (
-                not (window[0] <= preferred_span[0] < preferred_span[1] <= window[1]),
-                window[0],
-            )
+    eligible.sort(
+        key=lambda window: (
+            not (
+                preferred_span is not None
+                and window[0] <= preferred_span[0] < preferred_span[1] <= window[1]
+            ),
+            window[2],
+            window[0],
         )
-    return [(start, end, source[start:end]) for start, end in eligible[:max_windows]]
+    )
+    return [(start, end, source[start:end]) for start, end, _distance in eligible[:max_windows]]
 
 
 def verified_relationship_evidence_proposal(

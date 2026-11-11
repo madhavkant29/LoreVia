@@ -43,6 +43,20 @@ def test_relationship_evidence_windows_prioritize_saved_quote():
         relationship_evidence_windows(source, ["Mara"], ["Lina"], max_windows=0)
 
 
+def test_relationship_evidence_windows_prioritize_close_named_pair_without_saved_quote():
+    source = (
+        "Mara watched from the hill. "
+        + "x " * 1000
+        + "Lina crossed the valley. "
+        + "x " * 1600
+        + "Mara and Lina signed the pact together."
+    )
+    windows = relationship_evidence_windows(source, ["Mara"], ["Lina"], max_windows=1)
+
+    assert len(windows) == 1
+    assert "signed the pact" in windows[0][2]
+
+
 def test_verified_relationship_evidence_proposal_requires_exact_source_quote():
     source = "Mara and Lina signed the pact together."
     windows = [(100, 100 + len(source), source)]
