@@ -1,8 +1,10 @@
+import json
 import uuid
 from types import SimpleNamespace
 
 import pytest
 
+from app.models.character import CharacterVoiceProfile
 from app.services import extraction_voice_profile_service
 from app.services.extraction_voice_profile_service import refresh_chapter_voice_profiles
 
@@ -22,15 +24,21 @@ class _FakeResult:
     def scalars(self):
         return _FakeScalars(self._rows)
 
+    def all(self):
+        return self._rows
+
 
 class _FakeDb:
-    def __init__(self, profiles=None):
+    def __init__(self, profiles=None, earlier_chapters=None):
         self.profiles = profiles or []
+        self.earlier_chapters = earlier_chapters or []
         self.added = []
         self.executed = 0
 
-    async def execute(self, _statement):
+    async def execute(self, statement):
         self.executed += 1
+        if statement.column_descriptions[0]["name"] == "number":
+            return _FakeResult(self.earlier_chapters)
         return _FakeResult(self.profiles)
 
     def add(self, value):
@@ -283,3 +291,84 @@ async def test_long_quote_overlap_counts_as_one_independent_voice_sample():
     assert refreshed == 1
     assert db.added[0].sample_dialogue_count == 1
     assert db.added[0].sample_word_count == 180
+
+
+@pytest.mark.asyncio
+async def test_later_promotion_backfills_earlier_explicit_speech_without_recounting_existing_cast(
+    monkeypatch,
+):
+    generation_id = uuid.uuid4()
+    book = SimpleNamespace(id=uuid.uuid4())
+    ada = SimpleNamespace(
+        id=uuid.uuid4(), name="Ada", aliases=[], generation_id=generation_id, first_chapter=2
+    )
+    bram = SimpleNamespace(
+        id=uuid.uuid4(), name="Bram", aliases=[], generation_id=generation_id, first_chapter=2
+    )
+    bram_profile = CharacterVoiceProfile(
+        book_id=book.id,
+        character_id=bram.id,
+        generation_id=generation_id,
+        sample_dialogue_count=1,
+        sample_word_count=2,
+    )
+    db = _FakeDb(profiles=[bram_profile], earlier_chapters=[(2, "chapter-2")])
+    chapter_2 = json.dumps(
+        {
+            "format": "rich_text_v1",
+            "html": '<p>Ada said, "We should leave now." Bram said, "I agree."</p>',
+            "text": 'Ada said, "We should leave now." Bram said, "I agree."',
+        }
+    ).encode()
+    downloads = []
+
+    def download(key):
+        downloads.append(key)
+        return chapter_2
+
+    monkeypatch.setattr(extraction_voice_profile_service, "download_book", download)
+
+    refreshed = await refresh_chapter_voice_profiles(
+        db,
+        book=book,
+        chapter_text='Bram replied, "Let us go."',
+        chapter_number=3,
+        new_character_ids={ada.id},
+        existing_characters=[ada, bram],
+    )
+
+    assert refreshed == 2
+    assert downloads == ["chapter-2"]
+    assert len(db.added) == 1
+    assert db.added[0].character_id == ada.id
+    assert db.added[0].sample_dialogue_count == 1
+    assert bram_profile.sample_dialogue_count == 2
+
+
+@pytest.mark.asyncio
+async def test_later_promotion_keeps_current_speech_if_earlier_source_unavailable(monkeypatch):
+    character = SimpleNamespace(
+        id=uuid.uuid4(),
+        name="Ada",
+        aliases=[],
+        generation_id=uuid.uuid4(),
+        first_chapter=2,
+    )
+    db = _FakeDb(earlier_chapters=[(2, "missing-chapter")])
+
+    def unavailable(_key):
+        raise OSError("source unavailable")
+
+    monkeypatch.setattr(extraction_voice_profile_service, "download_book", unavailable)
+
+    refreshed = await refresh_chapter_voice_profiles(
+        db,
+        book=SimpleNamespace(id=uuid.uuid4()),
+        chapter_text='Ada said, "I can wait."',
+        chapter_number=3,
+        new_character_ids={character.id},
+        existing_characters=[character],
+    )
+
+    assert refreshed == 1
+    assert db.added[0].sample_dialogue_count == 1
