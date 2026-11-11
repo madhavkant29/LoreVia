@@ -222,3 +222,44 @@ async def test_relationship_ai_review_rechecks_source_after_provider_call(monkey
             expected_plan_sha256="original",
         )
     assert paid_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_relationship_ai_review_rejects_reader_book_before_paid_calls(monkeypatch):
+    generation_id = uuid.UUID("00000000-0000-0000-0000-000000000001")
+    calls = 0
+
+    class ReadSession:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def execute(self, *_args):
+            return None
+
+        async def get(self, *_args):
+            return SimpleNamespace(mode="reader", user_id=uuid.uuid4())
+
+    async def unchanged_plan(*_args):
+        return {"active_generation_id": str(generation_id), "evidence_plan_sha256": "plan"}
+
+    async def paid_call(**_kwargs):
+        nonlocal calls
+        calls += 1
+        return "{}"
+
+    monkeypatch.setattr(plan_relationship_evidence_review, "AsyncSessionLocal", ReadSession)
+    monkeypatch.setattr(
+        plan_relationship_evidence_review, "build_evidence_review_plan", unchanged_plan
+    )
+    monkeypatch.setattr(plan_relationship_evidence_review, "complete_with_fallback", paid_call)
+
+    with pytest.raises(ValueError, match="author_book_required"):
+        await plan_relationship_evidence_review.apply_evidence_review_plan(
+            book_id=uuid.uuid4(),
+            expected_generation_id=generation_id,
+            expected_plan_sha256="plan",
+        )
+    assert calls == 0

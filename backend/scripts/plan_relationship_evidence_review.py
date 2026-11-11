@@ -205,8 +205,8 @@ async def apply_evidence_review_plan(
         await db.execute(text("SET TRANSACTION READ ONLY"))
         plan = await build_evidence_review_plan(db, book_id)
         book = await db.get(Book, book_id)
-        if book is None:
-            raise ValueError("book_missing")
+        if book is None or book.mode != "author":
+            raise ValueError("relationship_review_author_book_required")
         user_id = book.user_id
     if (
         plan["active_generation_id"] != str(expected_generation_id)
