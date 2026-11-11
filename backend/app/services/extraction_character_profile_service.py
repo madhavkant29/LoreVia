@@ -83,7 +83,8 @@ async def extract_profile_from_packet(
         f"Source passage:\n{source_text}"
     )
     retry_instruction = ""
-    partial_profile: dict[str, Any] | None = None
+    verified_profiles: list[dict[str, Any]] = []
+    response_complete = False
     for _attempt in range(2):
         try:
             raw = await complete_with_fallback(
@@ -159,19 +160,33 @@ async def extract_profile_from_packet(
             "evidence": {"profile_claims": mapped_citations},
         }
         if complete:
-            return result
+            if not verified_profiles:
+                return result
+            verified_profiles.append(result)
+            response_complete = True
+            break
         # Keep independently verified claims if the retry also fails. The batch
         # stays visibly partial, and unsupported claims are never persisted.
         if mapped_citations:
-            partial_profile = {**result, "_profile_partial_invalid_response": True}
+            verified_profiles.append(result)
         retry_instruction = (
             "\nValidation feedback: At least one nonempty claim lacked a verbatim "
             "quote from the supplied source passage or was attributed to the wrong "
             "speaker. Remove unsupported claims or provide an exact quote clearly "
             "attributed to this character."
         )
-    if partial_profile is not None:
-        return partial_profile
+    if verified_profiles:
+        ranked = list(reversed(verified_profiles))
+        merged_traits: dict[str, Any] = {}
+        for profile in ranked:
+            merged_traits = merge_trait_states(merged_traits, profile["traits"])
+        updates, citations = merge_grounded_profile_claims(ranked, merged_traits)
+        return {
+            **updates,
+            "_source_batch_key": packet["source_batch_key"],
+            "_profile_partial_invalid_response": not response_complete,
+            "evidence": {"profile_claims": citations},
+        }
     raise CharacterProfileFormatError("character_profile_invalid_or_unsupported_response")
 
 

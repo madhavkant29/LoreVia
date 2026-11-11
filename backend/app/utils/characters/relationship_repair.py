@@ -8,7 +8,10 @@ from collections.abc import Sequence
 from typing import Any
 
 from app.utils.characters.profile_evidence import source_quote_span
-from app.utils.characters.relationship_evidence import relationship_participant_name_distance
+from app.utils.characters.relationship_evidence import (
+    relationship_participant_name_distance,
+    relationship_quote_anchors_participants,
+)
 from app.utils.characters.text import source_excerpt_ranges_around_names
 
 

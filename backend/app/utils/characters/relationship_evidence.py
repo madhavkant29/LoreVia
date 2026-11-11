@@ -44,8 +44,19 @@ def _participant_name_spans(text: str, name: object) -> list[tuple[int, int]]:
         return []
     variants = [" ".join(words)]
     title_words = {
-        "mr", "mrs", "ms", "miss", "mme", "madame", "monsieur",
-        "dr", "doctor", "sir", "lady", "the", "old",
+        "mr",
+        "mrs",
+        "ms",
+        "miss",
+        "mme",
+        "madame",
+        "monsieur",
+        "dr",
+        "doctor",
+        "sir",
+        "lady",
+        "the",
+        "old",
     }
     if len(words) > 1 and words[0].casefold() == "old":
         variants.append(words[-1])

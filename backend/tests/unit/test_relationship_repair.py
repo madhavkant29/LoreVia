@@ -151,7 +151,7 @@ async def test_relationship_ai_review_refuses_stale_source_plan_before_calls(mon
             return None
 
         async def get(self, *_args):
-            return SimpleNamespace(user_id=uuid.uuid4())
+            return SimpleNamespace(mode="author", user_id=uuid.uuid4())
 
     async def changed_plan(*_args):
         return {"active_generation_id": str(uuid.uuid4()), "evidence_plan_sha256": "new"}
@@ -211,7 +211,7 @@ async def test_relationship_ai_review_rechecks_source_after_provider_call(monkey
             return None
 
         async def get(self, *_args):
-            return SimpleNamespace(user_id=uuid.uuid4())
+            return SimpleNamespace(mode="author", user_id=uuid.uuid4())
 
     async def next_plan(*_args):
         return next(plans)
