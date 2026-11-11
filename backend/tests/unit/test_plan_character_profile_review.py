@@ -49,6 +49,75 @@ async def test_narrator_profile_apply_refuses_stale_plan_before_ai(monkeypatch):
     assert calls == 0
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("subject_mode", "review_mode"),
+    [("narrator", "confirmed_narrator"), ("named", "named_person")],
+)
+async def test_profile_review_does_not_repeat_ai_calls_for_completed_plan(
+    monkeypatch, subject_mode, review_mode
+):
+    book_id = uuid.uuid4()
+    character_id = uuid.uuid4()
+    generation_id = uuid.uuid4()
+    plan_hash = "reviewed-plan"
+    book = SimpleNamespace(mode="author", user_id=uuid.uuid4())
+    character = SimpleNamespace(
+        generation_id=generation_id,
+        analysis_metadata={
+            "character_profile_review": {
+                "plan_sha256": plan_hash,
+                "generation_id": str(generation_id),
+                "subject_mode": review_mode,
+                "proposals": [{"status": "accepted"}],
+            }
+        },
+    )
+
+    class Session:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def execute(self, _statement):
+            return None
+
+        async def get(self, model, _id):
+            return book if model is plan_character_profile_review.Book else character
+
+    async def fake_plan(*_args, **_kwargs):
+        return {
+            "active_generation_id": str(generation_id),
+            "plan_sha256": plan_hash,
+            "character_name": "Mara",
+            "budget": {"calls": 2},
+        }
+
+    async def unexpected_completion(**_kwargs):
+        raise AssertionError("A completed review must not spend AI tokens again")
+
+    monkeypatch.setattr(plan_character_profile_review, "AsyncSessionLocal", Session)
+    monkeypatch.setattr(plan_character_profile_review, "build_plan", fake_plan)
+    monkeypatch.setattr(
+        plan_character_profile_review, "complete_with_fallback", unexpected_completion
+    )
+
+    result = await plan_character_profile_review.apply_plan(
+        book_id,
+        character_id,
+        [2],
+        expected_generation_id=generation_id,
+        expected_plan_sha256=plan_hash,
+        subject_mode=subject_mode,
+    )
+
+    assert result["ai_calls"] == 0
+    assert result["source_checked_claims_for_review"] == 1
+    assert result["already_reviewed"] is True
+
+
 def test_named_profile_review_budget_uses_named_person_prompt():
     budget = plan_character_profile_review.review_budget(
         [{"prompt": "Mara lifted the gate."}], subject_mode="named"

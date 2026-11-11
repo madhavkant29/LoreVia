@@ -260,6 +260,30 @@ async def apply_plan(
         if book is None or book.mode != "author":
             raise ValueError("narrator_profile_author_book_required")
         user_id = book.user_id
+        character = await db.get(Character, character_id)
+        if character is None or character.generation_id != expected_generation_id:
+            raise ValueError("narrator_profile_generation_changed")
+        metadata = (
+            character.analysis_metadata if isinstance(character.analysis_metadata, dict) else {}
+        )
+        review = metadata.get("character_profile_review")
+        if isinstance(review, dict) and (
+            review.get("plan_sha256") == expected_plan_sha256
+            and review.get("generation_id") == str(expected_generation_id)
+            and review.get("subject_mode")
+            == ("confirmed_narrator" if subject_mode == "narrator" else "named_person")
+        ):
+            proposals = review.get("proposals")
+            return {
+                "active_generation_id": str(expected_generation_id),
+                "character_name": plan["character_name"],
+                "ai_calls": 0,
+                "source_checked_claims_for_review": len(proposals)
+                if isinstance(proposals, list)
+                else 0,
+                "already_reviewed": True,
+                "budget": plan["budget"],
+            }
     proposals: list[dict[str, Any]] = []
     for row in plan["_rows"]:
         raw = await complete_with_fallback(
