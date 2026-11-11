@@ -162,7 +162,12 @@ async def update_book_character_for_user(
         except ValueError:
             raise HTTPException(400, "Character visibility settings are invalid.")
     if body.accept_narrator_claim_index is not None:
-        review = (character.analysis_metadata or {}).get("narrator_profile_review") or {}
+        metadata = character.analysis_metadata or {}
+        review = (
+            metadata.get("character_profile_review")
+            or metadata.get("narrator_profile_review")
+            or {}
+        )
         proposals = review.get("proposals") or []
         index = body.accept_narrator_claim_index
         if not isinstance(proposals, list) or index >= len(proposals):

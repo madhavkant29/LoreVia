@@ -98,6 +98,11 @@ export interface Character {
       generation_id: string
       proposals: NarratorProfileProposal[]
     } | null
+    character_profile_review?: {
+      subject_mode: "named_person" | "confirmed_narrator"
+      generation_id: string
+      proposals: NarratorProfileProposal[]
+    } | null
   }
   visibility_state?: "visible" | "quarantined" | "noise" | null
   approval_state?: "approved" | "pending_review" | "rejected" | "protected" | null

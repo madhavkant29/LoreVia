@@ -55,6 +55,35 @@ def test_narrator_profile_proposals_reject_malformed_output():
     )
 
 
+def test_named_profile_review_keeps_only_claims_naming_the_subject():
+    passage = "Mara lifted the gate. I wanted to leave. Lina dropped the rope."
+    response = json.dumps(
+        {
+            "profile": {
+                "personality_tags": ["determined", "lonely", "careless"],
+                "claim_evidence": {
+                    "personality_tags": {
+                        "determined": "Mara lifted the gate.",
+                        "lonely": "I wanted to leave.",
+                        "careless": "Lina dropped the rope.",
+                    }
+                },
+            }
+        }
+    )
+    proposals = narrator_profile_proposals(
+        response,
+        character_name="Mara",
+        chapter_number=1,
+        window_start=0,
+        source_passage=passage,
+        is_narrator=False,
+    )
+    assert [(item["field"], item["value"]) for item in proposals] == [
+        ("personality_tags", "determined")
+    ]
+
+
 def test_dedupe_narrator_profile_proposals_preserves_first_quote():
     rows = [
         {"field": "motivations", "value": "Go home", "quote": "I went home."},
@@ -133,3 +162,41 @@ def test_accept_narrator_profile_proposal_rejects_stale_identity_and_conflicting
     character.generation_id = uuid.uuid4()
     with pytest.raises(ValueError, match="unavailable"):
         accept_narrator_profile_proposal(character, 0)
+
+
+def test_accept_named_character_profile_proposal_preserves_source_claim():
+    generation = uuid.uuid4()
+    character = Character(
+        name="Mara",
+        book_id=uuid.uuid4(),
+        generation_id=generation,
+        first_chapter=1,
+        personality_tags=[],
+        analysis_metadata={
+            "character_profile_review": {
+                "generation_id": str(generation),
+                "subject_mode": "named_person",
+                "proposals": [
+                    {
+                        "field": "personality_tags",
+                        "value": "careful",
+                        "quote": "Mara checked the lock twice.",
+                        "chapter_number": 1,
+                        "source_start": 5,
+                        "source_end": 33,
+                    }
+                ],
+            }
+        },
+    )
+
+    accept_narrator_profile_proposal(character, 0)
+
+    assert character.personality_tags == ["careful"]
+    assert character.analysis_metadata["profile_claims"][0]["quote"] == (
+        "Mara checked the lock twice."
+    )
+    assert (
+        character.analysis_metadata["character_profile_review"]["proposals"][0]["status"]
+        == "accepted"
+    )

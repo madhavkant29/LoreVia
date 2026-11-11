@@ -601,4 +601,12 @@ def build_character_analysis_payload(char: Character) -> dict[str, Any]:
             if isinstance(metadata.get("narrator_profile_review"), dict)
             else None
         ),
+        "character_profile_review": (
+            {
+                key: metadata["character_profile_review"].get(key)
+                for key in ("subject_mode", "generation_id", "proposals")
+            }
+            if isinstance(metadata.get("character_profile_review"), dict)
+            else None
+        ),
     }

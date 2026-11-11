@@ -41,7 +41,9 @@ export function CharacterOverviewIdentityCards({
   const aliasGroups = groupAliasRecordsByKind(character)
   const traitEntries = visibleTraitEntries(character)
   const profileClaims = currentProfileClaims(character)
-  const narratorProposals = character.analysis_metadata?.narrator_profile_review?.proposals ?? []
+  const profileReview = character.analysis_metadata?.character_profile_review
+  const narratorProposals = profileReview?.proposals ?? character.analysis_metadata?.narrator_profile_review?.proposals ?? []
+  const confirmedNarrator = profileReview?.subject_mode === "confirmed_narrator" || character.analysis_metadata?.narrator_profile_review?.author_confirmed_identity === true
 
   return (
     <>
@@ -180,9 +182,9 @@ export function CharacterOverviewIdentityCards({
       </SurfaceCard>
 
       {narratorProposals.some((proposal) => proposal.status !== "accepted") && (
-        <SurfaceCard title="Narrator profile suggestions" isDark={isDark}>
+        <SurfaceCard title={confirmedNarrator ? "Narrator profile suggestions" : "Character profile suggestions"} isDark={isDark}>
           <p className={`mb-3 text-xs ${isDark ? "text-slate-400" : "text-stone-600"}`}>
-            First-person identity was confirmed by the author. These AI interpretations have source quotes; review each before adding it to the profile.
+            {confirmedNarrator ? "First-person identity was confirmed by the author. " : ""}These AI interpretations have source quotes; review each before adding it to the profile.
           </p>
           <div className="space-y-3">
             {narratorProposals.map((proposal, index) => proposal.status === "accepted" ? null : (

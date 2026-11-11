@@ -108,6 +108,35 @@ test("author can accept one source-checked narrator profile suggestion", async (
   await expect(page.getByRole("heading", { name: "Narrator profile suggestions" })).toHaveCount(0)
 })
 
+test("author can review a named character's source-checked profile suggestion", async ({ page }) => {
+  await page.goto(route)
+  const characters = await page.evaluate(async () =>
+    (await fetch("/api/v1/books/book-1/characters")).json(),
+  ) as Character[]
+  const gregor = characters.find((item) => item.name === "Gregor")!
+  const proposal = { field: "personality_tags", value: "careful", quote: "Gregor checked the lock twice.", chapter_number: 2, source_start: 10, source_end: 40 }
+  gregor.analysis_metadata = {
+    ...gregor.analysis_metadata,
+    character_profile_review: { subject_mode: "named_person", generation_id: "generation-1", proposals: [proposal] },
+  }
+  await page.route("**/api/v1/books/book-1/characters", (request) => request.fulfill({ json: characters }))
+  await page.route(`**/api/v1/books/book-1/characters/${gregor.id}`, (request) => {
+    expect(request.request().postDataJSON()).toMatchObject({ accept_narrator_claim_index: 0 })
+    gregor.personality_tags = [...gregor.personality_tags, proposal.value]
+    gregor.analysis_metadata = {
+      ...gregor.analysis_metadata,
+      profile_claims: [{ field: proposal.field, value: proposal.value, quote: proposal.quote, chapter_number: 2 }],
+      character_profile_review: { subject_mode: "named_person", generation_id: "generation-1", proposals: [{ ...proposal, status: "accepted" }] },
+    }
+    return request.fulfill({ json: gregor })
+  })
+  await page.reload()
+  await expect(page.getByRole("heading", { name: "Character profile suggestions" })).toBeVisible()
+  await page.getByRole("button", { name: "Accept claim" }).click()
+  await expect(page.getByText("careful").first()).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Character profile suggestions" })).toHaveCount(0)
+})
+
 test("character mention counts distinguish verified names from legacy estimates", async ({ page }) => {
   await page.goto(route)
   await expect(page.getByRole("heading", { name: "Gregor", exact: true })).toBeVisible()
