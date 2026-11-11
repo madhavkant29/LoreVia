@@ -116,7 +116,15 @@ LoreVia2/
 - If tests need app settings, seed safe local dummy env vars instead of changing production config.
 - For DB-backed tests, confirm the local test database and required extensions are available before running the suite.
 
-### 7a. Story Intelligence Evaluation Corpus
+### 7a. Strict PR Merge Verification
+
+- Before recommending a merge to `main`, record the exact PR head and current target commit. Verify GitHub checks on that proposed merge when Actions is available. If either commit changes, repeat the checks on the new candidate.
+- When Actions is unavailable because of billing, quota, or runner access, run the **PR gates locally in clean Linux environments** against that exact source revision. Match `.github/workflows/ci-cd.yml`: Python and Node versions, PostgreSQL/pgvector and Redis, fresh dependencies, disposable database migrations, Ruff and repository checks, the full backend suite with CI flags and coverage, frontend unit/type/lint/build, every frontend E2E shard, and the applicable Trivy configuration and image scans. Confirm the test processes use current source files rather than a stale container image or cache. Record each command, environment difference, result, and any gate that could not run.
+- A local Windows run, focused tests, or a green result from an older commit does not satisfy this fallback. If a required gate fails or cannot be reproduced, mark merge readiness **unverified** and fix the cause before recommending a merge. If every applicable local gate passes, a merge recommendation may state **local CI-equivalent checks passed; GitHub Actions did not run**, and must disclose remaining environment differences. Never promise that an unknown runner will pass.
+- Check required external statuses separately when they are available. A skipped or never-started GitHub job caused by quota is not a test pass; use the completed local parity results as the stated evidence instead. Do not repeatedly rerun Actions while the account blocker remains.
+- Keep the full test gates on PRs. After an approved merge, run only the release, image, and deployment checks configured for `main`; do not repeat the full backend/frontend/E2E suites on `main` solely to compensate for missing PR checks.
+
+### 7b. Story Intelligence Evaluation Corpus
 
 - `backend/evals/story_intelligence/v1/cases.json` is the versioned, synthetic gold-standard corpus for character and continuity evaluation. It is test/evaluation data, not production application data.
 - Keep the corpus out of production request paths. Production code must never load it to answer user requests, authorize users, calculate plan limits, or provide runtime defaults.
