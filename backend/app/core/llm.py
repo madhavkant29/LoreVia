@@ -232,6 +232,17 @@ async def complete_with_fallback(
                 billing_scope=usage_billing_scope,
                 **request_kwargs,
             )
+            if usage_feature == "character_relationship_evidence_repair":
+                usage = getattr(response, "usage", None)
+                logger.info(
+                    "relationship_evidence_completion finish_reason=%s prompt_tokens=%s completion_tokens=%s total_tokens=%s",
+                    getattr(response.choices[0], "finish_reason", None)
+                    if response.choices
+                    else None,
+                    getattr(usage, "prompt_tokens", None),
+                    getattr(usage, "completion_tokens", None),
+                    getattr(usage, "total_tokens", None),
+                )
             if require_complete_output:
                 require_complete_llm_response(response)
             content = response.choices[0].message.content or ""
