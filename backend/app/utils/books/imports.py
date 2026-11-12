@@ -709,6 +709,18 @@ def build_import_preview(
         for section in sections
         if section.type == "toc"
     )
+    oversized_part_openings = [
+        section
+        for section in sections
+        if section.type == "part_opening" and section.word_count > 5000
+    ]
+    preview.warnings.extend(
+        ImportWarning(
+            message="This Part contains over 5,000 words without detected chapter boundaries. Review the chapter split before importing.",
+            section_id=section.id,
+        )
+        for section in oversized_part_openings
+    )
     for anomaly in (parsed["parser_diagnostics"] or {}).get("anomalies", []):
         preview.warnings.append(ImportWarning(message=f"Source extraction needs review: {anomaly}"))
     if any(section.type == "unknown" for section in sections):
@@ -720,4 +732,6 @@ def build_import_preview(
     preview.confidence = round(
         1 - min(0.75, 0.25 * sum(section.type == "unknown" for section in sections)), 2
     )
+    if oversized_part_openings:
+        preview.confidence = min(preview.confidence, 0.5)
     return preview.model_dump()
