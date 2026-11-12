@@ -310,18 +310,20 @@ describe("VoiceConsistencyPage", () => {
     expect(startVoiceChapterReviewMock).not.toHaveBeenCalled()
   })
 
-  it("explains the voice comparison when the info button is clicked", async () => {
+  it("expands the voice explanation in the page without covering review controls", async () => {
     renderPage()
     await waitForContent("The Ember Gate")
-    const info = container?.querySelector<HTMLButtonElement>('button[aria-label="How Voice Consistency works"]')
-    expect(info?.getAttribute("aria-expanded")).toBe("false")
-    await act(async () => { info?.click() })
-    expect(info?.getAttribute("aria-expanded")).toBe("true")
-    expect(container?.querySelector('[role="tooltip"]')?.textContent).toContain("review runs in the background")
-    expect(container?.querySelector('[role="tooltip"]')?.textContent).toContain("entire saved chapter")
-    expect(container?.querySelector('[role="tooltip"]')?.textContent).toContain("Passage Auto-detect checks up to five known characters")
-    await act(async () => { container?.querySelector<HTMLButtonElement>('button[aria-label="Close help"]')?.click() })
-    expect(info?.getAttribute("aria-expanded")).toBe("false")
+    const help = container?.querySelector<HTMLDetailsElement>("[data-voice-help]")
+    const summary = help?.querySelector("summary")
+    expect(help?.open).toBe(false)
+    await act(async () => { summary?.click() })
+    expect(help?.open).toBe(true)
+    expect(help?.textContent).toContain("review runs in the background")
+    expect(help?.textContent).toContain("entire saved chapter")
+    expect(help?.textContent).toContain("Passage Auto-detect checks up to five known characters")
+    expect(container?.querySelector('[role="tooltip"]')).toBeNull()
+    await act(async () => { summary?.click() })
+    expect(help?.open).toBe(false)
   })
 
   it("labels alternate-character similarity as evidence rather than identity proof", async () => {
