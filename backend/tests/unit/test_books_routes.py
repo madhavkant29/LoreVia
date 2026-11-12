@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import io
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -3029,6 +3030,11 @@ async def test_character_routes_cover_crud_and_exports(monkeypatch):
     assert noted_update["analysis_metadata"]["review_note"] == "Needs manual check"
 
     character.generation_id = uuid.uuid4()
+    reviewed_source = "I looked for shelter."
+    current_source = reviewed_source
+    patch_route_dependency(
+        monkeypatch, books, "download_book", lambda _key: current_source.encode("utf-8")
+    )
     proposal = {
         "field": "motivations",
         "value": "find shelter",
@@ -3041,6 +3047,7 @@ async def test_character_routes_cover_crud_and_exports(monkeypatch):
         "author_confirmed_identity": True,
         "generation_id": str(character.generation_id),
         "chapter_s3_keys": {"2": "chapter-2-key"},
+        "chapter_source_hashes": {"2": hashlib.sha256(reviewed_source.encode("utf-8")).hexdigest()},
         "proposals": [proposal],
     }
     stale_db = _FakeDB(
@@ -3057,6 +3064,20 @@ async def test_character_routes_cover_crud_and_exports(monkeypatch):
     assert stale_error.value.status_code == 409
     assert stale_db.commits == 0
 
+    current_source = "I stayed near the harbor."
+    same_key_db = _FakeDB(get_values=[character], execute_values=[_Result(scalar="chapter-2-key")])
+    with pytest.raises(HTTPException) as changed_source_error:
+        await books.update_book_character(
+            book.id,
+            character.id,
+            CharacterUpdateBody(accept_narrator_claim_index=0),
+            db=same_key_db,
+            current_user=user,
+        )
+    assert changed_source_error.value.status_code == 409
+    assert same_key_db.commits == 0
+
+    current_source = reviewed_source
     accepted_db = _FakeDB(
         get_values=[character],
         execute_values=[

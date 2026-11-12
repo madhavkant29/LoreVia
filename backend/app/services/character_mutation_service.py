@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import hashlib
 import uuid
 from typing import Any, cast
 
@@ -7,6 +9,7 @@ from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.storage import download_book
 from app.models.book import Chapter
 from app.models.character import Character, CharacterState, CharacterVoiceProfile
 from app.models.intelligence import CharacterRelationship
@@ -14,6 +17,7 @@ from app.schemas.books import CharacterCreateBody, CharacterUpdateBody
 from app.services.quality_metrics_service import record_quality_review
 from app.utils.billing_utils import require_author_access
 from app.utils.books.book_text import _clean_text
+from app.utils.books.manuscript import deserialize_manuscript_content
 from app.utils.books.notes import get_owned_book
 from app.utils.characters.duplicates import refresh_character_duplicate_suggestions
 from app.utils.characters.manual import (
@@ -183,6 +187,14 @@ async def update_book_character_for_user(
             )
         ).scalar_one_or_none()
         if not expected_key or current_key != expected_key:
+            raise HTTPException(409, "Source chapter changed. Refresh the profile review.")
+        expected_hash = (review.get("chapter_source_hashes") or {}).get(str(chapter_number))
+        if not expected_hash:
+            raise HTTPException(409, "Source chapter changed. Refresh the profile review.")
+        raw = await asyncio.to_thread(download_book, current_key)
+        current_source = str(deserialize_manuscript_content(raw).get("text") or "")
+        current_hash = hashlib.sha256(current_source.encode("utf-8")).hexdigest()
+        if current_hash != expected_hash:
             raise HTTPException(409, "Source chapter changed. Refresh the profile review.")
         try:
             accept_narrator_profile_proposal(character, index)

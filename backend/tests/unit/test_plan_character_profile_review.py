@@ -1,3 +1,4 @@
+import hashlib
 import uuid
 from types import SimpleNamespace
 
@@ -240,4 +241,5 @@ async def test_named_plan_requires_recorded_incomplete_chapter_before_source_dow
     assert plan["subject_mode"] == "named"
     assert plan["source_windows"] == 1
     assert plan["budget"]["calls"] == 1
+    assert plan["_source_hashes"][2] == hashlib.sha256(b"Mara opened the gate.").hexdigest()
     assert downloads == ["chapter-2"]

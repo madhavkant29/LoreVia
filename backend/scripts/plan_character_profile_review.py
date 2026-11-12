@@ -236,6 +236,7 @@ async def build_plan(
         "_rows": rows,
         "_aliases": aliases,
         "_source_keys": keys,
+        "_source_hashes": source_hashes,
     }
 
 
@@ -343,6 +344,10 @@ async def apply_plan(
                 else "named_person",
                 "chapter_s3_keys": {
                     str(number): key for number, key in plan["_source_keys"].items()
+                },
+                "chapter_source_hashes": {
+                    str(number): source_hash
+                    for number, source_hash in plan["_source_hashes"].items()
                 },
                 "proposals": proposals,
             }
