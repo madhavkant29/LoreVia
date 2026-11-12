@@ -1,6 +1,6 @@
-"""Read-only, source-neutral budget plan for one active generation's relationship review.
+"""Plan one active generation's relationship review; apply only with explicit flags.
 
-This command makes no provider calls or database changes. It never prints passages.
+The default plan makes no provider calls or database changes. It never prints passages.
 """
 
 from __future__ import annotations
@@ -30,14 +30,17 @@ from app.utils.characters.relationship_repair import (
     verified_relationship_evidence_proposal,
 )
 from app.utils.llm_pricing import calculate_llm_reservation_cost
+from app.utils.llm_usage_utils import LLMIncompleteResponseError
 from scripts.review_unanchored_relationships import apply_plan, build_plan
 
 MAX_CALLS = 12
 MAX_PROMPT_TOKENS_PER_CALL = 2_200
-MAX_OUTPUT_TOKENS_PER_CALL = 300
-MAX_TOTAL_TOKENS = 30_000
+MAX_OUTPUT_TOKENS_PER_CALL = 1_024
+RETRY_OUTPUT_TOKENS = 1_536
+MAX_RETRIES_PER_PLAN = 1
+MAX_TOTAL_TOKENS = 36_000
 MAX_COST_USD = Decimal("0.02")
-APPLY_TOKEN = "REVIEW_RELATIONSHIP_EVIDENCE_12_CALLS_0_02_USD"
+APPLY_TOKEN = "REVIEW_RELATIONSHIP_EVIDENCE_13_CALLS_0_02_USD"
 
 REVIEW_SYSTEM = (
     "Review only the named pair in the supplied manuscript passages. "
@@ -73,7 +76,11 @@ def review_budget(rows: list[dict[str, Any]]) -> dict[str, Any]:
         if estimated > MAX_PROMPT_TOKENS_PER_CALL:
             raise ValueError("relationship_review_prompt_limit_exceeded")
         prompt_tokens += estimated
+    retry_prompt_tokens = MAX_PROMPT_TOKENS_PER_CALL if rows else 0
     output_tokens = len(rows) * MAX_OUTPUT_TOKENS_PER_CALL
+    retry_output_tokens = RETRY_OUTPUT_TOKENS if rows else 0
+    prompt_tokens += retry_prompt_tokens
+    output_tokens += retry_output_tokens
     if prompt_tokens + output_tokens > MAX_TOTAL_TOKENS:
         raise ValueError("relationship_review_token_limit_exceeded")
     _input_cost, _output_cost, cost, _version = calculate_llm_reservation_cost(
@@ -85,6 +92,8 @@ def review_budget(rows: list[dict[str, Any]]) -> dict[str, Any]:
         raise ValueError("relationship_review_cost_limit_exceeded")
     return {
         "calls": len(rows),
+        "max_retry_calls": min(MAX_RETRIES_PER_PLAN, len(rows)),
+        "max_provider_calls": len(rows) + min(MAX_RETRIES_PER_PLAN, len(rows)),
         "max_prompt_tokens": prompt_tokens,
         "max_output_tokens": output_tokens,
         "max_total_tokens": prompt_tokens + output_tokens,
@@ -108,6 +117,16 @@ def evidence_plan_hash(
                     for number, source in sources.items()
                 },
                 "eligible": [(row["relationship_id"], row["prompt"]) for row in eligible],
+                "review_policy": {
+                    "model": settings.OPENAI_EXTRACT_MODEL,
+                    "max_initial_calls": MAX_CALLS,
+                    "max_prompt_tokens_per_call": MAX_PROMPT_TOKENS_PER_CALL,
+                    "first_output_tokens": MAX_OUTPUT_TOKENS_PER_CALL,
+                    "retry_output_tokens": RETRY_OUTPUT_TOKENS,
+                    "max_retries_per_plan": MAX_RETRIES_PER_PLAN,
+                    "max_total_tokens": MAX_TOTAL_TOKENS,
+                    "max_cost_usd": str(MAX_COST_USD),
+                },
             },
             sort_keys=True,
             ensure_ascii=False,
@@ -215,21 +234,29 @@ async def apply_evidence_review_plan(
         raise ValueError("relationship_review_plan_changed")
 
     proposals: dict[str, dict[str, Any]] = {}
+    retries_used = 0
     for row in plan["_eligible"]:
-        raw = await complete_with_fallback(
-            system=REVIEW_SYSTEM,
-            user=row["prompt"],
-            openai_model=settings.OPENAI_EXTRACT_MODEL,
-            temperature=0.0,
-            max_tokens=MAX_OUTPUT_TOKENS_PER_CALL,
-            response_format={"type": "json_object"},
-            require_complete_output=True,
-            retry_transient_openai=False,
-            usage_feature="character_relationship_evidence_repair",
-            usage_user_id=user_id,
-            usage_book_id=book_id,
-            usage_db=None,
-        )
+        for attempt, max_tokens in enumerate((MAX_OUTPUT_TOKENS_PER_CALL, RETRY_OUTPUT_TOKENS)):
+            try:
+                raw = await complete_with_fallback(
+                    system=REVIEW_SYSTEM,
+                    user=row["prompt"],
+                    openai_model=settings.OPENAI_EXTRACT_MODEL,
+                    temperature=0.0,
+                    max_tokens=max_tokens,
+                    response_format={"type": "json_object"},
+                    require_complete_output=True,
+                    retry_transient_openai=False,
+                    usage_feature="character_relationship_evidence_repair",
+                    usage_user_id=user_id,
+                    usage_book_id=book_id,
+                    usage_db=None,
+                )
+                break
+            except LLMIncompleteResponseError as exc:
+                if attempt or exc.finish_reason != "length" or retries_used >= MAX_RETRIES_PER_PLAN:
+                    raise
+                retries_used += 1
         proposal = verified_relationship_evidence_proposal(
             raw,
             windows=row["windows"],
@@ -287,7 +314,7 @@ async def apply_evidence_review_plan(
     return {
         "active_generation_id": str(expected_generation_id),
         "relationships_queued_for_review": applied["review_count"],
-        "ai_calls": plan["budget"]["calls"],
+        "ai_calls": plan["budget"]["calls"] + retries_used,
         "source_verified_proposals": len(proposals),
         "participant_anchored_proposals": sum(
             bool(item["participants_anchored"]) for item in proposals.values()

@@ -34,6 +34,11 @@ def test_structured_response_requires_an_explicit_provider_stop_reason():
     ):
         with pytest.raises(LLMIncompleteResponseError, match="llm_response_incomplete"):
             require_complete_llm_response(response)
+    with pytest.raises(LLMIncompleteResponseError) as exc_info:
+        require_complete_llm_response(
+            SimpleNamespace(choices=[SimpleNamespace(finish_reason="length")])
+        )
+    assert exc_info.value.finish_reason == "length"
 
 
 @pytest.fixture(autouse=True)

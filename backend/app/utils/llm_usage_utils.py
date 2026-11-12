@@ -38,12 +38,17 @@ SYSTEM_BILLING_SCOPE = "system"
 class LLMIncompleteResponseError(ValueError):
     """The provider stopped generation before completing the requested answer."""
 
+    def __init__(self, message: str, *, finish_reason: str | None = None) -> None:
+        super().__init__(message)
+        self.finish_reason = finish_reason
+
 
 def require_complete_llm_response(response: Any) -> None:
     """Reject missing or non-final chat choices before parsing structured output."""
     choices = getattr(response, "choices", None)
-    if not choices or getattr(choices[0], "finish_reason", None) != "stop":
-        raise LLMIncompleteResponseError("llm_response_incomplete")
+    finish_reason = getattr(choices[0], "finish_reason", None) if choices else None
+    if finish_reason != "stop":
+        raise LLMIncompleteResponseError("llm_response_incomplete", finish_reason=finish_reason)
 
 
 PROCESSING_FEATURE_PREFIXES = (
