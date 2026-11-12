@@ -77,6 +77,17 @@ def test_first_person_profile_quote_requires_named_speaker_or_subject():
     assert action_span is not None
     assert profile_quote_attributed_to_character(action, action_span, character_name="Mara")
 
+    for shared_or_addressed in (
+        "Mara and I wanted to leave the city.",
+        "Mara, I wanted to leave the city.",
+        "Mara and we walked toward the city.",
+    ):
+        span = source_quote_span(shared_or_addressed, shared_or_addressed)
+        assert span is not None
+        assert not profile_quote_attributed_to_character(
+            shared_or_addressed, span, character_name="Mara"
+        )
+
     speech = 'Mara said, "I will protect the gate."'
     speech_span = source_quote_span(speech, "I will protect the gate")
     assert speech_span is not None
@@ -86,6 +97,20 @@ def test_first_person_profile_quote_requires_named_speaker_or_subject():
     listener_span = source_quote_span(listener, "I will protect the gate")
     assert listener_span is not None
     assert not profile_quote_attributed_to_character(listener, listener_span, character_name="Mara")
+
+
+def test_confirmed_narrator_profile_rejects_another_speakers_first_person_quote():
+    source = 'Lina said, "I wanted to leave the city." I stayed until dawn.'
+    wrong = source_quote_span(source, "I wanted to leave the city.")
+    own = source_quote_span(source, "I stayed until dawn.")
+
+    assert wrong is not None and own is not None
+    assert not profile_quote_attributed_to_character(
+        source, wrong, character_name="Arun Vale", is_narrator=True
+    )
+    assert profile_quote_attributed_to_character(
+        source, own, character_name="Arun Vale", is_narrator=True
+    )
 
 
 def test_ground_character_profile_claims_omits_narrator_claims_for_another_person():

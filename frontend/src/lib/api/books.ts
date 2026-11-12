@@ -797,6 +797,7 @@ export const booksApi = {
       graphVisibility?: "include" | "exclude" | null
       protectedFromRepair?: boolean | null
       reviewNote?: string | null
+      acceptNarratorClaimIndex?: number
     }
   ) => apiClient.put<Character>(bookPath(bookId, `/characters/${characterId}`), {
     name: payload.name,
@@ -814,6 +815,7 @@ export const booksApi = {
     graph_visibility: payload.graphVisibility,
     protected_from_repair: payload.protectedFromRepair,
     review_note: payload.reviewNote,
+    accept_narrator_claim_index: payload.acceptNarratorClaimIndex,
   }).then(r => {
     invalidateBookCache(bookId)
     invalidateReaderCache(bookId)

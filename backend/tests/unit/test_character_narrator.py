@@ -3,6 +3,8 @@ from app.utils.characters.narrator import (
     detect_explicit_first_person_narrator,
     explicit_first_person_narrators,
     first_person_addressed_name,
+    first_person_narration_span,
+    first_person_profile_windows,
     first_person_self_identification,
 )
 
@@ -191,3 +193,50 @@ def test_contextual_narrators_keep_direct_address_separate_from_explicit_identit
         )
         == characters
     )
+
+
+def test_first_person_profile_windows_sample_narration_across_styles():
+    source = (
+        '"I am leaving," Mara said. '
+        + "Quiet road. " * 90
+        + "I wanted to return home. "
+        + "Crowded market. " * 90
+        + "My hands shook when I saw the gate. "
+        + "Empty harbor. " * 90
+        + "We had no place to go. "
+        + "Dark station. " * 90
+    )
+    windows = first_person_profile_windows(source, max_chars=180, max_windows=4)
+
+    assert 1 <= len(windows) <= 4
+    assert all(source[start:end] == text for start, end, text in windows)
+    assert any("I wanted" in text for _, _, text in windows)
+    assert not any(text == '"I am leaving," Mara said.' for _, _, text in windows)
+
+
+def test_first_person_profile_windows_skip_other_speakers_and_invalid_limits():
+    import pytest
+
+    assert first_person_profile_windows('Mara said, "I wanted to leave."') == []
+    assert first_person_profile_windows("— I wanted to leave.\nMara watched him go.") == []
+    assert first_person_profile_windows("") == []
+    with pytest.raises(ValueError, match="invalid_narrator_profile_window_limit"):
+        first_person_profile_windows("I walked away.", max_windows=0)
+
+
+def test_first_person_narration_span_rejects_other_speakers_but_keeps_narrator_speech():
+    other = 'Mara said, "I wanted the gate." I listened.'
+    narrator = 'I replied, "I wanted the gate." Mara listened.'
+    phrase = "I wanted the gate."
+
+    assert not first_person_narration_span(
+        other, (other.index(phrase), other.index(phrase) + len(phrase))
+    )
+    assert first_person_narration_span(
+        narrator, (narrator.index(phrase), narrator.index(phrase) + len(phrase))
+    )
+    assert first_person_narration_span(other, (other.index("I listened"), len(other)))
+    assert not first_person_narration_span(other, (-1, 2))
+    dash_dialogue = "— I wanted to leave.\nI stayed until dawn."
+    assert not first_person_narration_span(dash_dialogue, (2, 20))
+    assert first_person_narration_span(dash_dialogue, (21, len(dash_dialogue)))

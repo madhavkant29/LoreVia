@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import io
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -3028,6 +3029,83 @@ async def test_character_routes_cover_crud_and_exports(monkeypatch):
     )
     assert noted_update["analysis_metadata"]["review_note"] == "Needs manual check"
 
+    character.generation_id = uuid.uuid4()
+    reviewed_source = "I looked for shelter."
+    current_source = reviewed_source
+    patch_route_dependency(
+        monkeypatch, books, "download_book", lambda _key: current_source.encode("utf-8")
+    )
+    proposal = {
+        "field": "motivations",
+        "value": "find shelter",
+        "quote": "I looked for shelter.",
+        "chapter_number": 2,
+        "source_start": 10,
+        "source_end": 31,
+    }
+    character.analysis_metadata["narrator_profile_review"] = {
+        "author_confirmed_identity": True,
+        "generation_id": str(character.generation_id),
+        "chapter_s3_keys": {"2": "chapter-2-key"},
+        "chapter_source_hashes": {"2": hashlib.sha256(reviewed_source.encode("utf-8")).hexdigest()},
+        "proposals": [proposal],
+    }
+    stale_db = _FakeDB(
+        get_values=[character], execute_values=[_Result(scalar="changed-chapter-key")]
+    )
+    with pytest.raises(HTTPException) as stale_error:
+        await books.update_book_character(
+            book.id,
+            character.id,
+            CharacterUpdateBody(accept_narrator_claim_index=0),
+            db=stale_db,
+            current_user=user,
+        )
+    assert stale_error.value.status_code == 409
+    assert stale_db.commits == 0
+
+    current_source = "I stayed near the harbor."
+    same_key_db = _FakeDB(get_values=[character], execute_values=[_Result(scalar="chapter-2-key")])
+    with pytest.raises(HTTPException) as changed_source_error:
+        await books.update_book_character(
+            book.id,
+            character.id,
+            CharacterUpdateBody(accept_narrator_claim_index=0),
+            db=same_key_db,
+            current_user=user,
+        )
+    assert changed_source_error.value.status_code == 409
+    assert same_key_db.commits == 0
+
+    current_source = reviewed_source
+    accepted_db = _FakeDB(
+        get_values=[character],
+        execute_values=[
+            _Result(scalar="chapter-2-key"),
+            _Result(scalars=[]),
+            _Result(scalars=[]),
+            _Result(scalars=[]),
+            _Result(scalar=None),
+        ],
+    )
+    await books.update_book_character(
+        book.id,
+        character.id,
+        CharacterUpdateBody(accept_narrator_claim_index=0),
+        db=accepted_db,
+        current_user=user,
+    )
+    assert accepted_db.commits == 1
+    assert "find shelter" in character.motivations
+    assert (
+        character.analysis_metadata["narrator_profile_review"]["proposals"][0]["status"]
+        == "accepted"
+    )
+    assert any(
+        claim.get("quote") == "I looked for shelter."
+        for claim in character.analysis_metadata.get("profile_claims", [])
+    )
+
     demote_candidate = SimpleNamespace(id=uuid.uuid4())
     monkeypatch.setattr(
         books, "demote_character_to_review_candidate", _async_value(demote_candidate)
@@ -3146,6 +3224,37 @@ async def test_character_routes_cover_crud_and_exports(monkeypatch):
     )
     assert accepted["rel_type"] == "family"
     assert accepted["to_chapter"] == 5
+
+    generated_candidate = SimpleNamespace(**relationship_candidate.__dict__)
+    generated_candidate.reason_codes = ["generated_relationship_requires_review"]
+    generated_candidate.evidence = {
+        "relationship": {
+            "to_chapter": 5,
+            "shared_labels": ["unverified_label"],
+            "label_evidence": {"quote": "An unrelated saved quote."},
+        }
+    }
+    generated_accepted = await books.accept_relationship_candidate(
+        book.id,
+        generated_candidate.id,
+        RelationshipCandidateAcceptBody(
+            character_a_id=character.id,
+            character_b_id=secondary.id,
+            rel_type="allies",
+            from_chapter=3,
+            label_evidence={"quote": "Grete and her father agreed."},
+        ),
+        db=_FakeDB(
+            get_values=[generated_candidate, character, secondary],
+            execute_values=[_Result(scalars=[]), _Result(scalars=[])],
+        ),
+        current_user=user,
+    )
+    assert generated_accepted["rel_type"] == "allies"
+    assert generated_accepted["to_chapter"] == 5
+    assert generated_accepted["description"] is None
+    assert generated_accepted["shared_labels"] == []
+    assert generated_accepted["label_evidence"]["quote"] == "Grete and her father agreed."
 
     resolved = await books.resolve_relationship_candidate(
         book.id,

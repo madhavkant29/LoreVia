@@ -35,43 +35,52 @@ def relationship_quote_anchors_participants(
     text = str(quote or "")
     if not text.strip():
         return False
+    return relationship_participant_name_distance(text, character_a, character_b) is not None
 
-    def spans(name: object) -> list[tuple[int, int]]:
-        words = str(name or "").split()
-        if not words:
-            return []
-        variants = [" ".join(words)]
-        title_words = {
-            "mr",
-            "mrs",
-            "ms",
-            "miss",
-            "mme",
-            "madame",
-            "monsieur",
-            "dr",
-            "doctor",
-            "sir",
-            "lady",
-            "the",
-            "old",
-        }
-        if len(words) > 1 and words[0].casefold() == "old":
-            variants.append(words[-1])
-        elif len(words) > 1 and words[0].casefold() not in title_words:
-            variants.append(words[0])
-        matches: list[tuple[int, int]] = []
-        for variant in variants:
-            joined = r"\s+".join(re.escape(part) for part in variant.split())
-            pattern = rf"(?<!\w){joined}(?!\w)"
-            matches.extend(
-                (match.start(), match.end())
-                for match in re.finditer(pattern, text, flags=re.IGNORECASE)
-            )
-        return matches
 
-    return any(
-        left_end <= right_start or right_end <= left_start
-        for left_start, left_end in spans(character_a)
-        for right_start, right_end in spans(character_b)
-    )
+def _participant_name_spans(text: str, name: object) -> list[tuple[int, int]]:
+    words = str(name or "").split()
+    if not words:
+        return []
+    variants = [" ".join(words)]
+    title_words = {
+        "mr",
+        "mrs",
+        "ms",
+        "miss",
+        "mme",
+        "madame",
+        "monsieur",
+        "dr",
+        "doctor",
+        "sir",
+        "lady",
+        "the",
+        "old",
+    }
+    if len(words) > 1 and words[0].casefold() == "old":
+        variants.append(words[-1])
+    elif len(words) > 1 and words[0].casefold() not in title_words:
+        variants.append(words[0])
+    matches: list[tuple[int, int]] = []
+    for variant in variants:
+        joined = r"\s+".join(re.escape(part) for part in variant.split())
+        pattern = rf"(?<!\w){joined}(?!\w)"
+        matches.extend(
+            (match.start(), match.end())
+            for match in re.finditer(pattern, text, flags=re.IGNORECASE)
+        )
+    return matches
+
+
+def relationship_participant_name_distance(
+    text: str, character_a: object, character_b: object
+) -> int | None:
+    """Return the shortest gap between distinct named participants."""
+    gaps = [
+        max(right_start - left_end, left_start - right_end)
+        for left_start, left_end in _participant_name_spans(text, character_a)
+        for right_start, right_end in _participant_name_spans(text, character_b)
+        if left_end <= right_start or right_end <= left_start
+    ]
+    return min(gaps) if gaps else None

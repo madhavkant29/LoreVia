@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test"
 
-import { installMockApi } from "./support/mockApi"
+import { characterReviewPayload, installMockApi } from "./support/mockApi"
 
 const BOOK_ROUTE = "/sky-of-ash--book-1"
 const ADMIN_TEST_SESSION_SECRET = process.env.ADMIN_E2E_TEST_SECRET ?? "codex-e2e-admin-secret"
@@ -2338,6 +2338,31 @@ test("character review surfaces unresolved relationship candidates in duplicate 
 
   expect(consoleMessages.some((message) => /Maximum update depth exceeded/i.test(message))).toBe(false)
   expect(pageErrors.some((message) => /Maximum update depth exceeded/i.test(message))).toBe(false)
+})
+
+test("character review exposes every queued relationship with its evidence warning", async ({ page }) => {
+  await installMockApi(page)
+  const original = characterReviewPayload.relationship_candidates[0]
+  const relationshipCandidates = Array.from({ length: 17 }, (_, index) => ({
+    ...original,
+    id: `rel-candidate-${index + 1}`,
+    raw_character_a: `Review person ${index + 1}`,
+    reason_codes: ["relationship_source_quote_missing", "generated_relationship_requires_review"],
+  }))
+  await page.route("**/api/v1/books/book-1/character-review?**", (route) => route.fulfill({
+    json: {
+      ...characterReviewPayload,
+      relationship_candidates: relationshipCandidates,
+      counts: { ...characterReviewPayload.counts, pending_relationship_candidates: relationshipCandidates.length },
+    },
+  }))
+
+  await page.goto(`${BOOK_ROUTE}/characters`)
+  await page.getByRole("button", { name: "Open menu" }).first().click()
+  await page.getByRole("button", { name: "Review duplicate suggestions" }).click()
+  await expect(page.getByText("Review person 17 <-> Gregor's father")).toBeVisible()
+  await expect(page.getByText("No source quote was saved.").first()).toBeVisible()
+  await expect(page.getByRole("button", { name: "Confirm relationship" })).toHaveCount(17)
 })
 
 test("character bible follows the persisted dark theme", async ({ page }) => {

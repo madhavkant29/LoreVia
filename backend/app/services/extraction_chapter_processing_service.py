@@ -306,6 +306,7 @@ async def _process_chapter_in_generation(
                 chapter_number,
             )
             return False
+        prior_character_ids = {char.id for char in existing_characters}
         character_resolution = await resolve_chapter_character_entities(
             db,
             book=book,
@@ -344,6 +345,9 @@ async def _process_chapter_in_generation(
             ch_data=ch_data,
             chapter_number=chapter_number,
             existing_characters=existing_characters,
+            new_character_ids={
+                char.id for char in existing_characters if char.id not in prior_character_ids
+            },
             llm_extraction=llm_extraction,
             llm_started=llm_started,
             pending_relationships=pending_relationships,

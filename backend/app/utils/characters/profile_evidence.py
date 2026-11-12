@@ -6,6 +6,8 @@ import re
 from collections.abc import Mapping, Sequence
 from typing import Any
 
+from app.utils.characters.narrator import first_person_narration_span
+
 PROFILE_SCALAR_FIELDS = (
     "goal",
     "lie_they_believe",
@@ -17,6 +19,7 @@ PROFILE_SCALAR_FIELDS = (
 )
 PROFILE_LIST_FIELDS = ("personality_tags", "motivations", "fears")
 FIRST_PERSON_RE = re.compile(r"\b(?:I|me|my|mine|we|us|our|ours)\b", re.I)
+FIRST_PERSON_SUBJECT_RE = re.compile(r"\b(?:I|we)\b", re.I)
 SPEECH_VERB_RE = r"(?:said|asked|answered|replied|told|cried|called|shouted|whispered)"
 POST_QUOTE_SPEECH_VERB_RE = r"(?:said|asked|answered|replied|cried|called|shouted|whispered)"
 
@@ -32,14 +35,18 @@ def profile_quote_attributed_to_character(
     """Hold first-person claims unless the target speaks or acts in the cited text."""
     quote = source_text[span[0] : span[1]]
     pronouns = list(FIRST_PERSON_RE.finditer(quote))
-    if not pronouns or is_narrator:
+    if not pronouns:
         return True
+    if is_narrator:
+        return first_person_narration_span(source_text, span)
     names = [name.strip() for name in [character_name, *aliases] if name.strip()]
     for name in names:
         pattern = rf"(?<!\w){re.escape(name)}(?!\w)"
         for match in re.finditer(pattern, quote, re.I):
             before_name = quote[: match.start()]
-            if not FIRST_PERSON_RE.search(before_name):
+            if not FIRST_PERSON_RE.search(before_name) and not FIRST_PERSON_SUBJECT_RE.search(
+                quote
+            ):
                 return True
         before = source_text[max(0, span[0] - 100) : span[0]]
         after = source_text[span[1] : span[1] + 100]

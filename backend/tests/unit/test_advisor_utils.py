@@ -40,7 +40,8 @@ def test_build_fallback_advisor_suggestions_returns_three_items_without_focus_th
 
     assert len(suggestions) == 3
     assert suggestions[0]["type"] == "manuscript_checkpoint"
-    assert suggestions[-1]["type"] == "unresolved_clue"
+    assert suggestions[-1]["type"] == "clue_review"
+    assert "no specific structural warning" in suggestions[-1]["description"]
 
 
 def test_build_fallback_advisor_suggestions_uses_focus_thread_when_available():

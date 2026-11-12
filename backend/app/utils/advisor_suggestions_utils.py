@@ -6,6 +6,7 @@ from collections.abc import Sequence
 from typing import Any
 
 from app.models.intelligence import CharacterRelationship, PlotThread, WorldElement
+from app.utils.characters.relationship_evidence import relationship_quote_anchors_participants
 
 
 def proactive_advisor_finding_id(finding: dict[str, Any]) -> str:
@@ -20,12 +21,11 @@ def proactive_advisor_finding_id(finding: dict[str, Any]) -> str:
     return f"proactive-{hashlib.sha256(identity.encode()).hexdigest()[:24]}"
 
 
-def advisor_clue_evidence(clues: object) -> list[str]:
-    """Keep the structured clue and payoff context from detailed summaries."""
+def _advisor_clue_items(clues: object) -> list[object]:
     if isinstance(clues, list):
-        values = clues
-    elif isinstance(clues, dict):
-        values = (
+        return clues
+    if isinstance(clues, dict):
+        return (
             [clues]
             if "clue" in clues
             else [
@@ -33,10 +33,25 @@ def advisor_clue_evidence(clues: object) -> list[str]:
                 for key, value in clues.items()
             ]
         )
-    else:
-        return []
+    return []
+
+
+def advisor_clue_review_labels(clues: object) -> list[str]:
+    """Use only the clue itself for heuristic prompts, not inferred payoff context."""
+    labels: list[str] = []
+    for item in _advisor_clue_items(clues):
+        label = (
+            item if isinstance(item, str) else item.get("clue") if isinstance(item, dict) else None
+        )
+        if isinstance(label, str) and label.strip():
+            labels.append(" ".join(label.split()))
+    return labels
+
+
+def advisor_clue_evidence(clues: object) -> list[str]:
+    """Keep the structured clue and payoff context from detailed summaries."""
     evidence: list[str] = []
-    for item in values:
+    for item in _advisor_clue_items(clues):
         if isinstance(item, str):
             line = item.strip()
         elif isinstance(item, dict):
@@ -282,18 +297,45 @@ def build_open_thread_review_suggestions(
     return suggestions
 
 
+def advisor_supported_relationship(
+    relationship: CharacterRelationship, character_names: dict[Any, str]
+) -> bool:
+    """Include author-reviewed ties or generated ties with verified participant evidence."""
+    if relationship.edited_by_author:
+        return True
+    evidence = relationship.label_evidence if isinstance(relationship.label_evidence, dict) else {}
+    start = evidence.get("source_start")
+    end = evidence.get("source_end")
+    return bool(
+        isinstance(start, int)
+        and not isinstance(start, bool)
+        and isinstance(end, int)
+        and end > start >= 0
+        and relationship_quote_anchors_participants(
+            evidence.get("quote"),
+            character_names.get(relationship.character_a_id),
+            character_names.get(relationship.character_b_id),
+        )
+    )
+
+
 def build_relationship_drift_suggestions(
     relationship_rows: Sequence[CharacterRelationship],
     character_names: dict[Any, str],
 ) -> list[dict[str, Any]]:
     relationship_groups: dict[tuple[str, str], list[CharacterRelationship]] = {}
     for rel in relationship_rows:
+        if not advisor_supported_relationship(rel, character_names):
+            continue
         key = tuple(sorted([str(rel.character_a_id), str(rel.character_b_id)]))
         relationship_groups.setdefault(key, []).append(rel)
 
     suggestions: list[dict[str, Any]] = []
     for pair_key, rel_items in relationship_groups.items():
         if len(rel_items) < 2:
+            continue
+        rel_items = sorted(rel_items, key=lambda item: item.from_chapter)
+        if rel_items[0].from_chapter == rel_items[-1].from_chapter:
             continue
         first = rel_items[0]
         last = rel_items[-1]
@@ -308,7 +350,26 @@ def build_relationship_drift_suggestions(
             )
             or "Character relationship"
         )
-        type_changed = first.rel_type != last.rel_type
+        type_aliases = {
+            "friends": "friend",
+            "friendship": "friend",
+            "allies": "ally",
+            "enemies": "enemy",
+        }
+        situational_types = {
+            "relationship",
+            "sits_with",
+            "sitting_next_to",
+            "supportive",
+            "indifference",
+        }
+        first_type = str(first.rel_type or "").strip().casefold().replace(" ", "_")
+        last_type = str(last.rel_type or "").strip().casefold().replace(" ", "_")
+        if first_type in situational_types or last_type in situational_types:
+            continue
+        type_changed = type_aliases.get(first_type, first_type) != type_aliases.get(
+            last_type, last_type
+        )
         sentiment_changed = (
             first.sentiment is not None
             and last.sentiment is not None

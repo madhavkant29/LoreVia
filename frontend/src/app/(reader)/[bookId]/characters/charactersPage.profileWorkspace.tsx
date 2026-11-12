@@ -1,10 +1,11 @@
-import type { Dispatch, ReactNode, SetStateAction } from "react"
+import { useState, type Dispatch, type ReactNode, type SetStateAction } from "react"
 
 import { CharacterEvidencePanel } from "@/components/reader/CharacterEvidencePanel"
 import type { ConnectedRelationship } from "@/components/reader/CharacterProfileRightRail"
 import type { CharacterProfileTab } from "@/components/reader/CharacterProfileTabs"
 import type { Character, RelationshipGraph as RelationshipGraphData } from "@/types/character"
 import type { SearchResult } from "@/types/reader"
+import { booksApi } from "@/lib/api/books"
 import { CharacterArcTab } from "./charactersPage.arc"
 import type { MenuAction } from "./charactersPage.components"
 import { CharacterContinuityTab } from "./charactersPage.continuity"
@@ -65,6 +66,7 @@ type CharacterProfileWorkspaceProps = {
   summary: string
   traitEntries: TraitEntry[]
   onApproveCharacter: () => void
+  onCharacterUpdated: (character: Character) => void
   onCreateRelationship: () => void
   onDemoteSelectedCharacter: () => void
   onDraftChange: Dispatch<SetStateAction<EditDraft>>
@@ -123,6 +125,7 @@ export function CharacterProfileWorkspace({
   summary,
   traitEntries,
   onApproveCharacter,
+  onCharacterUpdated,
   onCreateRelationship,
   onDemoteSelectedCharacter,
   onDraftChange,
@@ -141,6 +144,21 @@ export function CharacterProfileWorkspace({
   onToggleCharacterMenu,
   onToggleProtectedFromRepair,
 }: CharacterProfileWorkspaceProps) {
+  const [acceptingNarratorClaimIndex, setAcceptingNarratorClaimIndex] = useState<number | null>(null)
+  const [narratorClaimError, setNarratorClaimError] = useState<string | null>(null)
+
+  async function acceptNarratorClaim(index: number) {
+    setAcceptingNarratorClaimIndex(index)
+    setNarratorClaimError(null)
+    try {
+      const updated = await booksApi.updateCharacter(bookId, character.id, { acceptNarratorClaimIndex: index })
+      onCharacterUpdated(updated)
+    } catch {
+      setNarratorClaimError("Could not add this claim. Reload the profile and try again.")
+    } finally {
+      setAcceptingNarratorClaimIndex(null)
+    }
+  }
   return (
     <div className="min-w-0 p-4 sm:p-5">
       <CharacterProfileHeader
@@ -187,7 +205,10 @@ export function CharacterProfileWorkspace({
             summary={summary}
             totalChapters={bookTotalChapters}
             onOpenEvidence={onOpenEvidence}
+            onAcceptNarratorClaim={isAuthorMode ? (index) => void acceptNarratorClaim(index) : undefined}
+            acceptingNarratorClaimIndex={acceptingNarratorClaimIndex}
           />
+          {narratorClaimError && <p role="alert" className="mt-2 text-sm text-rose-500">{narratorClaimError}</p>}
 
           <CharacterGraphVisibilityCard
             character={character}

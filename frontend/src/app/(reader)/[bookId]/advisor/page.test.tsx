@@ -333,6 +333,7 @@ describe("AdvisorPage", () => {
     })
 
     expect(container?.textContent).toContain("heuristic finding")
+    expect(container?.textContent).toContain("Supported relationships")
     expect(container?.textContent).toContain("Fallback analysis")
     expect(container?.textContent).toContain("Editorial focus pass")
     expect(container?.textContent).toContain("Find the best pressure point")

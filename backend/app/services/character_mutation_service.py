@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import hashlib
 import uuid
 from typing import Any, cast
 
@@ -7,12 +9,15 @@ from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.storage import download_book
+from app.models.book import Chapter
 from app.models.character import Character, CharacterState, CharacterVoiceProfile
 from app.models.intelligence import CharacterRelationship
 from app.schemas.books import CharacterCreateBody, CharacterUpdateBody
 from app.services.quality_metrics_service import record_quality_review
 from app.utils.billing_utils import require_author_access
 from app.utils.books.book_text import _clean_text
+from app.utils.books.manuscript import deserialize_manuscript_content
 from app.utils.books.notes import get_owned_book
 from app.utils.characters.duplicates import refresh_character_duplicate_suggestions
 from app.utils.characters.manual import (
@@ -20,6 +25,7 @@ from app.utils.characters.manual import (
     apply_manual_character_description,
     build_manual_character,
 )
+from app.utils.characters.narrator_profile_review import accept_narrator_profile_proposal
 from app.utils.characters.review import append_character_review_audit_entry, mark_character_curated
 from app.utils.characters.serialization import serialize_book_character
 from app.utils.characters.text import clean_optional_text, clean_string_list
@@ -159,6 +165,41 @@ async def update_book_character_for_user(
             apply_graph_visibility_override(character, body.graph_visibility)
         except ValueError:
             raise HTTPException(400, "Character visibility settings are invalid.")
+    if body.accept_narrator_claim_index is not None:
+        metadata = character.analysis_metadata or {}
+        review = (
+            metadata.get("character_profile_review")
+            or metadata.get("narrator_profile_review")
+            or {}
+        )
+        proposals = review.get("proposals") or []
+        index = body.accept_narrator_claim_index
+        if not isinstance(proposals, list) or index >= len(proposals):
+            raise HTTPException(400, "Narrator profile proposal is unavailable.")
+        proposal = proposals[index]
+        chapter_number = proposal.get("chapter_number") if isinstance(proposal, dict) else None
+        expected_key = (review.get("chapter_s3_keys") or {}).get(str(chapter_number))
+        current_key = (
+            await db.execute(
+                select(Chapter.s3_key).where(
+                    Chapter.book_id == book.id, Chapter.number == chapter_number
+                )
+            )
+        ).scalar_one_or_none()
+        if not expected_key or current_key != expected_key:
+            raise HTTPException(409, "Source chapter changed. Refresh the profile review.")
+        expected_hash = (review.get("chapter_source_hashes") or {}).get(str(chapter_number))
+        if not expected_hash:
+            raise HTTPException(409, "Source chapter changed. Refresh the profile review.")
+        raw = await asyncio.to_thread(download_book, current_key)
+        current_source = str(deserialize_manuscript_content(raw).get("text") or "")
+        current_hash = hashlib.sha256(current_source.encode("utf-8")).hexdigest()
+        if current_hash != expected_hash:
+            raise HTTPException(409, "Source chapter changed. Refresh the profile review.")
+        try:
+            accept_narrator_profile_proposal(character, index)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
     mark_character_curated(
         character,
         protected_from_repair=body.protected_from_repair

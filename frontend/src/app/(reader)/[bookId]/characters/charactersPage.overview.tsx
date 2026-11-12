@@ -21,6 +21,8 @@ type CharacterOverviewIdentityCardsProps = {
   summary: string
   totalChapters?: number | null
   onOpenEvidence: () => void
+  onAcceptNarratorClaim?: (index: number) => void
+  acceptingNarratorClaimIndex?: number | null
 }
 
 export function CharacterOverviewIdentityCards({
@@ -33,10 +35,15 @@ export function CharacterOverviewIdentityCards({
   summary,
   totalChapters,
   onOpenEvidence,
+  onAcceptNarratorClaim,
+  acceptingNarratorClaimIndex,
 }: CharacterOverviewIdentityCardsProps) {
   const aliasGroups = groupAliasRecordsByKind(character)
   const traitEntries = visibleTraitEntries(character)
   const profileClaims = currentProfileClaims(character)
+  const profileReview = character.analysis_metadata?.character_profile_review
+  const narratorProposals = profileReview?.proposals ?? character.analysis_metadata?.narrator_profile_review?.proposals ?? []
+  const confirmedNarrator = profileReview?.subject_mode === "confirmed_narrator" || character.analysis_metadata?.narrator_profile_review?.author_confirmed_identity === true
 
   return (
     <>
@@ -173,6 +180,27 @@ export function CharacterOverviewIdentityCards({
           </p>
         )}
       </SurfaceCard>
+
+      {narratorProposals.some((proposal) => proposal.status !== "accepted") && (
+        <SurfaceCard title={confirmedNarrator ? "Narrator profile suggestions" : "Character profile suggestions"} isDark={isDark}>
+          <p className={`mb-3 text-xs ${isDark ? "text-slate-400" : "text-stone-600"}`}>
+            {confirmedNarrator ? "First-person identity was confirmed by the author. " : ""}These AI interpretations have source quotes; review each before adding it to the profile.
+          </p>
+          <div className="space-y-3">
+            {narratorProposals.map((proposal, index) => proposal.status === "accepted" ? null : (
+              <div key={`${proposal.field}-${proposal.value}-${index}`} className={`border-l-2 pl-3 text-sm ${isDark ? "border-amber-700" : "border-amber-500"}`}>
+                <p className={isDark ? "text-slate-200" : "text-stone-800"}>{formatTraitLabel(proposal.field.replace("trait:", ""))}: {proposal.value} · Chapter {proposal.chapter_number}</p>
+                <blockquote className={`mt-1 italic ${isDark ? "text-slate-400" : "text-stone-600"}`}>“{proposal.quote}”</blockquote>
+                {onAcceptNarratorClaim && (
+                  <button type="button" disabled={acceptingNarratorClaimIndex !== null && acceptingNarratorClaimIndex !== undefined} onClick={() => onAcceptNarratorClaim(index)} className={`mt-2 text-xs font-semibold ${isDark ? "text-teal-300" : "text-teal-700"}`}>
+                    {acceptingNarratorClaimIndex === index ? "Adding..." : "Accept claim"}
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        </SurfaceCard>
+      )}
 
       <SurfaceCard title="Notes and audit" isDark={isDark}>
         <div className="space-y-4 text-sm">

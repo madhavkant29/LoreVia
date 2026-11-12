@@ -1408,7 +1408,7 @@ const chaptersByNumber = {
   },
 } as const
 
-const characterReviewPayload = {
+export const characterReviewPayload = {
   candidates: [
     {
       id: "candidate-1",

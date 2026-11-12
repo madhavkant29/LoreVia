@@ -270,6 +270,7 @@ PROACTIVE_SUGGESTION_TYPES = {
     "arc_opportunity",
     "foreshadowing_opportunity",
     "unresolved_clue",
+    "clue_review",
     "future_direction",
     "manuscript_checkpoint",
     "editorial_focus",
@@ -623,11 +624,11 @@ def build_fallback_advisor_suggestions(
         suggestions.append(
             {
                 "id": "fallback-foreshadowing-sweep",
-                "type": "unresolved_clue",
+                "type": "clue_review",
                 "severity": "opportunity",
                 "title": "Run a foreshadowing sweep",
                 "description": (
-                    "No urgent structural problems were flagged from extracted data, which usually means the highest-value next step is looking for underlined moments that could carry more future payoff."
+                    "This pass has no specific structural warning to show. Review key scenes for setup and later payoffs."
                 ),
                 "chapter_ref": total_chapters if total_chapters > 0 else None,
                 "action_label": "Look for payoff gaps",

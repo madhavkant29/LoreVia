@@ -2,7 +2,7 @@ name: CI/CD Pipeline
 
 on:
   push:
-    branches: [ main, develop ]
+    branches: [ main ]
   pull_request:
     branches: [ main, develop ]
 
@@ -14,6 +14,7 @@ permissions:
 
 jobs:
   backend-tests:
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
 
     services:
@@ -132,6 +133,7 @@ jobs:
         name: backend-coverage
 
   frontend-checks:
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
 
     steps:
@@ -162,6 +164,7 @@ jobs:
         npm run build
 
   frontend-e2e:
+    if: github.event_name == 'pull_request'
     name: Frontend E2E ${{ matrix.shard }}
     runs-on: ubuntu-24.04
     timeout-minutes: 45
@@ -210,6 +213,7 @@ jobs:
         fi
 
   security-scan:
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
 
     steps:
@@ -287,6 +291,14 @@ jobs:
 
   container-image-scan:
     needs: [backend-tests, frontend-checks, frontend-e2e, security-scan]
+    if: >-
+      always() &&
+      ((github.event_name == 'pull_request' &&
+        needs.backend-tests.result == 'success' &&
+        needs.frontend-checks.result == 'success' &&
+        needs.frontend-e2e.result == 'success' &&
+        needs.security-scan.result == 'success') ||
+       (github.event_name == 'push' && github.ref == 'refs/heads/main'))
     runs-on: ubuntu-latest
 
     steps:

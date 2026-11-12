@@ -417,6 +417,104 @@ def test_profile_enrichment_keeps_verified_claims_from_partially_invalid_batch(m
 
 
 @pytest.mark.asyncio
+async def test_profile_retry_keeps_distinct_verified_claims_from_two_partial_answers(monkeypatch):
+    source = "Mara promised to protect the gate. Mara checked the lock twice."
+    attempts = 0
+
+    async def fake_complete(**_kwargs):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            return json.dumps(
+                {
+                    "profile": {
+                        "goal": "protect the gate",
+                        "fears": ["the sea"],
+                        "claim_evidence": {"goal": "Mara promised to protect the gate."},
+                    }
+                }
+            )
+        return json.dumps(
+            {
+                "profile": {
+                    "personality_tags": ["careful"],
+                    "fears": ["the sea"],
+                    "claim_evidence": {
+                        "personality_tags": {"careful": "Mara checked the lock twice."}
+                    },
+                }
+            }
+        )
+
+    monkeypatch.setattr(
+        extraction_character_profile_service, "complete_with_fallback", fake_complete
+    )
+    result = await extract_profile_from_packet(
+        character_name="Mara",
+        aliases=[],
+        packet={"text": source, "source_batch_key": "book:1:1", "source_start": 50},
+        user_id=uuid.uuid4(),
+        book_id=uuid.uuid4(),
+        language="en",
+    )
+
+    assert attempts == 2
+    assert result["goal"] == "protect the gate"
+    assert result["personality_tags"] == ["careful"]
+    assert result["fears"] == []
+    assert result["evidence"]["profile_claims"]["goal"]["start"] == 50
+    assert result["evidence"]["profile_claims"]["personality_tags"]["careful"]["start"] > 50
+    assert result["_profile_partial_invalid_response"] is True
+
+
+@pytest.mark.asyncio
+async def test_profile_retry_keeps_earlier_verified_claim_when_correction_is_complete(monkeypatch):
+    source = "Mara promised to protect the gate. Mara checked the lock twice."
+    attempts = 0
+
+    async def fake_complete(**_kwargs):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            return json.dumps(
+                {
+                    "profile": {
+                        "goal": "protect the gate",
+                        "fears": ["the sea"],
+                        "claim_evidence": {"goal": "Mara promised to protect the gate."},
+                    }
+                }
+            )
+        return json.dumps(
+            {
+                "profile": {
+                    "personality_tags": ["careful"],
+                    "claim_evidence": {
+                        "personality_tags": {"careful": "Mara checked the lock twice."}
+                    },
+                }
+            }
+        )
+
+    monkeypatch.setattr(
+        extraction_character_profile_service, "complete_with_fallback", fake_complete
+    )
+    result = await extract_profile_from_packet(
+        character_name="Mara",
+        aliases=[],
+        packet={"text": source, "source_batch_key": "book:1:1", "source_start": 50},
+        user_id=uuid.uuid4(),
+        book_id=uuid.uuid4(),
+        language="en",
+    )
+
+    assert attempts == 2
+    assert result["goal"] == "protect the gate"
+    assert result["personality_tags"] == ["careful"]
+    assert result["_profile_partial_invalid_response"] is False
+
+
+@pytest.mark.asyncio
 async def test_partial_profile_claims_remain_counted_in_chapter_warning(monkeypatch):
     source = "Mara promised to protect the gate."
 

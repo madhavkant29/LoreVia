@@ -184,6 +184,7 @@ async def complete_with_fallback(
     max_tokens: int = 1200,
     response_format: dict[str, Any] | None = None,
     require_complete_output: bool = False,
+    retry_transient_openai: bool = True,
     openai_client: AsyncOpenAI | None = None,
     usage_feature: str = "llm_completion",
     usage_user_id: uuid.UUID | None,
@@ -215,7 +216,12 @@ async def complete_with_fallback(
             )
             if response_format is not None:
                 request_kwargs["response_format"] = response_format
-            response = await _call_openai_completion(
+            completion = (
+                _call_openai_completion
+                if retry_transient_openai
+                else create_tracked_chat_completion
+            )
+            response = await completion(
                 client=client,
                 feature=usage_feature,
                 model=openai_model,

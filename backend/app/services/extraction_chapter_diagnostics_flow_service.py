@@ -21,6 +21,7 @@ async def build_post_llm_chapter_diagnostics(
     ch_data: dict,
     chapter_number: int,
     existing_characters: list[Any],
+    new_character_ids: set[Any],
     llm_extraction: Any,
     llm_started: float,
     pending_relationships: list[dict[str, Any]],
@@ -42,6 +43,8 @@ async def build_post_llm_chapter_diagnostics(
         db,
         book=book,
         chapter_text=str(ch_data.get("text") or ""),
+        chapter_number=chapter_number,
+        new_character_ids=new_character_ids,
         existing_characters=existing_characters,
     )
 

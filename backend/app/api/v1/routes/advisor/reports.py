@@ -48,7 +48,13 @@ async def continuity_report(
         item
         for item in suggestions_payload.get("suggestions", [])
         if item.get("type")
-        in {"dropped_thread", "future_direction", "unresolved_clue", "arc_opportunity"}
+        in {
+            "dropped_thread",
+            "future_direction",
+            "unresolved_clue",
+            "clue_review",
+            "arc_opportunity",
+        }
     ][:8]
 
     markdown = build_continuity_report_markdown(

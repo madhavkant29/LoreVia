@@ -25,6 +25,7 @@ LoreVia2/
 ## Deployment Note
 
 - Treat the current deployment target as a **VPS** unless the user explicitly says this has changed.
+- The user chose to leave the runtime release SHA as `unknown` in production. Treat that value as expected, not as evidence of a failed deployment.
 - Do not assume Render-specific infrastructure, `onrender.com` hostnames, or Render-managed env behavior.
 - When discussing production incidents, do not claim env overrides or platform-level settings exist unless they have been verified from the VPS deployment configuration or explicitly confirmed by the user.
 
@@ -116,7 +117,22 @@ LoreVia2/
 - If tests need app settings, seed safe local dummy env vars instead of changing production config.
 - For DB-backed tests, confirm the local test database and required extensions are available before running the suite.
 
-### 7a. Story Intelligence Evaluation Corpus
+### 7a. Pre-push and PR Merge Verification
+
+- Before an agent proposes or performs **any branch push**, record `HEAD`, its tree hash, the target branch commit, the changed files, and any user-owned working-tree changes. Do not include unrelated files. Compare the candidate with the last fully tested source tree; a passing run from an older tree is insufficient when executable or CI inputs changed.
+- For changes to application code, tests, dependencies, migrations, Dockerfiles, or workflows, reproduce the PR gates **before the push** from a clean archive of the exact commit in disposable Linux containers. Never run against a production database or use real AI credentials. Do not substitute the host venv, a stale image, or a checkout containing uncommitted edits. Match the versions and commands in `.github/workflows/ci-cd.yml` and any path-triggered workflow rather than relying on this checklist alone.
+- Reproduce the backend job with Python 3.12, fresh pinned requirements, the spaCy model, disposable PostgreSQL/pgvector and Redis, and dummy CI settings. Run Ruff check and format, pricing catalog drift, production service contract, credential scan, Alembic upgrade on the disposable database, and the **full** `pytest tests/ -v --cov=app --cov-report=xml --cov-report=term-missing` suite with `CI=true` and `RUN_CELERY_LIVE_TESTS=1`. Give the test containers the Redis hostname and broker URL expected by the live worker tests. If the PR changes migrations or models, also reproduce the separate migration workflow's downgrade/upgrade and conflict checks.
+- Reproduce the frontend jobs with Node 24, fresh `npm ci`, `npm run test`, `npm run type-check`, `npm run lint`, and `npm run build`. Install Playwright Chromium with its Linux dependencies, then run all four `--fully-parallel --grep-invert "launch surfaces avoid" --shard=N/4` E2E shards and both separate launch audits using the workflow's exact grep filters.
+- Reproduce the security and image jobs with the workflow's pinned Trivy version: configuration scan, filesystem SARIF and its blocking-result check, then build and scan backend, worker, Nginx, Redis, and frontend release images. Check backend and worker tokenizer availability offline and the worker's live registration, health, wrong-identity, pause/recovery, and stopped-worker probes. Verify the built images contain the tested source and record every gate's result.
+- A documentation-only or empty trigger commit may reuse a completed full local run only after proving that all executable source, dependency, Docker, test, and workflow inputs are identical to the tested tree. Record both commits and the comparison; an empty commit still needs its own `HEAD` check. If an applicable gate fails or is unavailable, do not describe the branch as verified or recommend a push. Clean up disposable containers, networks, images, files, and opened connections when finished.
+
+- Before recommending a merge to `main`, record the exact PR head and current target commit. Verify GitHub checks on that proposed merge when Actions is available. If the target changes, repeat the checks on the new candidate. If the PR head changes, re-evaluate the gates; reuse local results only for a documented docs-only or empty commit with identical executable and CI inputs.
+- When Actions is unavailable because of billing, quota, or runner access, use the same clean-Linux pre-push gate as the merge fallback. Record each command, environment difference, result, and any gate that could not run. Confirm the test processes use the candidate's source files rather than a stale image or cache.
+- A local Windows run, focused tests, or a green result from an older **code tree** does not satisfy this fallback. If a required gate fails or cannot be reproduced, mark merge readiness **unverified** and fix the cause before recommending a merge. If every applicable local gate passes, a merge recommendation may state **local CI-equivalent checks passed; GitHub Actions did not run**, and must disclose remaining environment differences. Never promise that an unknown runner will pass.
+- Check required external statuses separately when they are available. A skipped or never-started GitHub job caused by quota is not a test pass; use the completed local parity results as the stated evidence instead. Do not repeatedly rerun Actions while the account blocker remains.
+- Keep the full test gates on PRs. After an approved merge, run only the release, image, and deployment checks configured for `main`; do not repeat the full backend/frontend/E2E suites on `main` solely to compensate for missing PR checks.
+
+### 7b. Story Intelligence Evaluation Corpus
 
 - `backend/evals/story_intelligence/v1/cases.json` is the versioned, synthetic gold-standard corpus for character and continuity evaluation. It is test/evaluation data, not production application data.
 - Keep the corpus out of production request paths. Production code must never load it to answer user requests, authorize users, calculate plan limits, or provide runtime defaults.

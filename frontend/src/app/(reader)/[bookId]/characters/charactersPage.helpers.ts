@@ -58,6 +58,34 @@ export type MergeSuggestion = {
 
 export const RELATIONSHIP_TYPE_OPTIONS: RelationshipComposerType[] = ["ally", "enemy", "family", "mentor", "neutral", "political", "romantic", "rival"]
 
+export function relationshipReviewWarning(candidate: CharacterRelationshipCandidate): string | null {
+  const reasons = candidate.reason_codes ?? []
+  if (reasons.includes("relationship_source_quote_missing")) return "No source quote was saved. Check the manuscript before confirming this relationship."
+  if (reasons.includes("relationship_source_quote_unverified")) return "The saved quote was not found in the chapter. Check the manuscript before confirming this relationship."
+  if (reasons.includes("relationship_participants_unanchored")) return "The quote appears in the chapter but does not identify both people. Check the relationship before confirming it."
+  return null
+}
+
+export function relationshipReviewQuote(candidate: CharacterRelationshipCandidate): string | null {
+  const relationship = candidate.evidence?.relationship
+  if (!relationship || typeof relationship !== "object" || Array.isArray(relationship)) return null
+  const citation = (relationship as Record<string, unknown>).label_evidence
+  if (!citation || typeof citation !== "object" || Array.isArray(citation)) return null
+  const quote = (citation as Record<string, unknown>).quote
+  return typeof quote === "string" && quote.trim() ? quote.trim() : null
+}
+
+export function relationshipReviewProposal(candidate: CharacterRelationshipCandidate): { relType: string; quote: string; sourceStart: number; sourceEnd: number; participantsAnchored: boolean } | null {
+  const relationship = candidate.evidence?.relationship
+  if (!relationship || typeof relationship !== "object" || Array.isArray(relationship)) return null
+  const proposal = (relationship as Record<string, unknown>).review_proposal
+  if (!proposal || typeof proposal !== "object" || Array.isArray(proposal)) return null
+  const data = proposal as Record<string, unknown>
+  if (typeof data.relationship_type !== "string" || typeof data.quote !== "string" || !data.quote.trim()) return null
+  if (typeof data.source_start !== "number" || typeof data.source_end !== "number" || data.source_end <= data.source_start) return null
+  return { relType: data.relationship_type, quote: data.quote, sourceStart: data.source_start, sourceEnd: data.source_end, participantsAnchored: data.participants_anchored === true }
+}
+
 export function relationshipChangeKey(
   item: NonNullable<NonNullable<Character["arc_tracker"]>["relationship_changes"]>[number],
   index: number,

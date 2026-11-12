@@ -6,6 +6,7 @@ import pytest
 
 from app.utils.advisor_suggestions_utils import (
     advisor_clue_evidence,
+    advisor_clue_review_labels,
     advisor_scan_output_token_budget,
     build_advisor_chapter_evidence_blocks,
     build_advisor_item_evidence_blocks,
@@ -62,6 +63,22 @@ def test_advisor_clue_evidence_keeps_structured_details_and_skips_empty_values()
         "Brass key | Points to the cellar"
     ]
     assert advisor_clue_evidence(None) == []
+
+
+def test_advisor_clue_review_labels_exclude_inferred_payoff_context():
+    assert advisor_clue_review_labels(
+        [
+            {"clue": " Brass key ", "foreshadows": "A locked cellar"},
+            "A blue ribbon | embroidered by Mara",
+            {"clue": "  "},
+            {"why_it_matters": "No clue supplied"},
+            None,
+        ]
+    ) == ["Brass key", "A blue ribbon | embroidered by Mara"]
+    assert advisor_clue_review_labels({"Brass key": {"why_it_matters": "A locked cellar"}}) == [
+        "Brass key"
+    ]
+    assert advisor_clue_review_labels(None) == []
 
 
 def test_advisor_chapter_evidence_blocks_cover_late_summary_and_every_key_event():
@@ -371,6 +388,7 @@ def test_build_relationship_drift_suggestions_flags_type_changes():
                 sentiment=0.5,
                 from_chapter=2,
                 description="They work together.",
+                edited_by_author=True,
             ),
             SimpleNamespace(
                 character_a_id=character_a_id,
@@ -379,6 +397,7 @@ def test_build_relationship_drift_suggestions_flags_type_changes():
                 sentiment=-0.9,
                 from_chapter=8,
                 description="They betray each other.",
+                edited_by_author=True,
             ),
         ],
         {character_a_id: "Mara", character_b_id: "Ilan"},
@@ -404,6 +423,7 @@ def test_build_relationship_drift_suggestions_flags_sentiment_swings():
                 sentiment=0.8,
                 from_chapter=1,
                 description=None,
+                edited_by_author=True,
             ),
             SimpleNamespace(
                 character_a_id=character_a_id,
@@ -412,6 +432,7 @@ def test_build_relationship_drift_suggestions_flags_sentiment_swings():
                 sentiment=-0.5,
                 from_chapter=4,
                 description=None,
+                edited_by_author=True,
             ),
         ],
         {character_a_id: "Mara", character_b_id: "Ilan"},
@@ -420,6 +441,73 @@ def test_build_relationship_drift_suggestions_flags_sentiment_swings():
     assert len(suggestions) == 1
     assert suggestions[0]["severity"] == "info"
     assert "emotional tone" in suggestions[0]["description"]
+
+
+def test_relationship_drift_ignores_generated_ties_without_participant_citations():
+    character_a_id = uuid.uuid4()
+    character_b_id = uuid.uuid4()
+    names = {character_a_id: "Mara", character_b_id: "Ilan"}
+    first = SimpleNamespace(
+        character_a_id=character_a_id,
+        character_b_id=character_b_id,
+        rel_type="friend",
+        sentiment=0.5,
+        from_chapter=2,
+        description=None,
+        edited_by_author=False,
+        label_evidence={
+            "quote": "Mara and Ilan planned together.",
+            "source_start": 10,
+            "source_end": 42,
+        },
+    )
+    unverified = SimpleNamespace(
+        **{
+            **vars(first),
+            "rel_type": "enemy",
+            "from_chapter": 3,
+            "label_evidence": {"quote": "Ilan left."},
+        }
+    )
+    one_sided = SimpleNamespace(
+        **{
+            **vars(unverified),
+            "label_evidence": {"quote": "Ilan left.", "source_start": 50, "source_end": 60},
+        }
+    )
+
+    assert build_relationship_drift_suggestions([first, unverified], names) == []
+    assert build_relationship_drift_suggestions([first, one_sided], names) == []
+    verified = SimpleNamespace(
+        **{
+            **vars(unverified),
+            "label_evidence": {
+                "quote": "Mara and Ilan fought.",
+                "source_start": 50,
+                "source_end": 71,
+            },
+        }
+    )
+    assert len(build_relationship_drift_suggestions([verified, first], names)) == 1
+
+
+@pytest.mark.parametrize("later_type", ["friends", "friendship", "sitting_next_to"])
+def test_relationship_drift_ignores_synonyms_and_situational_labels(later_type):
+    character_a_id = uuid.uuid4()
+    character_b_id = uuid.uuid4()
+    names = {character_a_id: "Mara", character_b_id: "Ilan"}
+    first = SimpleNamespace(
+        character_a_id=character_a_id,
+        character_b_id=character_b_id,
+        rel_type="friend",
+        sentiment=0.5,
+        from_chapter=2,
+        description=None,
+        edited_by_author=True,
+    )
+    later = SimpleNamespace(**{**vars(first), "rel_type": later_type, "from_chapter": 3})
+
+    assert build_relationship_drift_suggestions([later, first], names) == []
 
 
 def test_build_world_drift_suggestions_flags_conflicting_canon():

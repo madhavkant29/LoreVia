@@ -144,6 +144,36 @@ async def test_complete_with_fallback_retries_transient_errors(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_complete_with_fallback_can_disable_transient_retry_for_capped_review(
+    monkeypatch,
+):
+    import httpx
+
+    calls = 0
+
+    async def failed_completion(**_kwargs):
+        nonlocal calls
+        calls += 1
+        raise httpx.ConnectError("transient connection error")
+
+    monkeypatch.setattr(llm.settings, "OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr(llm.settings, "GEMINI_API_KEY", None)
+    monkeypatch.setattr(llm, "create_tracked_chat_completion", failed_completion)
+
+    with pytest.raises(httpx.ConnectError):
+        await llm.complete_with_fallback(
+            system="Review source evidence.",
+            user="Review one bounded passage.",
+            openai_model="gpt-test",
+            openai_client=_FakeOpenAIClient(),
+            retry_transient_openai=False,
+            usage_user_id=uuid.uuid4(),
+        )
+
+    assert calls == 1
+
+
+@pytest.mark.asyncio
 async def test_complete_with_fallback_no_retry_on_400(monkeypatch):
     call_count = [0]
 

@@ -134,6 +134,7 @@ async def accept_relationship_candidate_for_user(
         if isinstance(evidence_payload.get("relationship"), dict)
         else {}
     )
+    generated_review = "generated_relationship_requires_review" in (candidate.reason_codes or [])
     to_chapter = (
         body.to_chapter
         if "to_chapter" in body.model_fields_set
@@ -150,21 +151,32 @@ async def accept_relationship_candidate_for_user(
         sentiment=body.sentiment if body.sentiment is not None else candidate.sentiment,
         description=clean_optional_text(body.description)
         if body.description is not None
+        else None
+        if generated_review
         else clean_optional_text(candidate.description),
         from_chapter=from_chapter,
         to_chapter=to_chapter,
         shared_labels=body.shared_labels
         if body.shared_labels is not None
+        else None
+        if generated_review
         else extracted_relationship.get("shared_labels"),
         character_a_to_b_labels=body.character_a_to_b_labels
         if body.character_a_to_b_labels is not None
+        else None
+        if generated_review
         else extracted_relationship.get("character_a_to_b_labels"),
         character_b_to_a_labels=body.character_b_to_a_labels
         if body.character_b_to_a_labels is not None
+        else None
+        if generated_review
         else extracted_relationship.get("character_b_to_a_labels"),
         label_evidence=body.label_evidence
-        or extracted_relationship.get("label_evidence")
-        or evidence_payload,
+        or (
+            {}
+            if generated_review
+            else extracted_relationship.get("label_evidence") or evidence_payload
+        ),
     )
     relationship.edited_by_author = True
     candidate.matched_character_a_id = relationship_a.id

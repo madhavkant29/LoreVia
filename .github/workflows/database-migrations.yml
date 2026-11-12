@@ -1,11 +1,6 @@
 name: Database Migration Validation
 
 on:
-  push:
-    paths:
-      - 'backend/app/db/migrations/versions/**'
-      - 'backend/app/db/migrations/env.py'
-      - 'backend/app/models/**'
   pull_request:
     paths:
       - 'backend/app/db/migrations/versions/**'

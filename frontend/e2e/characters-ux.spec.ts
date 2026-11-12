@@ -79,6 +79,113 @@ test("character profile displays current source quotes and hides stale claims", 
   await expect(page.getByText("I will win the race.")).toHaveCount(0)
 })
 
+test("author can accept one source-checked narrator profile suggestion", async ({ page }) => {
+  await page.goto(route)
+  const characters = await page.evaluate(async () =>
+    (await fetch("/api/v1/books/book-1/characters")).json(),
+  ) as Character[]
+  const gregor = characters.find((item) => item.name === "Gregor")!
+  const proposal = { field: "motivations", value: "find shelter", quote: "I looked for shelter.", chapter_number: 2, source_start: 10, source_end: 31 }
+  gregor.analysis_metadata = {
+    ...gregor.analysis_metadata,
+    narrator_profile_review: { author_confirmed_identity: true, generation_id: "generation-1", proposals: [proposal] },
+  }
+  await page.route("**/api/v1/books/book-1/characters", (request) => request.fulfill({ json: characters }))
+  await page.route(`**/api/v1/books/book-1/characters/${gregor.id}`, (request) => {
+    expect(request.request().postDataJSON()).toMatchObject({ accept_narrator_claim_index: 0 })
+    gregor.motivations = [...gregor.motivations, proposal.value]
+    gregor.analysis_metadata = {
+      ...gregor.analysis_metadata,
+      profile_claims: [{ field: proposal.field, value: proposal.value, quote: proposal.quote, chapter_number: 2 }],
+      narrator_profile_review: { author_confirmed_identity: true, generation_id: "generation-1", proposals: [{ ...proposal, status: "accepted" }] },
+    }
+    return request.fulfill({ json: gregor })
+  })
+  await page.reload()
+  await expect(page.getByRole("heading", { name: "Narrator profile suggestions" })).toBeVisible()
+  await page.getByRole("button", { name: "Accept claim" }).click()
+  await expect(page.getByText("find shelter").first()).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Narrator profile suggestions" })).toHaveCount(0)
+})
+
+test("author can review a named character's source-checked profile suggestion", async ({ page }) => {
+  await page.goto(route)
+  const characters = await page.evaluate(async () =>
+    (await fetch("/api/v1/books/book-1/characters")).json(),
+  ) as Character[]
+  const gregor = characters.find((item) => item.name === "Gregor")!
+  const proposal = { field: "personality_tags", value: "careful", quote: "Gregor checked the lock twice.", chapter_number: 2, source_start: 10, source_end: 40 }
+  gregor.analysis_metadata = {
+    ...gregor.analysis_metadata,
+    character_profile_review: { subject_mode: "named_person", generation_id: "generation-1", proposals: [proposal] },
+  }
+  await page.route("**/api/v1/books/book-1/characters", (request) => request.fulfill({ json: characters }))
+  await page.route(`**/api/v1/books/book-1/characters/${gregor.id}`, (request) => {
+    expect(request.request().postDataJSON()).toMatchObject({ accept_narrator_claim_index: 0 })
+    gregor.personality_tags = [...gregor.personality_tags, proposal.value]
+    gregor.analysis_metadata = {
+      ...gregor.analysis_metadata,
+      profile_claims: [{ field: proposal.field, value: proposal.value, quote: proposal.quote, chapter_number: 2 }],
+      character_profile_review: { subject_mode: "named_person", generation_id: "generation-1", proposals: [{ ...proposal, status: "accepted" }] },
+    }
+    return request.fulfill({ json: gregor })
+  })
+  await page.reload()
+  await expect(page.getByRole("heading", { name: "Character profile suggestions" })).toBeVisible()
+  await page.getByRole("button", { name: "Accept claim" }).click()
+  await expect(page.getByText("careful").first()).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Character profile suggestions" })).toHaveCount(0)
+})
+
+test("relationship review submits the source-checked suggestion for author confirmation", async ({ page }) => {
+  await page.goto(route)
+  const review = await page.evaluate(async () =>
+    (await fetch("/api/v1/books/book-1/character-review")).json(),
+  ) as { relationship_candidates: Array<Record<string, unknown>> }
+  const candidate = review.relationship_candidates[0]
+  candidate.reason_codes = ["generated_relationship_requires_review"]
+  candidate.evidence = {
+    relationship: {
+      review_proposal: {
+        relationship_type: "allies",
+        quote: "Grete and Gregor's father guarded the door.",
+        source_start: 42,
+        source_end: 85,
+        participants_anchored: true,
+      },
+    },
+  }
+  await page.route("**/character-review**", (request) => {
+    if (request.request().method() !== "GET" || !new URL(request.request().url()).pathname.endsWith("/character-review")) {
+      return request.fallback()
+    }
+    return request.fulfill({ json: review })
+  })
+  let submitted: Record<string, unknown> | null = null
+  await page.route("**/relationship-review/rel-candidate-1/accept", (request) => {
+    submitted = request.request().postDataJSON() as Record<string, unknown>
+    candidate.status = "accepted"
+    return request.fulfill({ json: { accepted: candidate.id } })
+  })
+  await page.reload()
+  await page.getByRole("button", { name: "Open menu", exact: true }).click()
+  await page.getByRole("button", { name: "Open review queue", exact: true }).click()
+  await expect(page.getByText("AI suggested Allies.")).toBeVisible()
+  await page.getByRole("button", { name: "Confirm relationship" }).click()
+  await expect.poll(() => submitted).toMatchObject({
+    character_a_id: "char-grete",
+    character_b_id: "char-mr-samsa",
+    rel_type: "allies",
+    description: null,
+    from_chapter: 3,
+    label_evidence: {
+      quote: "Grete and Gregor's father guarded the door.",
+      source_start: 42,
+      source_end: 85,
+    },
+  })
+})
+
 test("character mention counts distinguish verified names from legacy estimates", async ({ page }) => {
   await page.goto(route)
   await expect(page.getByRole("heading", { name: "Gregor", exact: true })).toBeVisible()
