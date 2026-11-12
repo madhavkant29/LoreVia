@@ -2,9 +2,9 @@
 
 import Link from "next/link"
 import { useParams } from "next/navigation"
+import { Info } from "lucide-react"
 import { WorkspaceFamilyHeader } from "@/components/reader/WorkspaceFamilyHeader"
 import { WorkspacePage } from "@/components/ui/Workspace"
-import { HelpBubble } from "@/components/ui/HelpBubble"
 import { SUPPORT_HELP_EVENT } from "@/components/ui/ShortcutHelp"
 import { useVoiceWorkspace } from "./voicePage.state"
 import { ChapterVoiceReview } from "./voicePage.chapterReview"
@@ -41,12 +41,15 @@ function VoiceWorkspace({ bookId }: { bookId: string }) {
           description="Review one chapter or passage against established character voices, then save only the evidence you need."
           actions={<><Link href={`/${bookId}/manuscript`} className="app-button-secondary">Open manuscript</Link><button type="button" className="app-button-secondary" onClick={() => window.dispatchEvent(new Event(SUPPORT_HELP_EVENT))}>Help</button></>}
         />
-        <div className="mt-2 flex items-center gap-1 text-sm text-[rgb(var(--foreground))]">
-          <span>How voice review works</span>
-          <HelpBubble label="How Voice Consistency works" icon="info">
-            Review chapter checks the entire saved chapter, with a separate result for every identifiable speaker and first-person narrator. It compares attributable voice with earlier chapters, shows supporting passages, and reports unknown speakers or missing baseline evidence. The review runs in the background and can resume after a pause. For unsaved edits or a focused question, use passage review below: paste up to 12,000 characters or choose a chapter, then optionally select one character. Passage Auto-detect checks up to five known characters. Neither review changes your manuscript.
-          </HelpBubble>
-        </div>
+        <details data-voice-help className="mt-2 text-sm text-[rgb(var(--foreground))]">
+          <summary className="inline-flex cursor-pointer list-none items-center gap-1 rounded-sm px-1 py-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgb(var(--accent))] [&::-webkit-details-marker]:hidden">
+            How voice review works <Info className="h-4 w-4" aria-hidden="true" />
+          </summary>
+          <div className="mt-3 max-w-3xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))] p-4 leading-6">
+            <p>Review chapter checks the entire saved chapter, with a separate result for every identifiable speaker and first-person narrator. It compares attributable voice with earlier chapters, shows supporting passages, and reports unknown speakers or missing baseline evidence. The review runs in the background and can resume after a pause.</p>
+            <p className="mt-2">For unsaved edits or a focused question, use passage review below: paste up to 12,000 characters or choose a chapter, then optionally select one character. Passage Auto-detect checks up to five known characters. Neither review changes your manuscript.</p>
+          </div>
+        </details>
 
         {bookQuery.isLoading ? <p className="mt-5" role="status">Loading book context…</p> : bookQuery.isError || !book ? <div className="mt-5 border-l-2 border-[rgb(var(--border))] pl-4" role="alert"><p>Book context could not be loaded. Your passage stays here; reviewing is unavailable until it loads.</p><button type="button" className="app-button-secondary mt-2" disabled={bookQuery.isFetching} onClick={() => void bookQuery.refetch()}>Retry book context</button></div> : null}
 
