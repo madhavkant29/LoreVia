@@ -344,11 +344,14 @@ def parse_text_structure(
     if accepted[0][0] > 0:
         leading = "\n".join(raw_lines[: accepted[0][0]]).strip()
         if leading:
+            title_page = len(leading.split()) <= 400 and bool(
+                re.search(r"\b(?:copyright|all rights reserved)\b", leading, re.IGNORECASE)
+            )
             sections.append(
                 {
                     "title": "Opening material",
                     "text": leading,
-                    "section_type": "unknown",
+                    "section_type": "title_page" if title_page else "unknown",
                     "source_location": f"{source_name} 1–{accepted[0][0]}",
                     "start_line": 1,
                     "end_line": accepted[0][0],
