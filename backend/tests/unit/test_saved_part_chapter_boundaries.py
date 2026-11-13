@@ -18,6 +18,22 @@ def test_saved_part_split_preserves_exact_source_order_and_words():
     assert all(item["text"].startswith("Mara crossed") for item in chapters)
 
 
+def test_saved_part_split_preserves_final_end_and_trailing_author_matter():
+    body = "Mara crossed the harbor gate before sunrise. " * 8
+    source = (
+        f"I\n\n{body}\n\nII\n\n{body}\n\nTHE END."
+        "\n\nAbout the Author\n\nThe author grew up by the sea."
+    )
+
+    sections = split_saved_part_chapters("Part Two", source)
+
+    assert [item["title"] for item in sections] == ["I", "II", "About the Author"]
+    assert [item["source_number"] for item in sections] == [1, 2, None]
+    assert sections[1]["text"].endswith("THE END.")
+    assert sections[2]["text"] == "The author grew up by the sea."
+    assert "".join(item["raw_section"] for item in sections) == source
+
+
 @pytest.mark.parametrize(
     "source",
     [

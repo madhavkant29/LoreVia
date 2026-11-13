@@ -60,6 +60,32 @@ def test_end_of_part_maps_to_end_of_last_new_chapter():
     ) == {"current_chapter": 3, "scroll_pct": 1.0, "chapters_read": []}
 
 
+def test_progress_mapping_includes_trailing_author_matter():
+    body = "Mara crossed the harbor gate before sunrise. " * 8
+    saved = [
+        {
+            "number": 1,
+            "title": "Part Two — opening",
+            "text": (
+                f"I\n\n{body}\n\nII\n\n{body}\n\nTHE END."
+                "\n\nAbout the Author\n\nThe author grew up by the sea."
+            ),
+        }
+    ]
+    proposed = [
+        {"text": body.strip()},
+        {"text": body.strip() + "\n\nTHE END."},
+        {"text": "The author grew up by the sea."},
+    ]
+
+    mapping = chapter_number_map(saved, proposed)
+
+    assert mapping == {1: [1, 2, 3]}
+    assert map_reading_position(
+        mapping, proposed, current_chapter=1, scroll_pct=1.0, chapters_read=[1]
+    ) == {"current_chapter": 3, "scroll_pct": 1.0, "chapters_read": [1, 2, 3]}
+
+
 def test_mapping_rejects_missing_chapters_and_positions():
     saved, proposed = _chapters()
     with pytest.raises(ValueError, match="mapping_mismatch"):

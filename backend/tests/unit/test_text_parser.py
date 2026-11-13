@@ -36,6 +36,27 @@ def test_structure_splits_sequential_bare_roman_chapters_within_each_part():
     assert sum(item["text"].count("Mara crossed") for item in sections) == 5 * 8
 
 
+def test_structure_keeps_final_story_end_and_separates_author_matter():
+    body = "Mara returned to the harbor at dawn. " * 8
+    source = (
+        f"Part Two\n\nI\n\n{body}\n\nII\n\n{body}\n\nTHE END."
+        "\n\nAbout the Author\n\nThe author grew up by the sea."
+        "\n\nThis edition was printed by the harbor press."
+    )
+
+    sections = parse_text_structure(source, language="en")
+
+    assert [(item["title"], item["section_type"]) for item in sections] == [
+        ("Part Two", "part"),
+        ("I", "chapter"),
+        ("II", "chapter"),
+        ("About the Author", "notes"),
+    ]
+    assert sections[2]["text"].endswith("THE END.")
+    assert "About the Author" not in sections[2]["text"]
+    assert "printed by the harbor press" in sections[3]["text"]
+
+
 def test_structure_does_not_split_an_isolated_pronoun_or_broken_roman_sequence():
     body = "Mara crossed the harbor gate before sunrise. " * 8
     for markers in (("I",), ("I", "III"), ("I", "II", "II")):

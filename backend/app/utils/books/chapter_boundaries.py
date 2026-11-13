@@ -19,14 +19,17 @@ def split_saved_part_chapters(part_title: str, text: str) -> list[dict]:
     source = f"{part_title.strip()}\n\n{text}"
     sections = parse_text_structure(source, language="en")
     chapters = sections[1:]
+    story_chapters = [section for section in chapters if section["section_type"] == "chapter"]
+    trailing_matter = chapters[len(story_chapters) :]
     if (
         not sections
         or sections[0]["section_type"] != "part"
         or sections[0]["text"].strip()
-        or len(chapters) < 2
-        or any(section["section_type"] != "chapter" for section in chapters)
-        or [section.get("source_number") for section in chapters]
-        != list(range(1, len(chapters) + 1))
+        or len(story_chapters) < 2
+        or chapters[: len(story_chapters)] != story_chapters
+        or any(section["section_type"] != "notes" for section in trailing_matter)
+        or [section.get("source_number") for section in story_chapters]
+        != list(range(1, len(story_chapters) + 1))
     ):
         raise ValueError("saved_part_chapter_boundaries_ambiguous")
 

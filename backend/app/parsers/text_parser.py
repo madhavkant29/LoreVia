@@ -261,11 +261,18 @@ def parse_text_structure(
         line = re.sub(r"^#{1,6}\s+", "", raw_line.strip())
         if not line or is_toc_indicator(line):
             continue
-        explicit = bool(heading_regex.fullmatch(line))
+        author_matter = line.casefold() in {
+            "about the author",
+            "about the authors",
+            "author biography",
+        }
+        explicit = bool(heading_regex.fullmatch(line)) or author_matter
         styled = heading_hint_lines is not None and index in heading_hint_lines
         if not explicit and not styled:
             continue
         kind, _ = classify_heading_type(line, detected_language)
+        if author_matter:
+            kind = "notes"
         if kind == "unknown" and chapter_hint_lines and index in chapter_hint_lines:
             kind = "chapter"
         candidates.append((index, line, kind))
