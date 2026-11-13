@@ -2,9 +2,108 @@ from app.parsers.text_parser import (
     MIN_BODY_WORDS_AFTER_HEADING,
     _extract_clean_heading,
     parse_text_chapters,
+    parse_text_structure,
 )
 
 # ── Basic splitting ────────────────────────────────────────────────────────
+
+
+def test_structure_splits_sequential_bare_roman_chapters_within_each_part():
+    body = "Mara crossed the harbor gate before sunrise. " * 8
+    source = (
+        f"Part One\n\nI\n\n{body}\n\nII\n\n{body}\n\nIII\n\n{body}"
+        f"\n\nPart Two\n\nI\n\n{body}\n\nII\n\n{body}"
+    )
+
+    sections = parse_text_structure(source, language="en")
+
+    assert [(item["title"], item["section_type"]) for item in sections] == [
+        ("Part One", "part"),
+        ("I", "chapter"),
+        ("II", "chapter"),
+        ("III", "chapter"),
+        ("Part Two", "part"),
+        ("I", "chapter"),
+        ("II", "chapter"),
+    ]
+    assert [item["source_number"] for item in sections if item["section_type"] == "chapter"] == [
+        1,
+        2,
+        3,
+        1,
+        2,
+    ]
+    assert sum(item["text"].count("Mara crossed") for item in sections) == 5 * 8
+
+
+def test_structure_keeps_final_story_end_and_separates_author_matter():
+    body = "Mara returned to the harbor at dawn. " * 8
+    source = (
+        f"Part Two\n\nI\n\n{body}\n\nII\n\n{body}\n\nTHE END."
+        "\n\nAbout the Author\n\nThe author grew up by the sea."
+        "\n\nThis edition was printed by the harbor press."
+    )
+
+    sections = parse_text_structure(source, language="en")
+
+    assert [(item["title"], item["section_type"]) for item in sections] == [
+        ("Part Two", "part"),
+        ("I", "chapter"),
+        ("II", "chapter"),
+        ("About the Author", "notes"),
+    ]
+    assert sections[2]["text"].endswith("THE END.")
+    assert "About the Author" not in sections[2]["text"]
+    assert "printed by the harbor press" in sections[3]["text"]
+
+
+def test_structure_does_not_split_an_isolated_pronoun_or_broken_roman_sequence():
+    body = "Mara crossed the harbor gate before sunrise. " * 8
+    for markers in (("I",), ("I", "III"), ("I", "II", "II")):
+        text = "Part One\n\n" + (f"{body}\n\n").join(f"{marker}\n\n" for marker in markers) + body
+        sections = parse_text_structure(text, language="en")
+        assert len(sections) == 1
+        assert sections[0]["section_type"] == "part"
+        assert all(marker in sections[0]["text"] for marker in markers)
+
+
+def test_structure_uses_explicit_chapter_headings_within_part():
+    body = "Mara crossed the harbor gate before sunrise. " * 8
+    source = f"Part One\n\nI\n\n{body}\n\nChapter 1\n\n{body}\n\nII\n\n{body}"
+
+    sections = parse_text_structure(source, language="en")
+
+    assert [(item["title"], item["section_type"]) for item in sections] == [
+        ("Part One", "part"),
+        ("Chapter 1", "chapter"),
+    ]
+    assert "I\n\n" in sections[0]["text"]
+    assert "II\n\n" in sections[1]["text"]
+
+
+def test_structure_splits_lowercase_roman_headings_within_part():
+    body = "Mara crossed the harbor gate before sunrise. " * 8
+    source = f"Part One\n\ni\n\n{body}\n\nii\n\n{body}"
+
+    sections = parse_text_structure(source, language="en")
+
+    assert [item["title"] for item in sections] == ["Part One", "i", "ii"]
+    assert [item["source_number"] for item in sections[1:]] == [1, 2]
+
+
+def test_structure_does_not_duplicate_styled_roman_headings():
+    body = "Mara crossed the harbor gate before sunrise. " * 8
+    source = f"Part One\n\nI\n\n{body}\n\nII\n\n{body}"
+    lines = source.splitlines()
+    hints = {index for index, line in enumerate(lines) if line in {"I", "II"}}
+
+    for chapter_hints in (None, hints):
+        sections = parse_text_structure(
+            source, language="en", heading_hint_lines=hints, chapter_hint_lines=chapter_hints
+        )
+
+        assert [item["title"] for item in sections] == ["Part One", "I", "II"]
+        assert [item["source_number"] for item in sections[1:]] == [1, 2]
 
 
 def test_parse_english_chapters():

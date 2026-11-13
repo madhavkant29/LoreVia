@@ -10,6 +10,7 @@ import asyncio
 import hashlib
 import json
 import uuid
+from collections import Counter
 from decimal import Decimal
 from typing import Any
 
@@ -124,6 +125,7 @@ def evidence_plan_hash(
                     "first_output_tokens": MAX_OUTPUT_TOKENS_PER_CALL,
                     "retry_output_tokens": RETRY_OUTPUT_TOKENS,
                     "max_retries_per_plan": MAX_RETRIES_PER_PLAN,
+                    "incomplete_response_policy": "skip_pair_and_queue_for_review",
                     "max_total_tokens": MAX_TOTAL_TOKENS,
                     "max_cost_usd": str(MAX_COST_USD),
                 },
@@ -235,7 +237,9 @@ async def apply_evidence_review_plan(
 
     proposals: dict[str, dict[str, Any]] = {}
     retries_used = 0
+    incomplete_reasons: Counter[str] = Counter()
     for row in plan["_eligible"]:
+        raw: str | None = None
         for attempt, max_tokens in enumerate((MAX_OUTPUT_TOKENS_PER_CALL, RETRY_OUTPUT_TOKENS)):
             try:
                 raw = await complete_with_fallback(
@@ -254,9 +258,17 @@ async def apply_evidence_review_plan(
                 )
                 break
             except LLMIncompleteResponseError as exc:
-                if attempt or exc.finish_reason != "length" or retries_used >= MAX_RETRIES_PER_PLAN:
-                    raise
-                retries_used += 1
+                if (
+                    not attempt
+                    and exc.finish_reason == "length"
+                    and retries_used < MAX_RETRIES_PER_PLAN
+                ):
+                    retries_used += 1
+                    continue
+                incomplete_reasons[str(exc.finish_reason or "unknown")] += 1
+                break
+        if raw is None:
+            continue
         proposal = verified_relationship_evidence_proposal(
             raw,
             windows=row["windows"],
@@ -319,6 +331,7 @@ async def apply_evidence_review_plan(
         "participant_anchored_proposals": sum(
             bool(item["participants_anchored"]) for item in proposals.values()
         ),
+        "incomplete_responses_by_reason": dict(incomplete_reasons),
         "budget": plan["budget"],
     }
 

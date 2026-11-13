@@ -78,6 +78,22 @@ def test_nested_parts_keep_source_order_and_local_numbering():
     assert "".join(plan["blocks"])
 
 
+def test_copyright_opening_stays_readable_but_is_excluded_from_story_analysis():
+    body = "Mara crossed the harbor gate before sunrise. " * 8
+    source = (
+        "HARBOR LIGHTS\n\nBy Ada Writer\n\nCopyright 2026 Ada Writer. All rights reserved."
+        f"\n\nPart One\n\nI\n\n{body}\n\nII\n\n{body}"
+    )
+
+    plan = build_structure_plan(source.encode(), parse_text_structure(source, language="en"))
+    chapters = materialize_structure_plan(plan)
+
+    assert chapters[0]["title"] == "Opening material"
+    assert chapters[0]["section_type"] == "title_page"
+    assert chapters[0]["include_in_analysis"] is False
+    assert [row["section_type"] for row in chapters[1:]] == ["chapter", "chapter"]
+
+
 def test_boundary_move_preserves_every_block_once():
     detected = _synthetic_plan()
     proposed = deepcopy(detected)

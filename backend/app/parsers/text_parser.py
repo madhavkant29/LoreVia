@@ -52,6 +52,71 @@ _DATE_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
+_BARE_ROMAN_HEADING_RE = re.compile(r"([IVXLCDM]{1,6})\.?$", re.IGNORECASE | re.ASCII)
+
+
+def _bare_roman_chapter_number(line: str) -> int | None:
+    """Read a canonical, standalone Roman chapter number without treating prose as one."""
+    match = _BARE_ROMAN_HEADING_RE.fullmatch(line.strip())
+    if match is None:
+        return None
+    marker = match.group(1).upper()
+    values = {"I": 1, "V": 5, "X": 10, "L": 50, "C": 100, "D": 500, "M": 1000}
+    number = 0
+    for index, letter in enumerate(marker):
+        value = values[letter]
+        number += -value if index + 1 < len(marker) and value < values[marker[index + 1]] else value
+    if not 1 <= number <= 30:
+        return None
+    remainder = number
+    canonical = ""
+    for value, symbol in ((10, "X"), (9, "IX"), (5, "V"), (4, "IV"), (1, "I")):
+        count, remainder = divmod(remainder, value)
+        canonical += symbol * count
+    return number if marker == canonical else None
+
+
+def _roman_chapters_inside_parts(
+    raw_lines: list[str], candidates: list[tuple[int, str, str]]
+) -> dict[int, int]:
+    """Trust isolated Roman headings only as a complete sequence inside a Part."""
+    part_lines = [index for index, _heading, kind in candidates if kind == "part"]
+    accepted: dict[int, int] = {}
+    for part_index, start in enumerate(part_lines):
+        end = part_lines[part_index + 1] if part_index + 1 < len(part_lines) else len(raw_lines)
+        if any(
+            kind == "chapter"
+            and start < index < end
+            and _bare_roman_chapter_number(raw_lines[index]) is None
+            for index, _heading, kind in candidates
+        ):
+            continue
+        markers: list[tuple[int, int]] = []
+        for index in range(start + 1, end):
+            number = _bare_roman_chapter_number(raw_lines[index])
+            if number is None:
+                continue
+            if raw_lines[index - 1].strip() or (
+                index + 1 < len(raw_lines) and raw_lines[index + 1].strip()
+            ):
+                continue
+            markers.append((index, number))
+        if len(markers) < 2 or [number for _index, number in markers] != list(
+            range(1, len(markers) + 1)
+        ):
+            continue
+        if len(" ".join(raw_lines[start + 1 : markers[0][0]]).split()) > 100:
+            continue
+        boundaries = [index for index, _number in markers] + [end]
+        if any(
+            len(" ".join(raw_lines[left + 1 : right]).split()) < MIN_SHORT_CHAPTER_WORDS
+            or has_toc_signals(raw_lines[left + 1 : min(right, left + 9)])
+            for left, right in zip(boundaries, boundaries[1:])
+        ):
+            continue
+        accepted.update((index, number) for index, number in markers)
+    return accepted
+
 
 def parse_text_chapters(
     text: str,
@@ -196,14 +261,34 @@ def parse_text_structure(
         line = re.sub(r"^#{1,6}\s+", "", raw_line.strip())
         if not line or is_toc_indicator(line):
             continue
-        explicit = bool(heading_regex.fullmatch(line))
+        author_matter = line.casefold() in {
+            "about the author",
+            "about the authors",
+            "author biography",
+        }
+        explicit = bool(heading_regex.fullmatch(line)) or author_matter
         styled = heading_hint_lines is not None and index in heading_hint_lines
         if not explicit and not styled:
             continue
         kind, _ = classify_heading_type(line, detected_language)
+        if author_matter:
+            kind = "notes"
         if kind == "unknown" and chapter_hint_lines and index in chapter_hint_lines:
             kind = "chapter"
         candidates.append((index, line, kind))
+
+    roman_numbers = _roman_chapters_inside_parts(raw_lines, candidates)
+    candidates = [
+        (index, heading, "chapter" if index in roman_numbers else kind)
+        for index, heading, kind in candidates
+    ]
+    known_indices = {index for index, _heading, _kind in candidates}
+    candidates.extend(
+        (index, raw_lines[index].strip(), "chapter")
+        for index in roman_numbers
+        if index not in known_indices
+    )
+    candidates.sort(key=lambda item: item[0])
 
     accepted: list[tuple[int, str, str]] = []
     for index, (line_index, heading, kind) in enumerate(candidates):
@@ -259,11 +344,14 @@ def parse_text_structure(
     if accepted[0][0] > 0:
         leading = "\n".join(raw_lines[: accepted[0][0]]).strip()
         if leading:
+            title_page = len(leading.split()) <= 400 and bool(
+                re.search(r"\b(?:copyright|all rights reserved)\b", leading, re.IGNORECASE)
+            )
             sections.append(
                 {
                     "title": "Opening material",
                     "text": leading,
-                    "section_type": "unknown",
+                    "section_type": "title_page" if title_page else "unknown",
                     "source_location": f"{source_name} 1–{accepted[0][0]}",
                     "start_line": 1,
                     "end_line": accepted[0][0],
@@ -278,7 +366,8 @@ def parse_text_structure(
                 "title": heading,
                 "text": body,
                 "section_type": kind,
-                "source_number": _extract_source_number_from_heading(heading),
+                "source_number": roman_numbers.get(line_index)
+                or _extract_source_number_from_heading(heading),
                 "source_location": f"{source_name} {line_index + 1}–{end}",
                 "start_line": line_index + 1,
                 "end_line": end,

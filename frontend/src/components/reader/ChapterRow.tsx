@@ -63,6 +63,7 @@ export const ChapterRow = memo(function ChapterRow({ chapter, summary = null, un
         </div>
         <div className="min-w-0">
           <h3 id={`chapter-title-${chapter.number}`} className={`break-words text-base font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>{title}</h3>
+          {chapter.title_suggestion ? <p className={`mt-1 text-xs ${isDark ? "text-teal-200" : "text-teal-800"}`}>Suggested from chapter recap: {chapter.title_suggestion}</p> : null}
           {tags ? <p className={`mt-1 break-words text-xs ${isDark ? "text-slate-400" : "text-stone-500"}`}>{tags}</p> : null}
         </div>
 

@@ -133,6 +133,43 @@ def _make_text_pdf(chapters: list[str]) -> bytes:
     return pdf_bytes
 
 
+def test_pdf_preview_detects_roman_chapters_nested_under_parts():
+    document = fitz.open()
+    body = "Mara crossed the harbor gate before sunrise. " * 8
+    for heading in ("Part One", "I", "II", "Part Two", "I", "II"):
+        page = document.new_page(width=595, height=842)
+        page.insert_text((72, 72), heading, fontsize=20)
+        if heading in {"I", "II"}:
+            assert page.insert_textbox(fitz.Rect(72, 110, 520, 500), body, fontsize=11) >= 0
+    raw = document.write()
+    document.close()
+
+    preview = build_import_preview(format_name="pdf", work_type="novel", raw=raw)
+
+    assert preview["chapter_count"] == 4
+    assert [(item["title"], item["type"]) for item in preview["sections"]] == [
+        ("Part One", "part"),
+        ("I", "chapter"),
+        ("II", "chapter"),
+        ("Part Two", "part"),
+        ("I", "chapter"),
+        ("II", "chapter"),
+    ]
+    sections = preview["sections"]
+    assert [item["number"] for item in sections if item["type"] == "chapter"] == [
+        1,
+        2,
+        1,
+        2,
+    ]
+    assert [item["parent_id"] for item in sections if item["type"] == "chapter"] == [
+        sections[0]["id"],
+        sections[0]["id"],
+        sections[3]["id"],
+        sections[3]["id"],
+    ]
+
+
 def test_preview_txt_english_chapters():
     body = "word " * 200
     raw = f"Chapter 1\n{body}\nChapter 2\n{body}".encode()
@@ -141,6 +178,16 @@ def test_preview_txt_english_chapters():
     assert preview["chapter_count"] == 2
     assert len(preview["sections"]) == 2
     assert preview["confidence"] > 0.4
+
+
+def test_preview_warns_when_a_part_contains_undetected_long_chapter_text():
+    raw = ("Part One\n\n" + "The harbor remained silent. " * 1300).encode()
+
+    preview = build_import_preview(format_name="txt", work_type="novel", raw=raw, language="en")
+
+    assert preview["chapter_count"] == 0
+    assert any("Review the chapter split" in item["message"] for item in preview["warnings"])
+    assert preview["confidence"] <= 0.5
 
 
 def test_preview_txt_french_chapters():

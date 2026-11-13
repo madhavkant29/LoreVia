@@ -158,16 +158,16 @@ def test_evidence_plan_hash_changes_with_source_prompt_and_review_policy(monkeyp
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("outcomes", "expected_caps", "should_apply"),
+    ("outcomes", "expected_caps", "incomplete_reasons"),
     [
-        (["complete"], [1024], True),
-        (["length", "complete"], [1024, 1536], True),
-        (["length", "length"], [1024, 1536], False),
-        (["content_filter"], [1024], False),
+        (["complete"], [1024], {}),
+        (["length", "complete"], [1024, 1536], {}),
+        (["length", "length"], [1024, 1536], {"length": 1}),
+        (["content_filter"], [1024], {"content_filter": 1}),
     ],
 )
-async def test_relationship_review_retries_only_one_length_response_and_applies_atomically(
-    monkeypatch, outcomes, expected_caps, should_apply
+async def test_relationship_review_retries_only_length_and_queues_incomplete_for_review(
+    monkeypatch, outcomes, expected_caps, incomplete_reasons
 ):
     generation_id = uuid.uuid4()
     book_id = uuid.uuid4()
@@ -224,22 +224,93 @@ async def test_relationship_review_retries_only_one_length_response_and_applies_
     monkeypatch.setattr(plan_relationship_evidence_review, "complete_with_fallback", paid_call)
     monkeypatch.setattr(plan_relationship_evidence_review, "apply_plan", apply_plan)
 
-    if should_apply:
-        result = await plan_relationship_evidence_review.apply_evidence_review_plan(
-            book_id=book_id,
-            expected_generation_id=generation_id,
-            expected_plan_sha256="plan",
-        )
-        assert result["ai_calls"] == len(expected_caps)
-    else:
-        with pytest.raises(LLMIncompleteResponseError):
-            await plan_relationship_evidence_review.apply_evidence_review_plan(
-                book_id=book_id,
-                expected_generation_id=generation_id,
-                expected_plan_sha256="plan",
-            )
+    result = await plan_relationship_evidence_review.apply_evidence_review_plan(
+        book_id=book_id,
+        expected_generation_id=generation_id,
+        expected_plan_sha256="plan",
+    )
+    assert result["ai_calls"] == len(expected_caps)
+    assert result["incomplete_responses_by_reason"] == incomplete_reasons
     assert calls == expected_caps
-    assert bool(applied) is should_apply
+    assert bool(applied)
+
+
+@pytest.mark.asyncio
+async def test_relationship_review_keeps_later_verified_proposal_after_filtered_pair(monkeypatch):
+    generation_id = uuid.uuid4()
+    book_id = uuid.uuid4()
+    quote = "Mara and Lina signed the pact."
+    candidate = SimpleNamespace(evidence={"repaired_relationship_id": "tie-2"}, reason_codes=[])
+    plan = {
+        "active_generation_id": str(generation_id),
+        "evidence_plan_sha256": "plan",
+        "repair_plan_sha256": "repair",
+        "budget": {"calls": 2},
+        "_eligible": [
+            {
+                "relationship_id": tie_id,
+                "prompt": quote,
+                "windows": [(0, len(quote), quote)],
+                "character_a": "Mara",
+                "character_b": "Lina",
+            }
+            for tie_id in ("tie-1", "tie-2")
+        ],
+    }
+    calls = []
+
+    class Session:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        def begin(self):
+            return self
+
+        async def execute(self, *_args):
+            return SimpleNamespace(scalars=lambda: SimpleNamespace(all=lambda: [candidate]))
+
+        async def get(self, *_args):
+            return SimpleNamespace(mode="author", user_id=uuid.uuid4())
+
+    async def paid_call(**kwargs):
+        calls.append(kwargs["max_tokens"])
+        if len(calls) == 1:
+            raise LLMIncompleteResponseError(
+                "llm_response_incomplete", finish_reason="content_filter"
+            )
+        return json.dumps({"supported": True, "relationship_type": "allies", "quote": quote})
+
+    async def apply_plan(*_args, **_kwargs):
+        return {"review_count": 1}
+
+    async def build_plan(*_args):
+        return plan
+
+    async def mark_dirty(*_args):
+        return None
+
+    monkeypatch.setattr(plan_relationship_evidence_review, "AsyncSessionLocal", Session)
+    monkeypatch.setattr(plan_relationship_evidence_review, "build_evidence_review_plan", build_plan)
+    monkeypatch.setattr(plan_relationship_evidence_review, "complete_with_fallback", paid_call)
+    monkeypatch.setattr(plan_relationship_evidence_review, "apply_plan", apply_plan)
+    monkeypatch.setattr(plan_relationship_evidence_review, "mark_book_cache_dirty", mark_dirty)
+
+    result = await plan_relationship_evidence_review.apply_evidence_review_plan(
+        book_id=book_id,
+        expected_generation_id=generation_id,
+        expected_plan_sha256="plan",
+    )
+
+    assert calls == [1024, 1024]
+    assert result["incomplete_responses_by_reason"] == {"content_filter": 1}
+    assert result["relationships_queued_for_review"] == 1
+    assert result["source_verified_proposals"] == 1
+    assert result["participant_anchored_proposals"] == 1
+    assert candidate.evidence["relationship"]["review_proposal"]["quote"] == quote
+    assert "ai_evidence_proposal_needs_review" in candidate.reason_codes
 
 
 @pytest.mark.asyncio

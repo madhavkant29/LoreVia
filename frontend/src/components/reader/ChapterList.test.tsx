@@ -84,6 +84,15 @@ describe("ChapterList", () => {
     expect(view.textContent).toContain("Mark read")
   })
 
+  it("shows a recap-derived title suggestion beside the unchanged source label", () => {
+    const view = renderChapterList({
+      chapters: [{ number: 2, title: "I", title_suggestion: "The Harbor Gate", processed: true, read: true }],
+    })
+
+    expect(view.textContent).toContain("I")
+    expect(view.textContent).toContain("Suggested from chapter recap: The Harbor Gate")
+  })
+
   it("renders optional chapter removal actions", () => {
     const onDeleteChapter = vi.fn()
 
@@ -180,6 +189,7 @@ function renderChapterList({
   chapters: Array<{
     number: number
     title: string | null
+    title_suggestion?: string | null
     processed: boolean
     read: boolean
     intelligence_available?: boolean

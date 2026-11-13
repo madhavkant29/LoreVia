@@ -6,6 +6,8 @@ import pytest
 from sqlalchemy import select
 
 from app.models.book import Book, BookSection, Chapter
+from app.models.generation import BookDataGeneration
+from app.models.intelligence import ChapterSummary
 from app.models.user import User
 from app.services.book_section_service import (
     append_import_structure_plans,
@@ -13,6 +15,7 @@ from app.services.book_section_service import (
     persist_book_sections,
 )
 from app.utils.books.structure_plan import build_structure_plan, materialize_structure_plan
+from app.utils.reader_utils import build_chapter_list_payload
 
 
 def test_appending_later_import_plan_keeps_existing_structure():
@@ -22,7 +25,7 @@ def test_appending_later_import_plan_keeps_existing_structure():
         s3_key="books/test.txt",
         import_structure={"source_sha256": "old"},
     )
-    batch = {"scope": "later", "plan": {"parser_version": "prose-structure-2", "sections": []}}
+    batch = {"scope": "later", "plan": {"parser_version": "prose-structure-3", "sections": []}}
     append_import_structure_plans(book, [batch, batch])
     assert book.import_structure["source_sha256"] == "old"
     assert book.import_structure["additional_imports"] == [
@@ -150,3 +153,95 @@ async def test_rebuild_filter_keeps_legacy_chapters_but_excludes_imported_notes(
     )
     eligible = await filter_analysis_eligible_chapters(db, book.id, chapters)
     assert [chapter.number for chapter in eligible] == [1, 3]
+
+
+@pytest.mark.asyncio
+async def test_chapter_list_suggests_titles_from_active_summary_without_changing_source_heading(db):
+    user = User(
+        email=f"titles-{uuid.uuid4().hex[:8]}@lorevia.test",
+        username=f"titles{uuid.uuid4().hex[:8]}",
+        password_hash="hash",
+    )
+    db.add(user)
+    await db.flush()
+    book = Book(
+        user_id=user.id,
+        title="Harbor",
+        mode="author",
+        format="pdf",
+        s3_key="books/harbor.pdf",
+        status="ready",
+        import_structure={"parser_version": "test"},
+    )
+    db.add(book)
+    await db.flush()
+    chapter = Chapter(
+        book_id=book.id,
+        number=1,
+        title="I",
+        s3_key="chapters/harbor.txt",
+        processed=True,
+        analysis_state={"status": "succeeded", "generated_modes": ["detailed"]},
+    )
+    db.add(chapter)
+    await db.flush()
+    db.add(
+        BookSection(
+            book_id=book.id,
+            chapter_id=chapter.id,
+            source_section_id="harbor-I",
+            kind="chapter",
+            title="I",
+            source_label="I",
+            display_order=1,
+            start_block=0,
+            end_block=3,
+            include_in_analysis=True,
+        )
+    )
+    stale = BookDataGeneration(
+        book_id=book.id,
+        rebuild_run_id=uuid.uuid4().hex,
+        status="retired",
+        reason="test",
+    )
+    active = BookDataGeneration(
+        book_id=book.id,
+        rebuild_run_id=uuid.uuid4().hex,
+        status="active",
+        reason="test",
+    )
+    db.add_all([stale, active])
+    await db.flush()
+    db.add_all(
+        [
+            ChapterSummary(
+                chapter_id=chapter.id,
+                generation_id=stale.id,
+                mode="detailed",
+                content="A storm hits the harbor.",
+                key_events=[{"event_title": "The Storm Arrives"}],
+            ),
+            ChapterSummary(
+                chapter_id=chapter.id,
+                generation_id=active.id,
+                mode="detailed",
+                content="The harbor gate closes at dusk.",
+                key_events=[{"event_title": "The Harbor Gate Closes"}],
+            ),
+        ]
+    )
+    await db.flush()
+
+    payload = await build_chapter_list_payload(
+        db, book=book, current_user=user, intelligence_map={}
+    )
+    assert payload["chapters"][0]["title"] == "I"
+    assert payload["chapters"][0]["printed_label"] == "I"
+    assert payload["chapters"][0]["title_suggestion"] == "The Harbor Gate Closes"
+
+    chapter.processed = False
+    payload = await build_chapter_list_payload(
+        db, book=book, current_user=user, intelligence_map={}
+    )
+    assert payload["chapters"][0]["title_suggestion"] is None

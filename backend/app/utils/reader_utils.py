@@ -35,9 +35,11 @@ from app.engine.character.entity_filters import (
 from app.engine.character.profile_builder import build_description
 from app.models.book import Book, BookSection, Chapter, ChapterMedia
 from app.models.character import Character
+from app.models.generation import BookDataGeneration
 from app.models.intelligence import ChapterSummary, PlotThread
 from app.models.progress import ReadingProgress
 from app.utils.billing_utils import has_paid_reading_access
+from app.utils.books.chapter_titles import suggest_source_chapter_title
 from app.utils.books.collaboration import (
     build_book_access_context,
     normalize_collaboration_scope,
@@ -824,6 +826,57 @@ async def build_chapter_list_payload(
             section.chapter_id: section for section in outline if section.chapter_id
         }
         parts_by_id = {section.id: section for section in outline if section.kind == "part"}
+    title_suggestions: dict[uuid.UUID, str] = {}
+    if access.workspace_shell == "author" and getattr(book, "status", None) == "ready":
+        eligible = [
+            chapter
+            for chapter in chapters
+            if chapter.processed
+            and (chapter_analysis_status(chapter) or {}).get("status") == "succeeded"
+            and (
+                chapter.id not in section_by_chapter
+                or (
+                    section_by_chapter[chapter.id].kind == "chapter"
+                    and section_by_chapter[chapter.id].include_in_analysis
+                )
+            )
+        ]
+        if eligible:
+            active_generation_id = await db.scalar(
+                select(BookDataGeneration.id).where(
+                    BookDataGeneration.book_id == book.id,
+                    BookDataGeneration.status == "active",
+                )
+            )
+            summaries = (
+                await db.execute(
+                    select(
+                        ChapterSummary.chapter_id,
+                        ChapterSummary.content,
+                        ChapterSummary.key_events,
+                    ).where(
+                        ChapterSummary.chapter_id.in_([chapter.id for chapter in eligible]),
+                        ChapterSummary.mode == "detailed",
+                        ChapterSummary.generation_id == active_generation_id,
+                    )
+                )
+            ).all()
+            summary_by_id = {row[0]: (row[1], row[2]) for row in summaries}
+            for chapter in eligible:
+                summary = summary_by_id.get(chapter.id)
+                if summary is None:
+                    continue
+                section = section_by_chapter.get(chapter.id)
+                suggestion = suggest_source_chapter_title(
+                    chapter.title,
+                    source_label=section.source_label if section else None,
+                    section_kind=section.kind if section else None,
+                    summary=summary[0],
+                    key_events=summary[1] if isinstance(summary[1], list) else None,
+                    chapter_number=chapter.number,
+                )
+                if suggestion:
+                    title_suggestions[chapter.id] = suggestion
     return {
         "read_upto": read_upto,
         "current_chapter": read_upto,
@@ -831,6 +884,7 @@ async def build_chapter_list_payload(
             {
                 "number": chapter.number,
                 "title": chapter.title,
+                "title_suggestion": title_suggestions.get(chapter.id),
                 "chapter_kind": getattr(chapter, "chapter_kind", "chapter"),
                 "printed_label": section_by_chapter[chapter.id].source_label
                 if chapter.id in section_by_chapter
