@@ -76,6 +76,11 @@ def compare_saved_chapters_with_reparsed(saved: list[dict], reparsed: list[dict]
         proposed = reparsed[index] if index < len(reparsed) else None
         current_text = str(previous.get("text") or "") if previous else ""
         proposed_text = str(proposed.get("text") or "") if proposed else ""
+        content_preserved, line_wrap_joins = (
+            _compare_reparsed_words(current_text, proposed_text)
+            if previous and proposed
+            else (False, 0)
+        )
         comparisons.append(
             {
                 "number": index + 1,
@@ -94,9 +99,33 @@ def compare_saved_chapters_with_reparsed(saved: list[dict], reparsed: list[dict]
                 "title_matches": previous is not None
                 and proposed is not None
                 and previous.get("title") == proposed.get("title"),
-                "word_sequence_matches": previous is not None
-                and proposed is not None
-                and " ".join(current_text.split()) == " ".join(proposed_text.split()),
+                "content_preserved": content_preserved,
+                "line_wrap_joins": line_wrap_joins,
             }
         )
     return comparisons
+
+
+def _compare_reparsed_words(current_text: str, proposed_text: str) -> tuple[bool, int]:
+    """Accept only PDF line-wrap joins; reject inserted or changed manuscript words."""
+    before = current_text.split()
+    after = proposed_text.split()
+    joins = 0
+    old_index = new_index = 0
+    while old_index < len(before) and new_index < len(after):
+        if before[old_index] == after[new_index]:
+            old_index += 1
+            new_index += 1
+            continue
+        if old_index + 1 >= len(before):
+            return False, joins
+        first, second = before[old_index : old_index + 2]
+        target = after[new_index]
+        hyphen_join = first.endswith("-") and first[:-1] + second == target
+        punctuation_join = second[0] in ".,;:!?" and first + second == target
+        if not (hyphen_join or punctuation_join):
+            return False, joins
+        joins += 1
+        old_index += 2
+        new_index += 1
+    return old_index == len(before) and new_index == len(after), joins

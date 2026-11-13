@@ -48,12 +48,11 @@ def test_reparsed_comparison_detects_missing_or_changed_chapter_without_text():
     ]
 
     assert all(
-        row["word_sequence_matches"]
-        for row in compare_saved_chapters_with_reparsed(saved, reparsed)
+        row["content_preserved"] for row in compare_saved_chapters_with_reparsed(saved, reparsed)
     )
     reparsed[2]["text"] = "A changed chapter."
     comparisons = compare_saved_chapters_with_reparsed(saved, reparsed)
-    assert comparisons[2]["word_sequence_matches"] is False
+    assert comparisons[2]["content_preserved"] is False
     assert "text" not in comparisons[2]
 
 
@@ -64,5 +63,18 @@ def test_reparsed_comparison_reports_paragraph_repair_separately_from_word_chang
 
     result = compare_saved_chapters_with_reparsed(saved, reparsed)[0]
 
-    assert result["word_sequence_matches"] is True
+    assert result["content_preserved"] is True
     assert result["current_paragraphs"] > result["proposed_paragraphs"]
+
+
+def test_reparsed_comparison_allows_pdf_line_wrap_joins_but_rejects_changed_words():
+    saved = [{"title": "I", "text": "The sea-\n\nbird turned . Then it landed."}]
+    reparsed = [{"title": "I", "text": "The seabird turned. Then it landed."}]
+
+    result = compare_saved_chapters_with_reparsed(saved, reparsed)[0]
+
+    assert result["content_preserved"] is True
+    assert result["line_wrap_joins"] == 2
+
+    reparsed[0]["text"] = "The seabird vanished. Then it landed."
+    assert compare_saved_chapters_with_reparsed(saved, reparsed)[0]["content_preserved"] is False

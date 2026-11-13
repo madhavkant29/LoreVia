@@ -123,8 +123,8 @@ async def build_plan(book_id: uuid.UUID) -> dict:
         "saved_chapter_count": len(saved),
         "proposed_chapter_count": len(reparsed["chapters"]),
         "proposed_story_chapters": sum(row["type"] == "chapter" for row in sections),
-        "all_chapter_word_sequences_match": bool(comparisons)
-        and all(row["word_sequence_matches"] for row in comparisons),
+        "all_chapter_content_preserved": bool(comparisons)
+        and all(row["content_preserved"] for row in comparisons),
         "all_chapter_titles_match": bool(comparisons)
         and all(row["title_matches"] for row in comparisons),
         "comparisons": comparisons,
