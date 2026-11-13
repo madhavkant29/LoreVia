@@ -30,6 +30,7 @@ from app.utils.books.chapter_titles import (
     build_chapter_title_from_summary,
     chapter_title_is_placeholder,
     normalize_chapter_title,
+    suggest_source_chapter_title,
 )
 from app.utils.books.character_cards import build_character_card_payload
 from app.utils.books.consistency_reports import list_chapter_consistency_reports
@@ -1622,6 +1623,50 @@ def test_build_chapter_title_from_summary_prefers_key_event_titles_and_limits_wo
     )
 
     assert derived == "Shattered Gate Opens Wide"
+
+
+def test_source_numbered_chapter_gets_short_suggestion_without_changing_label():
+    args = {
+        "source_label": "II",
+        "section_kind": "chapter",
+        "summary": "Mara returns to the harbor and finds the gate shut.",
+        "key_events": [{"event_title": "The Harbor Gate Closes"}],
+        "chapter_number": 3,
+    }
+    assert suggest_source_chapter_title("II", **args) == "The Harbor Gate Closes"
+    assert suggest_source_chapter_title("Mara's Choice", **args) is None
+    assert suggest_source_chapter_title("II", **{**args, "source_label": None}) is None
+    assert suggest_source_chapter_title("II", **{**args, "summary": None, "key_events": []}) is None
+
+
+def test_source_title_suggestion_preserves_non_ascii_names():
+    assert (
+        suggest_source_chapter_title(
+            "III",
+            source_label="III",
+            section_kind="chapter",
+            summary="Céleste visite Montréal.",
+            chapter_number=3,
+        )
+        == "Céleste Visite Montréal"
+    )
+
+
+def test_source_title_suggestion_uses_chapters_main_event():
+    assert (
+        suggest_source_chapter_title(
+            "I",
+            source_label="I",
+            section_kind="chapter",
+            summary="Meursault travels after receiving news.",
+            key_events=[
+                {"event_title": "The Journey Begins", "importance": 2},
+                {"event_title": "The Funeral", "importance": 9},
+            ],
+            chapter_number=1,
+        )
+        == "The Funeral"
+    )
 
 
 def test_chapter_title_is_placeholder_detects_generic_labels():

@@ -8,7 +8,7 @@ CHAPTER_TITLE_MIN_WORDS = 1
 
 CHAPTER_TITLE_MAX_WORDS = 4
 
-CHAPTER_TITLE_WORD_RE = re.compile(r"[A-Za-z0-9]+(?:['\u2019-][A-Za-z0-9]+)*")
+CHAPTER_TITLE_WORD_RE = re.compile(r"[^\W_]+(?:['\u2019-][^\W_]+)*", re.UNICODE)
 
 CHAPTER_TITLE_STOPWORDS = {
     "a",

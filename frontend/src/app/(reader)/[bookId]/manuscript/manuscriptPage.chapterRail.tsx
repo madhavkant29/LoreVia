@@ -81,6 +81,7 @@ export function ManuscriptChapterRailSection({
                       <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${active ? "bg-teal-300" : chapter.processed ? "bg-emerald-400" : isDark ? "bg-slate-600" : "bg-stone-300"}`} />
                     </div>
                     <p className="mt-1 line-clamp-1 text-xs opacity-75">{chapter.title || `Chapter ${formatIndex(chapter.number, chapterIndexFormat)}`}</p>
+                    {chapter.title_suggestion ? <p className="mt-1 line-clamp-1 text-3xs opacity-75">Suggested: {chapter.title_suggestion}</p> : null}
                     <p className={`text-3xs ${isDark ? "text-slate-300" : "text-stone-500"}`}>{rowStats.sceneCount} scene{rowStats.sceneCount === 1 ? "" : "s"} - {rowReadingTime}</p>
                     <p className={`mt-2 text-3xs ${needsReprocess ? isDark ? "text-amber-200" : "text-amber-700" : isDark ? "text-slate-300" : "text-stone-500"}`}>
                       {rowWordCount > 0 ? `${rowWordCount.toLocaleString()} words` : "Draft ready"} - {needsReprocess ? "Needs reprocess" : dirtyDrafts.includes(chapter.number) ? "needs review" : "saved"}

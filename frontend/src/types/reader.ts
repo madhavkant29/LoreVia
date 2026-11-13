@@ -99,6 +99,7 @@ export type ChapterKind =
 export interface ChapterListItem {
   number: number
   title: string | null
+  title_suggestion?: string | null
   chapter_kind?: ChapterKind
   printed_label?: string | null
   parent_part_id?: string | null

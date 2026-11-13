@@ -54,6 +54,57 @@ def chapter_title_is_placeholder(title: str | None, *, chapter_number: int | Non
     )
 
 
+def suggest_source_chapter_title(
+    title: str | None,
+    *,
+    source_label: str | None,
+    section_kind: str | None,
+    summary: str | None,
+    key_events: list[dict[str, Any]] | None = None,
+    chapter_number: int | None = None,
+) -> str | None:
+    """Offer a recap-derived title without changing the printed chapter heading."""
+    cleaned = " ".join(str(title or "").split()).strip()
+    numbered_source_label = (
+        section_kind == "chapter"
+        and cleaned == " ".join(str(source_label or "").split()).strip()
+        and bool(re.fullmatch(r"(?:[IVXLCDM]{1,8}|[0-9]{1,4})[.]?", cleaned, re.IGNORECASE))
+    )
+    if not numbered_source_label and not chapter_title_is_placeholder(
+        title, chapter_number=chapter_number
+    ):
+        return None
+    ranked_events = sorted(
+        (event for event in (key_events or []) if isinstance(event, dict)),
+        key=lambda event: _event_importance(event),
+        reverse=True,
+    )
+    suggestion = None
+    if ranked_events:
+        event_title = book_text._clean_optional_text(
+            str(ranked_events[0].get("event_title") or ranked_events[0].get("event") or "")
+        )
+        event_words = CHAPTER_TITLE_WORD_RE.findall(event_title or "")
+        if 1 <= len(event_words) <= CHAPTER_TITLE_MAX_WORDS:
+            suggestion = " ".join(
+                word
+                if any(character.isupper() for character in word[1:])
+                else word[:1].upper() + word[1:]
+                for word in event_words
+            )
+    suggestion = suggestion or build_chapter_title_from_summary(summary, key_events=ranked_events)
+    if not suggestion or suggestion.casefold() == cleaned.casefold():
+        return None
+    return suggestion
+
+
+def _event_importance(event: dict[str, Any]) -> int:
+    try:
+        return int(event.get("importance") or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
 def build_chapter_title_from_summary(
     summary: str | None,
     *,

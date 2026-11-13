@@ -120,6 +120,7 @@ class ChapterAnalysisStatusOut(BaseModel):
 class ChapterListItemOut(BaseModel):
     number: int
     title: str | None = None
+    title_suggestion: str | None = None
     chapter_kind: str = "chapter"
     printed_label: str | None = None
     parent_part_id: str | None = None

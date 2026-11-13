@@ -15,6 +15,7 @@ type ManuscriptChapterEditorSurfaceProps = {
   characters: Character[]
   chapterApproxPages: number
   chapterHeading: string
+  titleSuggestion?: string | null
   chapterReadingTime: string
   chapterSceneCount: number
   chapterWordCount: number
@@ -53,6 +54,7 @@ export function ManuscriptChapterEditorSurface({
   characters,
   chapterApproxPages,
   chapterHeading,
+  titleSuggestion,
   chapterReadingTime,
   chapterSceneCount,
   chapterWordCount,
@@ -107,6 +109,7 @@ export function ManuscriptChapterEditorSurface({
                 onBlur={(event) => onChapterHeadingBlur(event.target.value)}
                 className={`mt-3 w-full border-0 bg-transparent font-serif text-2xl font-semibold leading-tight outline-none focus-visible:ring-2 focus-visible:ring-teal-500 sm:text-3xl ${isDark ? "text-white" : "text-stone-950"}`}
               />
+              {titleSuggestion ? <p className={`mt-1 text-xs ${isDark ? "text-teal-200" : "text-teal-800"}`}>Suggested from chapter recap: {titleSuggestion}. Edit the title above to use it.</p> : null}
               <p className={`mt-1 text-xs ${isDark ? "text-slate-300" : "text-stone-500"}`}>{chapterReadingTime} · {chapterSceneCount} scene{chapterSceneCount === 1 ? "" : "s"}</p>
               <p className={`mt-2 text-xs ${isDark ? "text-slate-300" : "text-stone-500"}`}>{chapterWordCount.toLocaleString()} words · ~{chapterApproxPages} pages</p>
             </div>

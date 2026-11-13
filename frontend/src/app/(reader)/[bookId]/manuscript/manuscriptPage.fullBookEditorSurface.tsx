@@ -115,6 +115,7 @@ function FullBookChapterCard({
               onBlur={(event) => onHeadingBlur(chapter.number, draft, event.target.value)}
               className={`mt-3 w-full border-0 bg-transparent font-serif text-3xl font-semibold leading-tight outline-none focus-visible:ring-2 focus-visible:ring-teal-500 sm:text-3xl ${isDark ? "text-white" : "text-stone-950"}`}
             />
+            {chapter.title_suggestion ? <p className={`mt-1 text-xs ${isDark ? "text-teal-200" : "text-teal-800"}`}>Suggested from chapter recap: {chapter.title_suggestion}. Edit the title above to use it.</p> : null}
             <p className={`mt-2 text-xs ${isDark ? "text-slate-300" : "text-stone-500"}`}>{wordCount.toLocaleString()} words / ~{Math.max(1, Math.ceil(wordCount / 500))} pages</p>
             <p className={`mt-1 text-xs ${isDark ? "text-slate-300" : "text-stone-500"}`}>{formatReadingTimeLabel(wordCount > 0 ? Math.max(1, Math.ceil(wordCount / 250)) : 0)} · {sceneCount} scene{sceneCount === 1 ? "" : "s"}</p>
           </div>

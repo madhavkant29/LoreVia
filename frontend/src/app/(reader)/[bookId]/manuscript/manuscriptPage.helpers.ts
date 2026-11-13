@@ -28,7 +28,7 @@ export {
 
 export type ManuscriptBookDraft = { title: string; text: string; html: string }
 export type BookDraftMap = Record<number, ManuscriptBookDraft>
-export type ManuscriptChapterListItem = { number: number; title?: string | null }
+export type ManuscriptChapterListItem = { number: number; title?: string | null; title_suggestion?: string | null }
 export type ManuscriptIndexFormat = Parameters<typeof formatIndex>[1]
 export type ManuscriptPreviewSection = {
   id: string

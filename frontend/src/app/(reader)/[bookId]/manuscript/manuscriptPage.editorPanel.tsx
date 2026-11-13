@@ -163,6 +163,7 @@ export function ManuscriptEditorPanel({
         characters={characters}
         chapterApproxPages={chapterApproxPages}
         chapterHeading={chapterHeading}
+        titleSuggestion={chapterListItems.find((chapter) => chapter.number === activeChapterNumber)?.title_suggestion}
         chapterReadingTime={chapterReadingTime}
         chapterSceneCount={chapterSceneCount}
         chapterWordCount={chapterWordCount}
