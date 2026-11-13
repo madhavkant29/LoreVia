@@ -112,6 +112,8 @@ def parse_pdf_structure(
         for page_number, page in enumerate(doc, start=1):
             page_height = float(cast(Any, page).rect.height or 0)
             diagnostics_state: dict[str, Any] = {"multi_column_pages": 0}
+            ordered_items: list[dict] = []
+            pending_lines: list[dict] = []
             for item in _page_blocks(page, diagnostics_state=diagnostics_state):
                 if item["type"] == "text":
                     cleaned = _clean_text(item["text"])
@@ -124,9 +126,29 @@ def parse_pdf_structure(
                         page_number=page_number,
                     ):
                         continue
-                    parts.append(cleaned)
+                    pending_lines.append({"text": cleaned, "bbox": item["bbox"]})
+                    continue
+                ordered_items.extend(
+                    _line_items_to_paragraph_items(
+                        pending_lines,
+                        page_number=page_number,
+                        total_pages=doc.page_count,
+                    )
+                )
+                pending_lines = []
+                ordered_items.append(item)
+            ordered_items.extend(
+                _line_items_to_paragraph_items(
+                    pending_lines,
+                    page_number=page_number,
+                    total_pages=doc.page_count,
+                )
+            )
+            for item in ordered_items:
+                if item["type"] == "text":
+                    parts.append(item["text"])
                     pages.append(page_number)
-                    text_count += len(cleaned.split())
+                    text_count += len(item["text"].split())
                 else:
                     marker = (
                         "[[IMAGE:"

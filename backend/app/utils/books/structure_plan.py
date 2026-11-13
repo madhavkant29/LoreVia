@@ -12,7 +12,7 @@ from fastapi import HTTPException
 from app.parsers.heading_patterns import classify_heading_type
 from app.schemas.section import SectionMeta, SectionTypeLiteral
 
-PARSER_VERSION = "prose-structure-2"
+PARSER_VERSION = "prose-structure-3"
 SECTION_TYPES = set(SectionTypeLiteral.__args__)
 NON_STORY_TYPES = {
     "toc",

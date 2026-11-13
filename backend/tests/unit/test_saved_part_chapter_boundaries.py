@@ -1,0 +1,68 @@
+import pytest
+
+from app.utils.books.chapter_boundaries import (
+    compare_saved_chapters_with_reparsed,
+    split_saved_part_chapters,
+)
+
+
+def test_saved_part_split_preserves_exact_source_order_and_words():
+    body = "Mara crossed the harbor gate before sunrise. " * 8
+    source = f"I\n\n{body}\r\n\r\nII\r\n\r\n{body}\r\n"
+
+    chapters = split_saved_part_chapters("Part One", source)
+
+    assert [item["title"] for item in chapters] == ["I", "II"]
+    assert "".join(item["raw_section"] for item in chapters) == source
+    assert [item["source_number"] for item in chapters] == [1, 2]
+    assert all(item["text"].startswith("Mara crossed") for item in chapters)
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "I\n\nMara crossed the harbor gate before sunrise.",
+        "I\n\nMara crossed the harbor gate before sunrise.\n\nIII\n\nMara returned.",
+        "An introduction too long. " * 120
+        + "\n\nI\n\n"
+        + "Mara crossed the harbor gate before sunrise. " * 8
+        + "\n\nII\n\n"
+        + "Mara crossed the harbor gate before sunrise. " * 8,
+    ],
+)
+def test_saved_part_split_rejects_ambiguous_boundaries(source):
+    with pytest.raises(ValueError, match="saved_part_chapter_boundaries_ambiguous"):
+        split_saved_part_chapters("Part One", source)
+
+
+def test_reparsed_comparison_detects_missing_or_changed_chapter_without_text():
+    body = "Mara crossed the harbor gate before sunrise. " * 8
+    saved = [
+        {"title": "Opening material", "text": "A note about the story."},
+        {"title": "Part One — opening", "text": f"I\n\n{body}\n\nII\n\n{body}"},
+    ]
+    reparsed = [
+        {"title": "Opening material", "text": "A note about the story."},
+        {"title": "I", "text": body.strip()},
+        {"title": "II", "text": body.strip()},
+    ]
+
+    assert all(
+        row["word_sequence_matches"]
+        for row in compare_saved_chapters_with_reparsed(saved, reparsed)
+    )
+    reparsed[2]["text"] = "A changed chapter."
+    comparisons = compare_saved_chapters_with_reparsed(saved, reparsed)
+    assert comparisons[2]["word_sequence_matches"] is False
+    assert "text" not in comparisons[2]
+
+
+def test_reparsed_comparison_reports_paragraph_repair_separately_from_word_changes():
+    body = "Mara crossed the harbor gate.\n\nThe captain watched from the pier. " * 3
+    saved = [{"title": "I", "text": body}]
+    reparsed = [{"title": "I", "text": " ".join(body.split())}]
+
+    result = compare_saved_chapters_with_reparsed(saved, reparsed)[0]
+
+    assert result["word_sequence_matches"] is True
+    assert result["current_paragraphs"] > result["proposed_paragraphs"]

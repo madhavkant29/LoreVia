@@ -22,7 +22,7 @@ def test_appending_later_import_plan_keeps_existing_structure():
         s3_key="books/test.txt",
         import_structure={"source_sha256": "old"},
     )
-    batch = {"scope": "later", "plan": {"parser_version": "prose-structure-2", "sections": []}}
+    batch = {"scope": "later", "plan": {"parser_version": "prose-structure-3", "sections": []}}
     append_import_structure_plans(book, [batch, batch])
     assert book.import_structure["source_sha256"] == "old"
     assert book.import_structure["additional_imports"] == [

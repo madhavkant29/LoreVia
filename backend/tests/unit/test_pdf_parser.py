@@ -22,7 +22,40 @@ from app.parsers.pdf_parser import (
     _scrub_inline_page_artifacts,
     _should_merge_across_pages,
     _split_large_chapter_parts,
+    parse_pdf_structure,
 )
+
+
+def test_structured_pdf_joins_visual_lines_but_preserves_paragraph_breaks():
+    document = fitz.open()
+    page = document.new_page(width=595, height=842)
+    lines = [
+        (72, 70, "Part One"),
+        (72, 110, "I"),
+        (72, 145, "Mara walked through the harbor gate before dawn."),
+        (72, 163, "She carried the letter and watched the empty pier."),
+        (90, 194, "At sunrise, the guard returned with news from the city."),
+        (72, 212, "Mara folded the letter and crossed the bridge."),
+        (72, 258, "II"),
+        (72, 294, "The ship reached the harbor before the storm."),
+        (72, 312, "Mara met the captain and asked about the missing crew."),
+    ]
+    for x, y, line in lines:
+        page.insert_text((x, y), line, fontsize=11)
+    raw = document.write()
+    document.close()
+
+    sections, diagnostics = parse_pdf_structure(raw, language="en")
+
+    assert diagnostics["chapter_count"] == 2
+    assert [(item["title"], item["section_type"]) for item in sections] == [
+        ("Part One", "part"),
+        ("I", "chapter"),
+        ("II", "chapter"),
+    ]
+    assert "before dawn. She carried" in sections[1]["text"]
+    assert "empty pier.\n\nAt sunrise" in sections[1]["text"]
+    assert "missing crew." in sections[2]["text"]
 
 
 def test_clear_two_column_pages_read_down_each_column_before_crossing():
