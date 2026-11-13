@@ -827,7 +827,7 @@ async def build_chapter_list_payload(
         }
         parts_by_id = {section.id: section for section in outline if section.kind == "part"}
     title_suggestions: dict[uuid.UUID, str] = {}
-    if access.workspace_shell == "author" and book.status == "ready":
+    if access.workspace_shell == "author" and getattr(book, "status", None) == "ready":
         eligible = [
             chapter
             for chapter in chapters
