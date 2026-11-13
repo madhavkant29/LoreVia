@@ -15,6 +15,7 @@ from app.parsers.pdf_parser import (
     _is_pagination_noise,
     _is_probable_front_matter,
     _is_repeated_noise,
+    _line_items_to_paragraph_items,
     _needs_forced_large_chapter_split,
     _normalize_chapters,
     _order_two_column_page_items,
@@ -56,6 +57,21 @@ def test_structured_pdf_joins_visual_lines_but_preserves_paragraph_breaks():
     assert "before dawn. She carried" in sections[1]["text"]
     assert "empty pier.\n\nAt sunrise" in sections[1]["text"]
     assert "missing crew." in sections[2]["text"]
+
+
+def test_pdf_paragraph_grouper_keeps_heading_separate_without_extra_vertical_space():
+    lines = [
+        {"text": "I", "bbox": (72, 100, 78, 112)},
+        {"text": "Mara walked through the gate.", "bbox": (72, 115, 270, 127)},
+        {"text": "She looked back at the harbor.", "bbox": (72, 130, 290, 142)},
+    ]
+
+    paragraphs = _line_items_to_paragraph_items(lines, page_number=1, total_pages=1)
+
+    assert [item["text"] for item in paragraphs] == [
+        "I",
+        "Mara walked through the gate. She looked back at the harbor.",
+    ]
 
 
 def test_clear_two_column_pages_read_down_each_column_before_crossing():

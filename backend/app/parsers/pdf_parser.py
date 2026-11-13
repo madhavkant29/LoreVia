@@ -527,7 +527,7 @@ def _should_break_between_lines(
     current_text = str(current_line.get("text") or "").strip()
     if not previous_text or not current_text:
         return False
-    if _extract_heading(current_text):
+    if _extract_heading(previous_text) or _extract_heading(current_text):
         return True
 
     previous_bbox = _normalize_bbox(tuple(previous_line.get("bbox") or (0, 0, 0, 0)))
