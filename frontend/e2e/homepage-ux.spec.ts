@@ -13,6 +13,10 @@ test("homepage navigation and reading layout work across screen sizes", async ({
     await page.goto("/")
 
     await expect(page.getByRole("heading", { level: 1, name: "Find plot holes before your readers do." })).toBeVisible()
+    const demoPlayer = page.getByTitle("LoreVia product demonstration")
+    await expect(demoPlayer).toBeVisible()
+    await expect(demoPlayer).toHaveAttribute("src", "https://www.youtube-nocookie.com/embed/LVwVqo5X4LA")
+    await expect(page.getByRole("link", { name: "Watch on YouTube" })).toHaveAttribute("href", "https://youtu.be/LVwVqo5X4LA")
     expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)).toBe(false)
     expect(await criticalAccessibilityViolations(page), `accessibility violations at ${viewport.name}`).toEqual([])
 

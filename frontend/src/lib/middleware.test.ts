@@ -39,6 +39,7 @@ describe("middleware CSP", () => {
     expect(policy).toContain("https://eu.i.posthog.com")
     expect(policy).toContain("https://example-project.supabase.co")
     expect(policy).toContain("wss://example-project.supabase.co")
+    expect(policy).toContain("frame-src 'self' https://*.paddle.com https://www.youtube-nocookie.com")
     expect(policy).toContain("object-src 'none'")
     expect(policy).not.toContain("https://securepubads.g.doubleclick.net")
     expect(policy).not.toContain("https://googleads.g.doubleclick.net")
