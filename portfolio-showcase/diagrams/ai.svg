@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="720" viewBox="0 0 1600 720">
+<rect width="1600" height="720" fill="#0b1021"/>
+<line x1="145.0" y1="310.0" x2="450.0" y2="238.0" stroke="#5de3c1" stroke-width="4"/>
+<polygon points="450.0,238.0 434.8,234.4 438.0,248.0" fill="#5de3c1"/>
+<line x1="145.0" y1="418.0" x2="450.0" y2="490.0" stroke="#5de3c1" stroke-width="4"/>
+<polygon points="450.0,490.0 438.0,480.0 434.8,493.6" fill="#5de3c1"/>
+<line x1="570.0" y1="184.0" x2="650.0" y2="184.0" stroke="#5de3c1" stroke-width="4"/>
+<polygon points="650.0,184.0 636.0,177.0 636.0,191.0" fill="#5de3c1"/>
+<line x1="450.0" y1="238.0" x2="450.0" y2="490.0" stroke="#5de3c1" stroke-width="4"/>
+<polygon points="450.0,490.0 457.0,476.0 443.0,476.0" fill="#5de3c1"/>
+<line x1="890.0" y1="184.0" x2="960.0" y2="184.0" stroke="#5de3c1" stroke-width="4"/>
+<polygon points="960.0,184.0 946.0,177.0 946.0,191.0" fill="#5de3c1"/>
+<line x1="1200.0" y1="184.0" x2="1270.0" y2="184.0" stroke="#5de3c1" stroke-width="4"/>
+<polygon points="1270.0,184.0 1256.0,177.0 1256.0,191.0" fill="#5de3c1"/>
+<line x1="1400.0" y1="238.0" x2="1400.0" y2="490.0" stroke="#5de3c1" stroke-width="4"/>
+<polygon points="1400.0,490.0 1407.0,476.0 1393.0,476.0" fill="#5de3c1"/>
+<line x1="570.0" y1="544.0" x2="1270.0" y2="544.0" stroke="#5de3c1" stroke-width="4"/>
+<polygon points="1270.0,544.0 1256.0,537.0 1256.0,551.0" fill="#5de3c1"/>
+<rect x="30" y="310" width="230" height="108" rx="17" fill="#17223b" stroke="#b8a3ff" stroke-width="2"/>
+<text x="49" y="358" font-family="Segoe UI,Arial" font-size="28" font-weight="700" fill="#f7f9ff">Manuscript</text>
+<text x="49" y="393" font-family="Segoe UI,Arial" font-size="18" fill="#aebbd3">Validated source</text>
+<rect x="330" y="130" width="240" height="108" rx="17" fill="#17223b" stroke="#b8a3ff" stroke-width="2"/>
+<text x="349" y="178" font-family="Segoe UI,Arial" font-size="28" font-weight="700" fill="#f7f9ff">Parser</text>
+<text x="349" y="213" font-family="Segoe UI,Arial" font-size="18" fill="#aebbd3">Chapters + chunks</text>
+<rect x="330" y="490" width="240" height="108" rx="17" fill="#17223b" stroke="#b8a3ff" stroke-width="2"/>
+<text x="349" y="538" font-family="Segoe UI,Arial" font-size="25" font-weight="700" fill="#f7f9ff">Character engine</text>
+<text x="349" y="573" font-family="Segoe UI,Arial" font-size="18" fill="#aebbd3">Candidates + identity</text>
+<rect x="650" y="130" width="240" height="108" rx="17" fill="#17223b" stroke="#b8a3ff" stroke-width="2"/>
+<text x="669" y="178" font-family="Segoe UI,Arial" font-size="28" font-weight="700" fill="#f7f9ff">Embeddings</text>
+<text x="669" y="213" font-family="Segoe UI,Arial" font-size="18" fill="#aebbd3">Tracked model calls</text>
+<rect x="960" y="130" width="240" height="108" rx="17" fill="#17223b" stroke="#b8a3ff" stroke-width="2"/>
+<text x="979" y="178" font-family="Segoe UI,Arial" font-size="28" font-weight="700" fill="#f7f9ff">pgvector</text>
+<text x="979" y="213" font-family="Segoe UI,Arial" font-size="18" fill="#aebbd3">Book-scoped vectors</text>
+<rect x="1270" y="130" width="260" height="108" rx="17" fill="#17223b" stroke="#b8a3ff" stroke-width="2"/>
+<text x="1289" y="178" font-family="Segoe UI,Arial" font-size="28" font-weight="700" fill="#f7f9ff">Hybrid search</text>
+<text x="1289" y="213" font-family="Segoe UI,Arial" font-size="18" fill="#aebbd3">Chapter boundary</text>
+<rect x="1270" y="490" width="260" height="108" rx="17" fill="#17223b" stroke="#b8a3ff" stroke-width="2"/>
+<text x="1289" y="538" font-family="Segoe UI,Arial" font-size="28" font-weight="700" fill="#f7f9ff">Advisor + checks</text>
+<text x="1289" y="573" font-family="Segoe UI,Arial" font-size="18" fill="#aebbd3">Citations / evidence</text>
+</svg>

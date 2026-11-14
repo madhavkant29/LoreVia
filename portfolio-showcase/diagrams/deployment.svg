@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="720" viewBox="0 0 1600 720">
+<rect width="1600" height="720" fill="#0b1021"/>
+<line x1="260.0" y1="119.0" x2="335.0" y2="119.0" stroke="#5de3c1" stroke-width="4"/>
+<polygon points="335.0,119.0 321.0,112.0 321.0,126.0" fill="#5de3c1"/>
+<line x1="575.0" y1="119.0" x2="650.0" y2="119.0" stroke="#5de3c1" stroke-width="4"/>
+<polygon points="650.0,119.0 636.0,112.0 636.0,126.0" fill="#5de3c1"/>
+<line x1="890.0" y1="119.0" x2="965.0" y2="119.0" stroke="#5de3c1" stroke-width="4"/>
+<polygon points="965.0,119.0 951.0,112.0 951.0,126.0" fill="#5de3c1"/>
+<line x1="1205.0" y1="119.0" x2="1280.0" y2="119.0" stroke="#5de3c1" stroke-width="4"/>
+<polygon points="1280.0,119.0 1266.0,112.0 1266.0,126.0" fill="#5de3c1"/>
+<line x1="1280.0" y1="119.0" x2="575.0" y2="484.0" stroke="#5de3c1" stroke-width="4"/>
+<polygon points="575.0,484.0 590.7,483.8 584.2,471.3" fill="#5de3c1"/>
+<line x1="1415.0" y1="173.0" x2="770.0" y2="430.0" stroke="#5de3c1" stroke-width="4"/>
+<polygon points="770.0,430.0 785.6,431.3 780.4,418.3" fill="#5de3c1"/>
+<line x1="1415.0" y1="173.0" x2="1085.0" y2="430.0" stroke="#5de3c1" stroke-width="4"/>
+<polygon points="1085.0,430.0 1100.3,426.9 1091.7,415.9" fill="#5de3c1"/>
+<line x1="1415.0" y1="173.0" x2="1415.0" y2="370.0" stroke="#5de3c1" stroke-width="4"/>
+<polygon points="1415.0,370.0 1422.0,356.0 1408.0,356.0" fill="#5de3c1"/>
+<line x1="1415.0" y1="478.0" x2="1415.0" y2="555.0" stroke="#5de3c1" stroke-width="4"/>
+<polygon points="1415.0,555.0 1422.0,541.0 1408.0,541.0" fill="#5de3c1"/>
+<line x1="1280.0" y1="609.0" x2="1205.0" y2="484.0" stroke="#5de3c1" stroke-width="4"/>
+<polygon points="1205.0,484.0 1206.2,499.6 1218.2,492.4" fill="#5de3c1"/>
+<line x1="1280.0" y1="609.0" x2="890.0" y2="484.0" stroke="#5de3c1" stroke-width="4"/>
+<polygon points="890.0,484.0 901.2,494.9 905.5,481.6" fill="#5de3c1"/>
+<rect x="20" y="65" width="240" height="108" rx="17" fill="#17223b" stroke="#b8a3ff" stroke-width="2"/>
+<text x="39" y="113" font-family="Segoe UI,Arial" font-size="28" font-weight="700" fill="#f7f9ff">Browser</text>
+<text x="39" y="148" font-family="Segoe UI,Arial" font-size="18" fill="#aebbd3">Author workspace</text>
+<rect x="335" y="65" width="240" height="108" rx="17" fill="#17223b" stroke="#b8a3ff" stroke-width="2"/>
+<text x="354" y="113" font-family="Segoe UI,Arial" font-size="28" font-weight="700" fill="#f7f9ff">Vercel</text>
+<text x="354" y="148" font-family="Segoe UI,Arial" font-size="18" fill="#aebbd3">Next.js frontend</text>
+<rect x="650" y="65" width="240" height="108" rx="17" fill="#17223b" stroke="#b8a3ff" stroke-width="2"/>
+<text x="669" y="113" font-family="Segoe UI,Arial" font-size="28" font-weight="700" fill="#f7f9ff">Cloudflare</text>
+<text x="669" y="148" font-family="Segoe UI,Arial" font-size="18" fill="#aebbd3">API edge / DNS</text>
+<rect x="965" y="65" width="240" height="108" rx="17" fill="#17223b" stroke="#b8a3ff" stroke-width="2"/>
+<text x="984" y="113" font-family="Segoe UI,Arial" font-size="28" font-weight="700" fill="#f7f9ff">Nginx</text>
+<text x="984" y="148" font-family="Segoe UI,Arial" font-size="18" fill="#aebbd3">Hetzner VPS</text>
+<rect x="1280" y="65" width="270" height="108" rx="17" fill="#17223b" stroke="#b8a3ff" stroke-width="2"/>
+<text x="1299" y="113" font-family="Segoe UI,Arial" font-size="28" font-weight="700" fill="#f7f9ff">FastAPI</text>
+<text x="1299" y="148" font-family="Segoe UI,Arial" font-size="18" fill="#aebbd3">Gunicorn / Compose</text>
+<rect x="335" y="430" width="240" height="108" rx="17" fill="#17223b" stroke="#b8a3ff" stroke-width="2"/>
+<text x="354" y="478" font-family="Segoe UI,Arial" font-size="28" font-weight="700" fill="#f7f9ff">Supabase Auth</text>
+<text x="354" y="513" font-family="Segoe UI,Arial" font-size="18" fill="#aebbd3">OAuth identity</text>
+<rect x="650" y="430" width="240" height="108" rx="17" fill="#17223b" stroke="#b8a3ff" stroke-width="2"/>
+<text x="669" y="478" font-family="Segoe UI,Arial" font-size="28" font-weight="700" fill="#f7f9ff">R2-compatible</text>
+<text x="669" y="513" font-family="Segoe UI,Arial" font-size="18" fill="#aebbd3">Object storage</text>
+<rect x="965" y="430" width="240" height="108" rx="17" fill="#17223b" stroke="#b8a3ff" stroke-width="2"/>
+<text x="984" y="478" font-family="Segoe UI,Arial" font-size="28" font-weight="700" fill="#f7f9ff">PostgreSQL</text>
+<text x="984" y="513" font-family="Segoe UI,Arial" font-size="18" fill="#aebbd3">pgvector database</text>
+<rect x="1280" y="370" width="270" height="108" rx="17" fill="#17223b" stroke="#b8a3ff" stroke-width="2"/>
+<text x="1299" y="418" font-family="Segoe UI,Arial" font-size="28" font-weight="700" fill="#f7f9ff">Redis</text>
+<text x="1299" y="453" font-family="Segoe UI,Arial" font-size="18" fill="#aebbd3">Broker / session data</text>
+<rect x="1280" y="555" width="270" height="108" rx="17" fill="#17223b" stroke="#b8a3ff" stroke-width="2"/>
+<text x="1299" y="603" font-family="Segoe UI,Arial" font-size="28" font-weight="700" fill="#f7f9ff">Celery + Beat</text>
+<text x="1299" y="638" font-family="Segoe UI,Arial" font-size="18" fill="#aebbd3">Five worker roles</text>
+</svg>

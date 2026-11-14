@@ -1,178 +1,169 @@
-# LoreVia
+# LoreVia — AI-Powered Manuscript Intelligence Platform
 
-LoreVia is an AI-powered manuscript intelligence platform for fiction authors. It helps authors understand, revise, and maintain continuity in complex manuscripts across characters, relationships, plot threads, worldbuilding, and cross-book arcs.
+LoreVia is a full-stack writing workspace that turns a fiction manuscript into chapter-aware, searchable story context. It tracks characters, relationships, plot threads, and continuity findings, and gives authors answers linked to source passages. The engineering work spans asynchronous ingestion, durable task recovery, retrieval with spoiler boundaries, and a production VPS deployment.
 
-Instead of acting like a generic document chatbot, LoreVia is organized around the author workflow itself: continuity-aware summaries, evolving character profiles, relationship tracking, grounded Q&A, manuscript notes, export tools, and invite-only collaborator surfaces when they are needed.
+## Product Demo & Technical Walkthrough
 
-## What The Project Does
+The **4:35 narrated architecture walkthrough** follows a manuscript through the API, Celery queues, pgvector retrieval, recovery path, and deployment. Select the preview to see the short animated cut. The full 1920×1080 MP4 is generated at `portfolio-showcase/videos/lorevia-technical-walkthrough.mp4` locally; it is intentionally excluded from normal Git history until a Release asset or another authorized video host is available.
 
-LoreVia lets an author upload a manuscript or book, process it into chapters and chunks, and work with it through a set of AI-assisted continuity tools. The product is structured around three levels of understanding:
+<a href="portfolio-showcase/technical-preview.gif"><img src="portfolio-showcase/technical-thumbnail.webp" alt="Preview of LoreVia technical walkthrough showing the verified system architecture" width="720"></a>
 
-- `Character Engine` for the micro view of people, motivations, traits, aliases, and relationships
-- `Plot / Continuity Tracker` for the meso view of what has happened, what is unresolved, and what may break
-- `Theme / Cross-Book Analysis` for the macro view of recurring motifs, arcs, and multi-book continuity
+**[Open the technical preview](portfolio-showcase/technical-preview.gif)** · [Narration and chapter timing](portfolio-showcase/narration.md) · [Subtitles](portfolio-showcase/subtitles.srt) · [Reproduction guide](portfolio-showcase/README.md)
 
-The app is built as a full-stack system with asynchronous processing so that ingestion, extraction, and intelligence features can run independently from the main web app.
+The separate product preview tours real application screens populated with synthetic demo content.
 
-## Core Features
+<a href="portfolio-showcase/product-preview.gif"><img src="portfolio-showcase/product-thumbnail.webp" alt="Preview of LoreVia product screens, beginning with the manuscript workspace" width="720"></a>
 
-- `Admin Operations Console`
-  Platform monitoring (metrics, queue depth, subscription metrics), rate limit management, creator strikes, public demo book tooling, public-share moderation, book hide/remove/restore, refund reviews, admin access management, and audit review. See [docs/admin-guide.md](/C:/Users/madha/.vscode/prod/LoreVia2/docs/admin-guide.md) for scope requirements and operational procedures.
+**[Open the product UI preview](portfolio-showcase/product-preview.gif)**
 
-- `Manuscript Upload and Parsing`
-  Upload PDF, EPUB, DOCX, DOC, or text-based manuscript files and turn them into chapter-aware, searchable drafting material.
+## Key product capabilities
 
-- `Author Continuity Workspace`
-  Track book mode, chapter progress, draft state, and editing context in a workspace built for revision.
+- **Manuscript ingestion:** bounded PDF, EPUB, DOCX, DOC, text, and Markdown uploads, structure preview, chapter parsing, and processing status.
+- **Author workspace:** manuscript editor, chapter organization, notes, export tools, and reading or writing modes.
+- **Story intelligence:** character profiles and alias review, relationship graph, timeline, plot threads, and continuity checks.
+- **Grounded retrieval:** book-scoped search over chunks, chapter limits for spoiler control, and advisor responses with source references.
+- **Collaborator and operations surfaces:** scoped book access, billing and webhooks, public sharing, and administrator review tools. See the [feature inventory](docs/feature-inventory.md) and [admin guide](docs/admin-guide.md).
 
-- `Continuity-Aware Summaries`
-  Show summaries, chapter notes, and recall only within the spoiler boundaries that the book and user context allow.
+## Screenshots
 
-- `Character Engine`
-  Build evolving character profiles with merged aliases, roles, motivations, fears, traits, and descriptions.
+These are captures of the actual LoreVia interface with synthetic demo content. They contain no customer manuscript or account data.
 
-- `Relationship Graph and Evolution`
-  Track how characters are connected and how those connections change through events over time.
+**Manuscript workspace** — editor and context inspector.
 
-- `Continuity Recall / Previously On`
-  Generate quick recaps so an author or collaborator can resume a draft without rereading old chapters.
+<img src="portfolio-showcase/screenshots/manuscript-analysis.webp" alt="LoreVia manuscript editor with chapter context and continuity warnings" width="780">
 
-- `Grounded Q&A`
-  Ask questions about the book or manuscript and receive answers grounded in the text instead of speculative outputs.
+**Character intelligence** — profile, aliases, review state, and evidence tabs.
 
-- `Foreshadowing and Timeline Views`
-  Surface earlier hints, major events, and arc progression from already-processed material.
+<img src="portfolio-showcase/screenshots/character-continuity.webp" alt="Character Bible with Gregor profile, relationships, and review indicators" width="780">
 
-- `Thematic Search`
-  Explore scenes and passages by idea or motif rather than just raw keyword matching.
+**Relationship graph** — a chapter-filtered graph with character details.
 
-- `Annotations, Notes, and Saved Quotes`
-  Store passages with metadata such as source book, chapter, and optional character context.
+<img src="portfolio-showcase/screenshots/relationship-graph.webp" alt="Character relationship graph with nodes, edges, and a detail panel" width="780">
 
-- `Library and Shelf Management`
-  Keep books in the library, archive them, or hide them from the UI while still preserving usage accounting.
+**Continuity checking** — editorial feedback tied to a story issue.
 
-- `Authentication and Billing Foundations`
-  Includes JWT auth, refresh flows, session handling, Paddle checkout and portal flows, and webhook-backed subscription updates for pricing plans.
+<img src="portfolio-showcase/screenshots/editorial-review-2.webp" alt="Editorial review showing a continuity issue and scene verdict" width="780">
 
-## Architecture
+**Evidence-backed analysis** — answer with a chapter and passage reference.
 
-LoreVia is split into a frontend, a FastAPI backend, background workers, and supporting infrastructure.
+<img src="portfolio-showcase/screenshots/manuscript-analysis-with-advisor.webp" alt="Manuscript advisor answer with a cited passage from Chapter 2" width="780">
 
-### Frontend
+**Notes workspace** — structured author notes alongside the manuscript.
 
-- `Next.js 15`
-- `TypeScript`
-- `Tailwind CSS`
+<img src="portfolio-showcase/screenshots/notes-workspace.webp" alt="Author notes workspace with folders and editing controls" width="780">
 
-The frontend handles authentication, library management, manuscript editing, pricing, settings, and all author-side continuity tools.
+## System architecture
 
-### Backend
+The browser uses a Next.js 15 App Router frontend. Credentialed Axios requests pass through a same-origin `/api/v1` rewrite to FastAPI. The API applies authentication, Pydantic validation, and service-layer workflows. Async SQLAlchemy sessions use PostgreSQL; pgvector holds chunk and character embeddings. Redis is the Celery broker. File storage uses an S3-compatible abstraction with a local filesystem mode for development.
 
-- `FastAPI`
-- `SQLAlchemy`
-- `PostgreSQL + pgvector`
-- `Redis`
+The five editable SVG diagrams are also available as PNG exports:
 
-The backend manages auth, uploads, parsing, progress tracking, book metadata, character and relationship APIs, summaries, search, and billing routes.
+| View | Editable diagram | Rendered export |
+| --- | --- | --- |
+| System context | [System SVG](portfolio-showcase/diagrams/system.svg) | [PNG](portfolio-showcase/diagrams/system.png) |
+| Upload and dispatch | [Ingestion SVG](portfolio-showcase/diagrams/ingestion.svg) | [PNG](portfolio-showcase/diagrams/ingestion.png) |
+| Worker topology | [Workers SVG](portfolio-showcase/diagrams/workers.svg) | [PNG](portfolio-showcase/diagrams/workers.png) |
+| AI and retrieval | [AI SVG](portfolio-showcase/diagrams/ai.svg) | [PNG](portfolio-showcase/diagrams/ai.png) |
+| Deployment | [Deployment SVG](portfolio-showcase/diagrams/deployment.svg) | [PNG](portfolio-showcase/diagrams/deployment.png) |
 
-### Background Processing
+See the [source-to-claim map](portfolio-showcase/EVIDENCE.md) and the broader [architecture notes](docs/ARCHITECTURE.md). Where documentation and source differ, the diagrams follow current source; for example, the worker launcher defines **five** roles and the database layer uses async `psycopg`.
 
-- `Celery`
-- Separate worker queues for extraction, analysis, embedding, and intelligence tasks
+## Technology stack
 
-Workers parse books, generate chunks, compute embeddings, extract characters and relationships, and produce derived continuity features.
+| Layer | Verified implementation |
+| --- | --- |
+| Web | Next.js 15, React 19, TypeScript, Tailwind CSS, TanStack Query, Zustand |
+| API | FastAPI, Pydantic, SQLAlchemy 2.x async sessions, Alembic |
+| Data | PostgreSQL, pgvector, Redis, S3-compatible object storage |
+| Background work | Celery, role-specific workers, Redis broker, Beat maintenance |
+| AI | OpenAI extraction and embeddings, character resolution, hybrid vector and lexical search |
+| Operations | Docker Compose, Nginx, Cloudflare API edge, Hetzner VPS, Vercel frontend, Sentry, GitHub Actions |
 
-### Infrastructure
+## Asynchronous processing and AI pipeline
 
-- `Docker Compose`
-- `Postgres`
-- `Redis`
-- Local object storage mounted through a Docker volume for development
+1. The upload route validates size, file signature, structure, account allowance, and an active duplicate fingerprint.
+2. The upload service stores the source and commits a `Book`, `BookProcessingRun`, and `TaskExecution` before dispatching work.
+3. An extraction worker parses the manuscript and queues chapter work. Analysis and embedding tasks persist derived results.
+4. Search embeds a question and filters `book_chunks` by book and chapter before using pgvector cosine similarity; hybrid search can combine lexical candidates.
+5. Advisor and continuity features use bounded context and source references. Model output is validated and remains subject to author review.
 
-## How LoreVia Works
+The worker launcher maps **extraction**, **analysis**, **embedding**, **intelligence**, and **maintenance** to their own modules and queues; extraction and analysis also consume priority queues. Celery uses late acknowledgments, worker-loss rejection, prefetch one, task limits, and bounded child recycling. These controls require tasks to tolerate redelivery.
 
-1. An author uploads a manuscript or book.
-2. The backend stores the file and records a book entry.
-3. Workers parse the source into chapters and chunks.
-4. AI-backed extraction builds summaries, character data, relationships, and retrieval context.
-5. The frontend exposes those features through a structured author continuity workspace.
-6. Book state determines what the app should reveal and what it should keep spoiler-safe.
+## Reliability and engineering challenges
 
-## Running Locally
+- **Broker and database consistency:** PostgreSQL task executions and a dispatch outbox make pending work recoverable after publish failures. Workers claim executions under row locks and stable identities; maintenance reconciles stale dispatch.
+- **Processing-state recovery:** the processing run tracks progress, pauses, and resume blockers; repair and retry paths reconcile incomplete books and chapters.
+- **Worker memory:** role-specific task registration and a minimal exact-worker health ping reduce unnecessary imports. [The local memory audit](ops/production-memory-audit.md) reports exploratory Docker measurements and explicitly leaves VPS before/after gains unverified.
+- **Observability:** request IDs pass into Celery headers; the API and workers configure Sentry with event scrubbing. Docker health checks probe API readiness and exact worker responsiveness.
 
-This project is intended to run locally with Docker only. Production uses a split topology: Vercel serves the frontend at `www.getlorevia.com`, while a Hetzner VPS runs Nginx, the Gunicorn-managed FastAPI backend, Redis, and workers behind Cloudflare at `api.getlorevia.com`.
+## Testing and verification
 
-### Prerequisites
+The repository includes backend unit and integration tests, a synthetic story-intelligence evaluation corpus, frontend Vitest tests, Playwright E2E smoke tests, migration checks, security scans, and image checks in GitHub Actions. The portfolio video was checked for 4:35 duration, 1920×1080/30 fps H.264, AAC audio, and representative frame readability. This documentation and media change does not alter application behavior; it is not a fresh full CI run.
 
-- `Docker Desktop`
-- Available ports:
-  - `3000` for the frontend
-  - `5432` for Postgres
-  - `8000` for the API
-  - `5555` for Flower
+Backend tests should run in Docker Compose Local so the pinned application, PostgreSQL/pgvector, and Redis match the project setup:
 
-### 1. Create backend environment file
+```powershell
+docker compose -f docker-compose-local.yml exec -T api pytest tests -v
+```
 
-Create `backend/.env.local` and add your local values.
+Frontend checks:
 
-Use this template:
+```powershell
+cd frontend
+npm.cmd test
+npm.cmd run test:e2e
+```
+
+The Playwright smoke suite starts a local Next dev server and mocks API responses. See [.github/workflows/ci-cd.yml](.github/workflows/ci-cd.yml) for the full PR gate.
+
+## Deployment architecture
+
+The tracked production model serves Next.js from Vercel. Cloudflare fronts the API, which reaches Nginx and a Gunicorn-managed FastAPI container on a Hetzner VPS. Compose runs Redis with AOF, five Celery worker roles, and Beat; the database and S3-compatible storage are external dependencies. Supabase supports OAuth identity, and Sentry is wired into backend and worker error reporting. Release operations and migration safeguards live in [deploy.sh](deploy.sh), [VPS service notes](docs/hetzner-service-management.md), and [firewall/monitoring notes](ops/production-firewall-and-monitoring.md). The repository does not prove current external platform settings or ongoing service availability.
+
+## Project status
+
+LoreVia is presented here as an engineering portfolio project. The hosted application is planned for discontinuation; the repository, diagrams, synthetic screenshots, and reproducible presentation remain the durable showcase. The GitHub repository visibility and a public video destination could not be verified from this workspace, so no public availability is promised.
+
+## Running locally
+
+The backend and workers run with Docker Compose Local; the frontend runs separately with Node. Create `backend/.env.local` with local-only values and `frontend/.env.local` with the local API URL. Do not use production credentials or point local commands at a remote database.
+
+The backend settings require a disposable local PostgreSQL URL, Redis broker credentials, local file storage, a JWT secret, and provider keys for any AI features you exercise. For local file storage, the repository uses `S3_ENDPOINT_URL=file:///app/storage` and a shared Docker volume. See [backend/app/core/config.py](backend/app/core/config.py) for the complete settings contract; Paddle checkout also needs its API key, webhook secret, and plan price IDs together.
+
+<details>
+<summary>Example local environment values</summary>
+
+Create `backend/.env.local` with local dummy values and your own development-only AI key if you plan to run model-backed features:
 
 ```env
 APP_NAME=LoreVia
 DEBUG=true
 API_V1_PREFIX=/api/v1
-
 DATABASE_URL=postgresql://postgres:postgres@postgres:5432/lorevia
 REDIS_PASSWORD=replace_local_redis_password
 EDGE_PROXY_SECRET=replace_with_64_character_random_edge_secret
-
-OPENAI_API_KEY=your_openai_api_key_here
+OPENAI_API_KEY=your_development_key_here
 OPENAI_EXTRACT_MODEL=gpt-4o-mini
 OPENAI_INTEL_MODEL=gpt-4o-mini
 OPENAI_EMBED_MODEL=text-embedding-3-small
-
 S3_BUCKET=local-dev
 S3_ENDPOINT_URL=file:///app/storage
 AWS_ACCESS_KEY_ID=local-dev
 AWS_SECRET_ACCESS_KEY=local-dev
-
 JWT_SECRET=replace_with_a_long_random_secret
-
-PADDLE_API_KEY=pdl_live_or_sandbox_key_here
-PADDLE_WEBHOOK_SECRET=pdl_webhook_secret_here
+PADDLE_API_KEY=pdl_sandbox_key_here
+PADDLE_WEBHOOK_SECRET=pdl_sandbox_webhook_secret_here
 PADDLE_AUTHOR_MONTHLY_PRICE_ID=pri_author_monthly
 PADDLE_AUTHOR_ANNUAL_PRICE_ID=pri_author_annual
 PADDLE_ARCHITECT_MONTHLY_PRICE_ID=pri_architect_monthly
 PADDLE_ARCHITECT_ANNUAL_PRICE_ID=pri_architect_annual
 PADDLE_DEFAULT_CHECKOUT_URL=http://localhost:3000/checkout
-
 RESEND_API_KEY=dummy
 INTERNAL_JOB_SECRET=replace_with_an_internal_job_secret
 SENTRY_DSN=
 CLOUDFLARE_TUNNEL_TOKEN=
-
 FREE_MAX_BOOKS=999
 ```
-
-Notes:
-
-- Do not paste any real secret values into this README.
-- For production, generate `EDGE_PROXY_SECRET` independently (for example,
-  `openssl rand -hex 32`). It authenticates the private Nginx-to-API hop and
-  must not be reused as the JWT, Redis, or any provider credential.
-- Keep `backend/.env.local` out of version control.
-- Local Docker Compose reads `REDIS_URL` and `CELERY_BROKER_URL` from `backend/.env.local`; `CELERY_RESULT_BACKEND` can stay empty now that advisor async polling persists state in Postgres.
-- For local development, file storage is mounted to a Docker volume instead of cloud storage.
-- Paddle checkout requires the API key, webhook secret, and plan price IDs to be set together.
-- In Paddle Checkout settings, set the default payment link to your public HTTPS checkout page, such as `https://getlorevia.com/checkout` on the Hetzner deployment or `http://localhost:3000/checkout` in local sandbox testing.
-- Trial lifecycle emails can be run from a scheduler with `python backend/scripts/run_due_trial_emails.py --limit 100` or through the protected internal job endpoint.
-
-Production deployment notes for the Hetzner VPS live in [ops/production-firewall-and-monitoring.md](/C:/Users/madha/.vscode/prod/LoreVia2/ops/production-firewall-and-monitoring.md), [docs/hetzner-redis-operations.md](/C:/Users/madha/.vscode/prod/LoreVia2/docs/hetzner-redis-operations.md), and [docs/hetzner-service-management.md](/C:/Users/madha/.vscode/prod/LoreVia2/docs/hetzner-service-management.md). Use `./deploy.sh` for production releases so the database backup, Alembic upgrade, and post-migration verification run before new containers start. Plain `docker compose -f docker-compose.yml up -d --build` is only for restarting an already-migrated release.
-
-`deploy.sh` deploys `main` by default. Set `DEPLOY_BRANCH` explicitly only for a reviewed non-default release, such as a temporary hotfix deployment.
-
-### 2. Create frontend environment file
 
 Create `frontend/.env.local`:
 
@@ -182,130 +173,25 @@ NEXT_PUBLIC_APP_URL=http://localhost:3000
 NEXT_PUBLIC_PADDLE_CLIENT_TOKEN=test_your_paddle_client_side_token_here
 ```
 
-### 3. Start the full stack
+Keep both files out of version control. Compose Local supplies its own Redis broker URL and uses the disposable `lorevia_test` database for tests. Paddle checkout requires a valid matching sandbox configuration; placeholder IDs only illustrate the setting names.
 
-From the project root:
-
-```bash
-docker compose -f docker-compose-local.yml up --build
-```
-
-This starts:
-
-- `api`
-- `worker-extraction`
-- `worker-analysis`
-- `worker-embedding`
-- `worker-intelligence`
-- `worker-maintenance`
-- `celery-beat`
-- `postgres`
-- `redis`
-- `flower`
-
-### 4. Open the app
-
-- Frontend: [http://localhost:3000](http://localhost:3000)
-- API: [http://localhost:8000](http://localhost:8000)
-- API docs: [http://localhost:8000/docs](http://localhost:8000/docs)
-- Flower: [http://localhost:5555](http://localhost:5555)
-
-## Stopping The App
-
-```bash
-docker compose -f docker-compose-local.yml down
-```
-
-To remove containers, networks, and volumes:
-
-```bash
-docker compose -f docker-compose-local.yml down -v
-```
-
-## Testing
-
-LoreVia has backend tests, frontend unit tests, and frontend E2E smoke tests.
-
-### Backend tests
-
-From the repo root:
+</details>
 
 ```powershell
-docker compose -f docker-compose-local.yml exec -T api pytest tests -v
-```
-
-Notes:
-
-- Prefer Docker Compose Local so tests run against the repo's pinned app image, Postgres, Redis, and extensions.
-- DB-backed backend tests require the local compose stack and required extensions such as `pgvector`.
-
-### Frontend unit tests
-
-From the repo root:
-
-```powershell
+docker compose -f docker-compose-local.yml up --build -d
 cd frontend
-npm.cmd test
+npm.cmd ci
+npm.cmd run dev
 ```
 
-This runs the Vitest suite for frontend utilities, stores, API wrappers, config, and security-sensitive frontend logic.
+The local API is at `http://localhost:8000`, API docs at `http://localhost:8000/docs`, Flower at `http://localhost:5555`, and the frontend at `http://localhost:3000`. Compose Local includes an explicit disposable migration/bootstrap service; it does not start the frontend or Beat. Stop the stack with `docker compose -f docker-compose-local.yml down` from the repository root. Avoid `down -v` unless you intend to discard local database and storage volumes.
 
-### Frontend E2E smoke tests
-
-From the repo root:
-
-```powershell
-cd frontend
-npm.cmd run test:e2e
-```
-
-Notes:
-
-- These smoke tests run against the local Next.js dev server, not production.
-- The suite mocks API traffic in the browser, so it does not require a live backend to verify the core UI flows.
-- The Playwright config uses Playwright-managed Chromium so the same browser engine can run locally and in CI.
-
-### Will these fail in non-production environments?
-
-Not just because the environment is non-production.
-
-- Backend tests should pass in local or CI-style non-production environments as long as the Python environment, local test database, and required extensions are present.
-- Frontend unit tests should pass in local or CI-style non-production environments as long as Node dependencies are installed.
-- Frontend E2E smoke tests are intentionally non-production-friendly because they run against a local dev server with mocked API responses.
-- The CI pipeline runs the same frontend unit and E2E smoke suites, so a passing local run should match CI as long as dependencies and browser prerequisites are present.
-
-They can still fail if the environment is missing prerequisites such as:
-
-- backend venv or Python dependencies
-- local test database / `pgvector`
-- frontend `node_modules`
-- a supported Playwright browser runtime
-
-## Project Structure
+## Repository structure
 
 ```text
-LoreVia/
-├── backend/
-│   ├── app/
-│   │   ├── api/
-│   │   ├── core/
-│   │   ├── engine/
-│   │   ├── models/
-│   │   ├── parsers/
-│   │   ├── services/
-│   │   └── workers/
-│   ├── Dockerfile.api
-│   └── Dockerfile.worker
-├── frontend/
-│   ├── src/
-│   │   ├── app/
-│   │   ├── components/
-│   │   ├── lib/
-│   │   └── types/
-├── docker-compose-local.yml
-└── README.md
+backend/                 FastAPI, services, workers, migrations, and tests
+frontend/                Next.js application and Playwright tests
+ops/                     Nginx, Redis image, and VPS operations
+docs/                    Architecture and operational decisions
+portfolio-showcase/      Diagrams, screenshots, script, subtitles, previews, and local MP4
 ```
-
-## Why This Project Matters
-
-LoreVia was built to solve a real writing problem: long manuscripts are hard to keep consistent over time. Authors and collaborators lose track of character state, unresolved promises, chapter history, and cross-book continuity. This project turns that pain point into a full product experience by combining retrieval, summarization, entity extraction, asynchronous processing, and a focused author continuity workspace.

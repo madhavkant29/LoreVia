@@ -1,0 +1,159 @@
+1
+00:00:00,000 --> 00:00:04,279
+LoreVia is an AI-powered manuscript intelligence platform for fiction authors.
+
+2
+00:00:04,499 --> 00:00:09,727
+The engineering problem is maintaining character, plot, and continuity context across long drafts.
+
+3
+00:00:09,947 --> 00:00:18,470
+The product combines a Next.js author workspace, a FastAPI application, PostgreSQL with pgvector, object storage, and Celery workers.
+
+4
+00:00:18,690 --> 00:00:24,488
+This walkthrough follows a manuscript from upload to evidence-backed analysis, then examines recovery and deployment.
+
+5
+00:00:30,000 --> 00:00:34,144
+The Next.js App Router hosts the author workspace and interactive demo.
+
+6
+00:00:34,364 --> 00:00:41,292
+React components own the editing interface; TanStack Query manages server state, while Zustand stores selected client state.
+
+7
+00:00:41,512 --> 00:00:45,355
+Axios sends credentialed API requests through a same-origin rewrite.
+
+8
+00:00:45,575 --> 00:00:50,599
+These screenshots use the repository's synthetic demo content, not customer manuscripts.
+
+9
+00:00:52,000 --> 00:00:57,743
+FastAPI validates endpoint input with Pydantic schemas and resolves authenticated users before service calls.
+
+10
+00:00:57,963 --> 00:01:04,721
+LoreVia issues access and refresh JWTs in HttpOnly cookies, with CSRF checks on unsafe requests.
+
+11
+00:01:04,941 --> 00:01:08,605
+SQLAlchemy uses async sessions against PostgreSQL.
+
+12
+00:01:08,825 --> 00:01:13,148
+Services own multi-step transactions; Alembic revisions evolve the schema.
+
+13
+00:01:15,000 --> 00:01:22,468
+On upload, the API bounds and validates the file, previews structure, checks allowances, and rejects a duplicate active upload for the same user.
+
+14
+00:01:22,688 --> 00:01:30,876
+The upload service writes the source to S3-compatible storage, commits the Book, processing run, and task execution, then dispatches after commit.
+
+15
+00:01:31,096 --> 00:01:34,539
+The response reports processing while the long job continues.
+
+16
+00:01:45,000 --> 00:01:47,109
+Redis carries Celery messages.
+
+17
+00:01:47,329 --> 00:01:53,303
+Five worker roles isolate extraction, analysis, embedding, intelligence, and maintenance.
+
+18
+00:01:53,523 --> 00:01:56,871
+Extraction and analysis also consume priority queues.
+
+19
+00:01:57,091 --> 00:02:01,475
+The launcher registers only the modules each role needs; Beat schedules maintenance.
+
+20
+00:02:01,695 --> 00:02:10,038
+Late acknowledgments, one-message prefetch, task timeouts, and child recycling bound failure and memory behavior, but redelivery requires replay-safe tasks.
+
+21
+00:02:15,000 --> 00:02:19,823
+An extraction worker reads the stored manuscript, parses chapters, and creates chapter work.
+
+22
+00:02:20,043 --> 00:02:25,012
+Chapter processing builds chunks, character candidates, identities, and relationship data.
+
+23
+00:02:25,232 --> 00:02:30,090
+Analysis tasks derive summaries and narrative signals; embedding tasks create vectors.
+
+24
+00:02:30,310 --> 00:02:34,754
+The UI reports stored processing state, not a prediction from a browser timer.
+
+25
+00:02:40,000 --> 00:02:44,688
+Book chunks and character embeddings use 1,536-dimensional pgvector columns.
+
+26
+00:02:44,908 --> 00:02:53,031
+Search embeds the question, queries book-scoped chunks, filters by chapter to respect spoiler boundaries, and can combine vector and lexical candidates.
+
+27
+00:02:53,251 --> 00:02:58,095
+Advisor prompts use retrieved passages, and grounded answer schemas carry citations.
+
+28
+00:02:58,315 --> 00:03:02,884
+Retrieval narrows context; it does not make model output automatically reliable.
+
+29
+00:03:05,000 --> 00:03:08,819
+Long-running work can fail after a database commit or during a broker publish.
+
+30
+00:03:09,039 --> 00:03:15,177
+LoreVia records executions and an outbox in PostgreSQL, then a maintenance task reconciles stalled dispatch.
+
+31
+00:03:15,397 --> 00:03:20,430
+Workers claim rows under a lock and use stable execution identities; terminal results are guarded.
+
+32
+00:03:20,650 --> 00:03:24,604
+The tradeoff is more control-plane code, but it makes retries auditable.
+
+33
+00:03:35,000 --> 00:03:40,043
+One operational issue was memory spent importing every task module in every worker and in health probes.
+
+34
+00:03:40,263 --> 00:03:42,807
+Role-specific loading reduced idle imports.
+
+35
+00:03:43,027 --> 00:03:49,310
+The health check now creates a minimal Celery client and pings the exact worker identity without loading SQLAlchemy or tasks.
+
+36
+00:03:49,530 --> 00:03:54,874
+Local Docker tests covered registration and failure states; VPS memory gains remain unmeasured.
+
+37
+00:04:05,000 --> 00:04:12,733
+The tracked deployment places the Next.js frontend on Vercel and routes API traffic through Cloudflare to Nginx and FastAPI on a Hetzner VPS.
+
+38
+00:04:12,953 --> 00:04:15,627
+Compose runs Redis and the five worker roles.
+
+39
+00:04:15,847 --> 00:04:24,235
+Supabase supports OAuth, R2-compatible storage holds files, Sentry captures backend failures, and GitHub Actions defines test and image gates.
+
+40
+00:04:24,455 --> 00:04:29,973
+The hosted product may be retired; the repository preserves the engineering design and verification history.
