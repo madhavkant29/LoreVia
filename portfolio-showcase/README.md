@@ -22,4 +22,8 @@ python portfolio-showcase/make_previews.py
 
 ## Publishing step
 
-The full MP4 has no verified public URL. Upload it as a GitHub Release asset, or to another explicitly authorized video host, then replace the README preview targets with the verified asset URL. Do not commit the MP4 into normal Git history. If the repository is private, a private Release asset and README will not be visible to unauthenticated recruiters; verify visibility and decide on a public-safe destination before publishing.
+The technical walkthrough MP4 has no verified public URL. Upload it as a GitHub Release asset, or to another explicitly authorized video host, then replace the technical preview target with the verified asset URL. Do not commit the technical MP4 into normal Git history. If the repository is private, a private Release asset and README will not be visible to unauthenticated recruiters; verify visibility and decide on a public-safe destination before publishing.
+
+## Live product demonstration
+
+The updated **6:02 product demonstration** uses an original sample manuscript and verified live captures. [Watch the full MP4](videos/lorevia-product-demo.mp4), committed on the `author` branch.
