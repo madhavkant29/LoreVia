@@ -26,4 +26,4 @@ The technical walkthrough MP4 has no verified public URL. Upload it as a GitHub 
 
 ## Live product demonstration
 
-The updated **6:02 product demonstration** uses an original sample manuscript and verified live captures. [Watch the full MP4](videos/lorevia-product-demo.mp4), committed on the `author` branch.
+The updated **6:02 product demonstration** uses an original sample manuscript and verified live captures. [Watch it on YouTube](https://youtu.be/LVwVqo5X4LA). The [MP4](videos/lorevia-product-demo.mp4) is also committed in this repository.

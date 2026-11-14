@@ -12,9 +12,9 @@ The **4:35 narrated architecture walkthrough** follows a manuscript through the 
 
 The short product preview tours application screens populated with synthetic demo content. The full product demo follows an original sample manuscript through the authenticated application.
 
-<a href="portfolio-showcase/product-preview.gif"><img src="portfolio-showcase/product-thumbnail.webp" alt="Preview of LoreVia product screens, beginning with the manuscript workspace" width="720"></a>
+<a href="https://youtu.be/LVwVqo5X4LA"><img src="portfolio-showcase/product-thumbnail.webp" alt="Watch the LoreVia product demo" width="720"></a>
 
-**[Watch the full product demo (6:02)](portfolio-showcase/videos/lorevia-product-demo.mp4)** · [Open the short product UI preview](portfolio-showcase/product-preview.gif)
+**[Watch the full product demo (6:02)](https://youtu.be/LVwVqo5X4LA)** · [Open the short product UI preview](portfolio-showcase/product-preview.gif)
 
 ## Key product capabilities
 
