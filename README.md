@@ -8,7 +8,7 @@ The **4:35 narrated architecture walkthrough** follows a manuscript through the 
 
 <a href="portfolio-showcase/technical-preview.gif"><img src="portfolio-showcase/technical-thumbnail.webp" alt="Preview of LoreVia technical walkthrough showing the verified system architecture" width="720"></a>
 
-**[Open the technical preview](portfolio-showcase/technical-preview.gif)** · [Narration and chapter timing](portfolio-showcase/narration.md) · [Subtitles](portfolio-showcase/subtitles.srt) · [Reproduction guide](portfolio-showcase/README.md)
+**[Open the technical preview](portfolio-showcase/technical-preview.gif)** · **[Read the full technical walkthrough](portfolio-showcase/TECHNICAL_WALKTHROUGH_TRANSCRIPT.md)** · [Subtitles](portfolio-showcase/subtitles.srt) · [Reproduction guide](portfolio-showcase/README.md)
 
 The separate product preview tours real application screens populated with synthetic demo content.
 
