@@ -4,6 +4,10 @@ from app.utils.books.chapter_boundaries import (
     compare_saved_chapters_with_reparsed,
     split_saved_part_chapters,
 )
+from scripts.plan_saved_chapter_structure import (
+    _compare_saved_to_reparsed_storage,
+    _text_after_storage,
+)
 
 
 def test_saved_part_split_preserves_exact_source_order_and_words():
@@ -94,3 +98,24 @@ def test_reparsed_comparison_allows_pdf_line_wrap_joins_but_rejects_changed_word
 
     reparsed[0]["text"] = "The seabird vanished. Then it landed."
     assert compare_saved_chapters_with_reparsed(saved, reparsed)[0]["content_preserved"] is False
+
+
+def test_saved_pdf_plan_compares_the_text_that_storage_will_display():
+    first = "Mara watched the sea\u2014the harbor was quiet. " * 8
+    second = "She returned at dawn. " * 16
+    raw = f"I\n\n{first}\n\nII\n\n{second}"
+    saved = [{"title": "Part One \u2014 opening", "text": _text_after_storage(raw)}]
+    proposed = [
+        {"title": "I", "text": first.strip()},
+        {"title": "II", "text": second.strip()},
+    ]
+
+    assert not all(
+        row["content_preserved"] for row in compare_saved_chapters_with_reparsed(saved, proposed)
+    )
+    assert all(
+        row["content_preserved"] for row in _compare_saved_to_reparsed_storage(saved, proposed)
+    )
+
+    proposed[1]["text"] = second.replace("returned", "disappeared")
+    assert _compare_saved_to_reparsed_storage(saved, proposed)[1]["content_preserved"] is False

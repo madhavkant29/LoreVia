@@ -27,10 +27,28 @@ from app.models.generation import BookDataGeneration
 from app.models.progress import ReadingProgress, ReadingSession
 from app.utils.books.chapter_boundaries import compare_saved_chapters_with_reparsed
 from app.utils.books.imports import parse_structured_prose_upload
-from app.utils.books.manuscript import deserialize_manuscript_content
+from app.utils.books.manuscript import (
+    deserialize_manuscript_content,
+    serialize_manuscript_content,
+)
 from app.utils.books.structure_repair import chapter_number_map, map_reading_position
 
 logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
+
+
+def _text_after_storage(text: str) -> str:
+    """Compare the text readers will see after the same write used by the repair."""
+    return str(deserialize_manuscript_content(serialize_manuscript_content(text)).get("text") or "")
+
+
+def _compare_saved_to_reparsed_storage(saved: list[dict], reparsed: list[dict]) -> list[dict]:
+    return compare_saved_chapters_with_reparsed(
+        saved,
+        [
+            {**chapter, "text": _text_after_storage(str(chapter.get("text") or ""))}
+            for chapter in reparsed
+        ],
+    )
 
 
 async def build_plan(book_id: uuid.UUID, *, include_private: bool = False) -> dict:
@@ -134,7 +152,7 @@ async def build_plan(book_id: uuid.UUID, *, include_private: bool = False) -> di
         raw=raw_pdf,
         filename="saved-manuscript.pdf",
     )
-    comparisons = compare_saved_chapters_with_reparsed(saved, reparsed["chapters"])
+    comparisons = _compare_saved_to_reparsed_storage(saved, reparsed["chapters"])
     number_map = chapter_number_map(saved, reparsed["chapters"])
     progress_plan = [
         map_reading_position(
