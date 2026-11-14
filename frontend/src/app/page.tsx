@@ -188,6 +188,41 @@ function HeroWorkspaceSummary() {
   )
 }
 
+function ProductDemoSection() {
+  return (
+    <Section id="product-demo" className="pb-16 pt-6 md:pb-20 md:pt-10">
+      <div className="mx-auto max-w-5xl">
+        <SectionHeading
+          title="See LoreVia in action."
+          body="Follow an original sample manuscript from import through story analysis and evidence review."
+          align="center"
+        />
+        <div className="mt-9 overflow-hidden rounded-lg border border-white/[0.12] bg-black shadow-[0_28px_90px_rgba(0,0,0,0.35)]">
+          <iframe
+            className="aspect-video w-full"
+            src="https://www.youtube-nocookie.com/embed/LVwVqo5X4LA"
+            title="LoreVia product demonstration"
+            loading="lazy"
+            referrerPolicy="strict-origin-when-cross-origin"
+            allow="autoplay; encrypted-media; picture-in-picture; web-share"
+            allowFullScreen
+          />
+        </div>
+        <p className="mt-4 text-center text-sm text-[#aeb9b3]">
+          <a
+            href="https://youtu.be/LVwVqo5X4LA"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="underline decoration-[#6fae9f] underline-offset-4 transition hover:text-white"
+          >
+            Watch on YouTube
+          </a>
+        </p>
+      </div>
+    </Section>
+  )
+}
+
 function HomepageComparisonSection() {
   return (
     <Section id="compare" className="py-10">
@@ -311,6 +346,7 @@ export default function HomePage() {
           </Section>
         </div>
 
+        <ProductDemoSection />
         <LandingShowcase />
 
         <Section id="workflow" className="pb-18 pt-8">

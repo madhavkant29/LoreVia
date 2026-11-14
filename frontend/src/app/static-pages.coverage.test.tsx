@@ -119,6 +119,10 @@ describe("static public pages", () => {
 
     expect(container?.textContent).toContain(expectedText)
     if (_name === "home") {
+      const demoPlayer = container?.querySelector('iframe[title="LoreVia product demonstration"]')
+      expect(demoPlayer?.getAttribute("src")).toBe("https://www.youtube-nocookie.com/embed/LVwVqo5X4LA")
+      expect(demoPlayer?.getAttribute("loading")).toBe("lazy")
+      expect(container?.querySelector('a[href="https://youtu.be/LVwVqo5X4LA"]')?.textContent).toContain("Watch on YouTube")
       const homeJsonLd = jsonLdDataMock.get("home-software-jsonld") as {
         offers: Array<{ name: string; price: string }>
       }

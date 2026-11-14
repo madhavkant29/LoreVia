@@ -202,7 +202,7 @@ export function buildContentSecurityPolicy(nonce: string) {
     `img-src ${Array.from(imageSources).join(" ")}`,
     "font-src 'self' data:",
     `connect-src ${Array.from(connectSources).join(" ")}`,
-    "frame-src 'self' https://*.paddle.com",
+    "frame-src 'self' https://*.paddle.com https://www.youtube-nocookie.com",
     "frame-ancestors 'none'",
     "base-uri 'self'",
     "form-action 'self' https://*.paddle.com",
