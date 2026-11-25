@@ -195,3 +195,10 @@ ops/                     Nginx, Redis image, and VPS operations
 docs/                    Architecture and operational decisions
 portfolio-showcase/      Diagrams, screenshots, script, subtitles, previews, and local MP4
 ```
+
+## License & Usage
+
+This project is **not open source**. The code is provided for portfolio and showcase purposes only. Forking, cloning, or redistributing this repository (or its code) is not permitted and would violate the license. See the [LICENSE](./LICENSE) file for details.
+
+Showcase repository: [Lorevia-showcase](https://github.com/madhavkant29/Lorevia-showcase)
+
